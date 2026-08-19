@@ -18,7 +18,11 @@ interface CustomerIntelligencePageProps {
 export function CustomerIntelligencePage({ client }: CustomerIntelligencePageProps) {
   const controller = useRunController(client);
   const { runState } = controller;
-  const hasReport = Boolean(runState.report);
+  const isTerminal =
+    runState.phase === "completed" || runState.phase === "degraded";
+  const terminalReport = isTerminal ? runState.report : null;
+  const terminalCustomerId = isTerminal ? runState.selectedCustomerId : null;
+  const hasReport = Boolean(terminalReport);
 
   return (
     <main className="app-page">
@@ -82,19 +86,20 @@ export function CustomerIntelligencePage({ client }: CustomerIntelligencePagePro
             agentMode={runState.agentMode}
             fallbackReason={runState.fallbackReason}
             submissionError={controller.submissionError}
+            submissionErrorKind={controller.submissionErrorKind}
             isCreating={controller.isCreating}
             error={runState.error}
             onRetry={() => void controller.run()}
           />
           <div className="detail-grid">
             <RankedCustomers
-              customers={runState.report?.ranked_customers ?? []}
-              selectedCustomerId={runState.selectedCustomerId}
+              customers={terminalReport?.ranked_customers ?? []}
+              selectedCustomerId={terminalCustomerId}
               hasReport={hasReport}
               onSelectCustomer={controller.selectCustomer}
             />
             <JourneyTimeline
-              customerId={runState.selectedCustomerId}
+              customerId={terminalCustomerId}
               state={controller.journeyState}
               onOpenEvidence={controller.openEvidence}
               onRetry={controller.retryJourney}

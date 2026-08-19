@@ -52,6 +52,8 @@ export type DetailState<T> =
   | { status: "empty"; key: string; data: T; error: null }
   | { status: "error"; key: string; data: null; error: string };
 
+export type SubmissionErrorKind = "validation" | "network";
+
 const idleDetail = <T,>(): DetailState<T> => ({
   status: "idle",
   key: null,
@@ -100,6 +102,8 @@ export function useRunController(providedClient?: CustomerIntelligenceClient) {
   ]);
   const [isCreating, setIsCreating] = useState(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [submissionErrorKind, setSubmissionErrorKind] =
+    useState<SubmissionErrorKind | null>(null);
   const [journeyState, setJourneyState] = useState<
     DetailState<CustomerJourneyResult>
   >(idleDetail);
@@ -251,10 +255,12 @@ export function useRunController(providedClient?: CustomerIntelligenceClient) {
     const normalizedQuestion = question.trim();
     if (!normalizedQuestion) {
       setSubmissionError("분석할 질문을 입력해 주세요.");
+      setSubmissionErrorKind("validation");
       return;
     }
     if (!startDate || !endDate || startDate >= endDate) {
       setSubmissionError("종료일은 시작일보다 뒤여야 합니다.");
+      setSubmissionErrorKind("validation");
       return;
     }
 
@@ -266,6 +272,7 @@ export function useRunController(providedClient?: CustomerIntelligenceClient) {
     clearDetails();
     dispatch({ kind: "reset" });
     setSubmissionError(null);
+    setSubmissionErrorKind(null);
     setIsCreating(true);
 
     const request: RunRequest = {
@@ -286,6 +293,7 @@ export function useRunController(providedClient?: CustomerIntelligenceClient) {
         !isAbort(error)
       ) {
         setSubmissionError(publicError(error, "run"));
+        setSubmissionErrorKind("network");
       }
       if (mountedRef.current && runVersionRef.current === runVersion) {
         setIsCreating(false);
@@ -378,27 +386,43 @@ export function useRunController(providedClient?: CustomerIntelligenceClient) {
 
   const selectCustomer = useCallback(
     (customerId: string) => {
-      if (!runState.runId) return;
+      if (
+        !runState.runId ||
+        (runState.phase !== "completed" && runState.phase !== "degraded")
+      ) {
+        return;
+      }
       selectedCustomerRef.current = customerId;
       dispatch({ kind: "select_customer", customerId });
       closeEvidence();
       void loadJourney(runState.runId, customerId, runVersionRef.current);
     },
-    [closeEvidence, loadJourney, runState.runId],
+    [closeEvidence, loadJourney, runState.phase, runState.runId],
   );
 
   const retryJourney = useCallback(() => {
-    if (!runState.runId || !selectedCustomerRef.current) return;
+    if (
+      !runState.runId ||
+      !selectedCustomerRef.current ||
+      (runState.phase !== "completed" && runState.phase !== "degraded")
+    ) {
+      return;
+    }
     void loadJourney(
       runState.runId,
       selectedCustomerRef.current,
       runVersionRef.current,
     );
-  }, [loadJourney, runState.runId]);
+  }, [loadJourney, runState.phase, runState.runId]);
 
   const openEvidence = useCallback(
     (nextEvidenceId: string, opener: HTMLElement) => {
-      if (!runState.runId) return;
+      if (
+        !runState.runId ||
+        (runState.phase !== "completed" && runState.phase !== "degraded")
+      ) {
+        return;
+      }
       evidenceIdRef.current = nextEvidenceId;
       setEvidenceId(nextEvidenceId);
       setEvidenceOpener(opener);
@@ -408,17 +432,23 @@ export function useRunController(providedClient?: CustomerIntelligenceClient) {
         runVersionRef.current,
       );
     },
-    [loadEvidence, runState.runId],
+    [loadEvidence, runState.phase, runState.runId],
   );
 
   const retryEvidence = useCallback(() => {
-    if (!runState.runId || !evidenceIdRef.current) return;
+    if (
+      !runState.runId ||
+      !evidenceIdRef.current ||
+      (runState.phase !== "completed" && runState.phase !== "degraded")
+    ) {
+      return;
+    }
     void loadEvidence(
       runState.runId,
       evidenceIdRef.current,
       runVersionRef.current,
     );
-  }, [loadEvidence, runState.runId]);
+  }, [loadEvidence, runState.phase, runState.runId]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -445,6 +475,7 @@ export function useRunController(providedClient?: CustomerIntelligenceClient) {
     toggleSource,
     isCreating,
     submissionError,
+    submissionErrorKind,
     run,
     selectCustomer,
     journeyState,

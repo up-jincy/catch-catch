@@ -5,6 +5,7 @@ import type {
   RunPhase,
   SourceId,
 } from "./contracts";
+import type { SubmissionErrorKind } from "./use-run-controller";
 
 interface InsightSummaryProps {
   report: InsightReport | null;
@@ -12,6 +13,7 @@ interface InsightSummaryProps {
   agentMode: AgentMode | null;
   fallbackReason: string | null;
   submissionError: string | null;
+  submissionErrorKind: SubmissionErrorKind | null;
   isCreating: boolean;
   error: RunError | null;
   onRetry: () => void;
@@ -74,11 +76,12 @@ export function InsightSummary({
   agentMode,
   fallbackReason,
   submissionError,
+  submissionErrorKind,
   isCreating,
   error,
   onRetry,
 }: InsightSummaryProps) {
-  if (submissionError) {
+  if (submissionError && submissionErrorKind === "network") {
     return (
       <FailureState unsupported={false} message={submissionError} onRetry={onRetry} />
     );

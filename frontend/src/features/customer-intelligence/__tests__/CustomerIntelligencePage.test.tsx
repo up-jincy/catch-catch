@@ -439,6 +439,72 @@ describe("CustomerIntelligencePage", () => {
     expect(client.getJourney).not.toHaveBeenCalled();
   });
 
+  it("result가 와도 done 전에는 상세 동작을 열지 않고 완료 뒤 첫 Journey를 조회한다", async () => {
+    const user = userEvent.setup();
+    const client = new ControlledClient();
+    render(<CustomerIntelligencePage client={client} />);
+
+    await startRun(user);
+    client.emit(
+      "run-1",
+      event({
+        id: 1,
+        type: "result",
+        data: { agent_mode: "fixture", report: completedReport },
+      }),
+    );
+    expect((await screen.findAllByText("검증된 Insight 구성")).length).toBeGreaterThan(
+      0,
+    );
+
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "CUST-007 Journey 보기" }),
+    ).not.toBeInTheDocument();
+    expect(client.getJourney).not.toHaveBeenCalled();
+
+    client.emit(
+      "run-1",
+      event({ id: 2, type: "done", data: { status: "completed" } }),
+    );
+
+    expect(await screen.findByRole("heading", { name: /고객 6명/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "CUST-007 Journey 보기" }),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(client.getJourney).toHaveBeenCalledTimes(1));
+  });
+
+  it("빈 질문과 잘못된 날짜는 서버 장애로 오해시키지 않고 입력 옆에서 안내한다", async () => {
+    const user = userEvent.setup();
+    const client = new ControlledClient();
+    render(<CustomerIntelligencePage client={client} />);
+
+    await user.click(screen.getByRole("button", { name: "분석 시작" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("분석할 질문을 입력해 주세요.");
+    expect(
+      screen.queryByRole("heading", { name: "분석 서버에 연결하지 못했어요" }),
+    ).not.toBeInTheDocument();
+    expect(client.createRun).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("분석 질문"), {
+      target: { value: "검색 실패 후 문의한 고객을 찾아줘" },
+    });
+    fireEvent.change(screen.getByLabelText("종료일 · 미포함"), {
+      target: { value: "2026-07-20" },
+    });
+    await user.click(screen.getByRole("button", { name: "분석 시작" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "종료일은 시작일보다 뒤여야 합니다.",
+    );
+    expect(
+      screen.queryByRole("heading", { name: "분석 서버에 연결하지 못했어요" }),
+    ).not.toBeInTheDocument();
+    expect(client.createRun).not.toHaveBeenCalled();
+  });
+
   it("고객 Journey 요청 순서가 뒤집혀도 현재 선택 고객만 표시한다", async () => {
     const user = userEvent.setup();
     const client = new ControlledClient();
