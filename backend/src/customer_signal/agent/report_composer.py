@@ -13,6 +13,7 @@ from customer_signal.analytics.models import (
     CustomerJourneyResult,
     EvidenceResult,
     PatternMatchResult,
+    RankCustomersResult,
 )
 from customer_signal.domain.models import SourceId
 from customer_signal.domain.reports import (
@@ -78,12 +79,41 @@ def _selected_evidence_id(
     return selected
 
 
+def _validate_match_and_rank(
+    matched: PatternMatchResult,
+    ranked: RankCustomersResult,
+) -> None:
+    ranked_customer_ids = [customer.customer_id for customer in ranked.customers]
+    ranked_evidence_ids = [
+        evidence_id for customer in ranked.customers for evidence_id in customer.evidence_ids
+    ]
+    if (
+        ranked.customer_count != min(ranked.candidate_count, 100)
+        or ranked.customer_count != len(ranked.customers)
+        or ranked.stats.returned_rows != len(ranked.customers)
+        or len(ranked_customer_ids) != len(set(ranked_customer_ids))
+        or ranked.evidence_ids != ranked_evidence_ids
+        or len(ranked.evidence_ids) != len(set(ranked.evidence_ids))
+    ):
+        raise UnsupportedClaimError("Ranking 결과 내부 집계가 반환 고객과 일치하지 않습니다.")
+    if matched.candidate_count != ranked.candidate_count:
+        raise UnsupportedClaimError("Journey Pattern과 Ranking 후보 수가 일치하지 않습니다.")
+
+    ranked_by_customer_id = {customer.customer_id: customer for customer in ranked.customers}
+    if any(
+        ranked_by_customer_id.get(customer.customer_id) != customer
+        for customer in matched.customers
+    ):
+        raise UnsupportedClaimError("Journey Pattern 고객이 Ranking 결과와 일치하지 않습니다.")
+
+
 def compose_verified_report(
     request: RunRequest,
     *,
     catalog: CatalogSourcesResult,
     aggregate: AggregateResult,
     matched: PatternMatchResult,
+    ranked: RankCustomersResult,
     journey: CustomerJourneyResult | None,
     evidence: EvidenceResult | None,
 ) -> InsightReport:
@@ -96,6 +126,7 @@ def compose_verified_report(
         or len(returned_customer_ids) != len(set(returned_customer_ids))
     ):
         raise UnsupportedClaimError("Journey Pattern 고객 집계가 반환 고객과 일치하지 않습니다.")
+    _validate_match_and_rank(matched, ranked)
 
     customer_count = matched.customer_count
     selected_evidence_id: str | None = None
@@ -152,7 +183,12 @@ def compose_verified_report(
     if aggregate.stats.scanned_rows == 0:
         limitations.append("요청 기간에 분석 가능한 데이터가 없습니다.")
     elif journey is None:
-        limitations.append("대표 Journey로 확인할 고객 후보가 없습니다.")
+        if ranked.candidate_count:
+            limitations.append(
+                f"완전한 패턴은 없지만 부분 Journey 후보 {ranked.candidate_count}명이 확인됐습니다."
+            )
+        else:
+            limitations.append("대표 Journey로 확인할 고객 후보가 없습니다.")
     limitations.extend(
         f"{source_id} Source가 없어 완전한 패턴 판단이 제한됩니다." for source_id in missing_sources
     )

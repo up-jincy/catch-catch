@@ -506,11 +506,13 @@ class GeminiRunner:
             evidence = cast(EvidenceResult | None, capture.results.get("get_evidence"))
             catalog = cast(CatalogSourcesResult, capture.results["catalog_sources"])
             aggregate = cast(AggregateResult, capture.results["aggregate_events"])
+            ranked = cast(RankCustomersResult, capture.results["rank_customers"])
             report = compose_verified_report(
                 capture.request,
                 catalog=catalog,
                 aggregate=aggregate,
                 matched=matched,
+                ranked=ranked,
                 journey=journey,
                 evidence=evidence,
             )
@@ -519,7 +521,7 @@ class GeminiRunner:
                 catalog=catalog,
                 aggregate=aggregate,
                 matched=matched,
-                ranked=cast(RankCustomersResult, capture.results["rank_customers"]),
+                ranked=ranked,
                 journey=journey,
                 evidence=evidence,
                 representative_customer_id=(journey.customer_id if journey is not None else None),

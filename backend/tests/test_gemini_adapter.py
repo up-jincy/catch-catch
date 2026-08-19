@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -538,6 +539,118 @@ def _empty_fabricated_draft(report: InsightReport) -> InsightReport:
     return draft
 
 
+def _tamper_tool_result(
+    prepared: _PreparedAnalysis,
+    tool_name: str,
+    mutate: Callable[[dict[str, Any]], None],
+) -> _PreparedAnalysis:
+    calls: list[tuple[str, dict[str, Any], CallToolResult]] = []
+    found = False
+    for name, arguments, response in prepared.calls:
+        if name != tool_name:
+            calls.append((name, arguments, response))
+            continue
+        assert response.structuredContent is not None
+        content = json.loads(json.dumps(response.structuredContent))
+        mutate(content)
+        calls.append(
+            (
+                name,
+                arguments,
+                CallToolResult(content=[], structuredContent=content),
+            )
+        )
+        found = True
+    assert found
+    return _PreparedAnalysis(
+        fixture_outcome=prepared.fixture_outcome,
+        report=prepared.report,
+        calls=calls,
+    )
+
+
+async def _assert_validation_failed(prepared: _PreparedAnalysis) -> None:
+    runner, _mcp_factory, _model_factory, _agent_factory = _runner(prepared)
+    events: list[RunnerEvent] = []
+
+    with pytest.raises(GeminiRunnerError) as caught:
+        await runner.run(_request(), emit=events.append)
+
+    assert caught.value.code == "gemini_validation_failed"
+    assert "result" not in [event.type for event in events]
+
+
+@pytest.mark.parametrize(
+    "inconsistency",
+    [
+        "customer_count",
+        "customers_length",
+        "returned_rows",
+        "duplicate_customer_id",
+        "duplicate_evidence_id",
+    ],
+)
+async def test_rank_result_rejects_internal_count_and_identity_inconsistencies(
+    prepared_analysis: _PreparedAnalysis,
+    inconsistency: str,
+) -> None:
+    def mutate(content: dict[str, Any]) -> None:
+        if inconsistency == "customer_count":
+            content["customer_count"] -= 1
+        elif inconsistency == "customers_length":
+            content["customers"] = content["customers"][:-1]
+        elif inconsistency == "returned_rows":
+            content["stats"]["returned_rows"] -= 1
+        elif inconsistency == "duplicate_customer_id":
+            content["customers"][-1]["customer_id"] = content["customers"][0]["customer_id"]
+        else:
+            content["evidence_ids"].append(content["evidence_ids"][0])
+
+    await _assert_validation_failed(
+        _tamper_tool_result(prepared_analysis, "rank_customers", mutate)
+    )
+
+
+async def test_match_and_rank_candidate_counts_must_match(
+    prepared_analysis: _PreparedAnalysis,
+) -> None:
+    def mutate(content: dict[str, Any]) -> None:
+        content["candidate_count"] += 1
+
+    await _assert_validation_failed(
+        _tamper_tool_result(prepared_analysis, "match_journey_pattern", mutate)
+    )
+
+
+@pytest.mark.parametrize(
+    "mismatch",
+    ["missing", "risk_score", "signals", "evidence_ids"],
+)
+async def test_each_matched_customer_must_be_present_as_the_exact_ranked_customer(
+    prepared_analysis: _PreparedAnalysis,
+    mismatch: str,
+) -> None:
+    def mutate(content: dict[str, Any]) -> None:
+        first = content["customers"][0]
+        if mismatch == "missing":
+            first["customer_id"] = "CUST-FABRICATED"
+        elif mismatch == "risk_score":
+            first["risk_score"] = 0 if first["risk_score"] != 0 else 1
+        elif mismatch == "signals":
+            first["signals"][0]["label"] = "조작된 신호"
+        else:
+            first["evidence_ids"][0] = "EVIDENCE-FABRICATED"
+            content["evidence_ids"] = [
+                evidence_id
+                for customer in content["customers"]
+                for evidence_id in customer["evidence_ids"]
+            ]
+
+    await _assert_validation_failed(
+        _tamper_tool_result(prepared_analysis, "rank_customers", mutate)
+    )
+
+
 async def test_positive_run_rebuilds_an_empty_fabricated_draft_from_mcp_results(
     prepared_analysis: _PreparedAnalysis,
 ) -> None:
@@ -550,9 +663,14 @@ async def test_positive_run_rebuilds_an_empty_fabricated_draft_from_mcp_results(
 
     outcome = await runner.run(_request(), emit=lambda _event: None)
 
+    matched = prepared_analysis.calls[2][2].structuredContent
+    ranked = prepared_analysis.calls[3][2].structuredContent
+    assert matched is not None and matched["customer_count"] == 6
+    assert ranked is not None and ranked["customer_count"] == 24
     assert outcome.report == prepared_analysis.fixture_outcome.report
     assert outcome.report.headline == "검색 실패 후 문의로 이어진 고객 6명"
     assert outcome.report.metrics[0].value == 6
+    assert len(outcome.report.ranked_customers) == 6
     assert outcome.report.findings
     assert outcome.report.recommendations
     assert outcome.report.ranked_customers
@@ -604,6 +722,7 @@ async def test_zero_match_voc_off_run_completes_from_four_tools(
         request.enabled_sources,
     )
     assert matched.customer_count == 0
+    assert ranked.candidate_count == ranked.customer_count == 24
     results = [
         ("catalog_sources", {"start_at": scope["start_at"], "end_at": scope["end_at"]}, catalog),
         ("aggregate_events", {**scope, "group_by": "topic"}, aggregate),
@@ -641,6 +760,8 @@ async def test_zero_match_voc_off_run_completes_from_four_tools(
     assert outcome.report.representative_journeys == []
     assert outcome.report.findings == []
     assert outcome.report.recommendations == []
+    assert any("부분 Journey 후보 24명" in limitation for limitation in outcome.report.limitations)
+    assert all("후보가 없습니다" not in limitation for limitation in outcome.report.limitations)
 
 
 async def test_evidence_must_match_the_captured_journey_event_provenance(
