@@ -169,18 +169,26 @@ export type RunEventType =
   | "fallback"
   | "done";
 
+export type ToolName =
+  | "catalog_sources"
+  | "aggregate_events"
+  | "match_journey_pattern"
+  | "rank_customers"
+  | "get_customer_journey"
+  | "get_evidence";
+
 export type RunStreamEvent =
   | { id: number; type: "plan"; data: { steps: string[] } }
   | {
       id: number;
       type: "tool_started";
-      data: { tool: string; source: SourceId[] };
+      data: { tool: ToolName; source: SourceId[] };
     }
   | {
       id: number;
       type: "tool_completed";
       data: {
-        tool: string;
+        tool: ToolName;
         source: SourceId[];
         count: number;
         duration_ms: number;
@@ -202,7 +210,6 @@ export type RunStreamEvent =
         message?: string;
         from?: AgentMode;
         to?: AgentMode;
-        [key: string]: JsonValue | undefined;
       };
     }
   | {
