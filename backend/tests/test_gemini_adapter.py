@@ -36,6 +36,13 @@ from customer_signal.runtime.run_store import RunStore
 START_AT = "2026-07-20T00:00:00+09:00"
 END_AT = "2026-08-19T00:00:00+09:00"
 ALL_SOURCES = ["search_history", "search_feedback", "voc"]
+FIVE_SOURCES = [
+    "search_history",
+    "search_feedback",
+    "digital_behavior",
+    "subscription",
+    "voc",
+]
 PRIMARY_MODEL = "gemini-3.7-flash"
 FALLBACK_MODEL = "gemini-3.6-flash"
 MODEL_TODO_STEPS = [
@@ -139,6 +146,107 @@ async def prepared_analysis(repository: DuckDBRepository) -> _PreparedAnalysis:
         fixture_outcome=fixture_outcome,
         report=fixture_outcome.report,
         calls=calls,
+    )
+
+
+async def _prepare_five_source_evidence_case(
+    repository: DuckDBRepository,
+    *,
+    evidence_kind: str,
+) -> tuple[RunRequest, _PreparedAnalysis, list[str]]:
+    request = _request(enabled_sources=FIVE_SOURCES)
+    service = AnalyticsService(repository)
+    fixture_outcome = await FixtureRunner(create_mcp_server(service)).run(
+        request,
+        emit=lambda _event: None,
+    )
+    scope = {
+        "start_at": request.start_at.isoformat(),
+        "end_at": request.end_at.isoformat(),
+        "enabled_sources": list(request.enabled_sources),
+    }
+    catalog = service.catalog_sources(request.start_at, request.end_at)
+    aggregate = service.aggregate_events(
+        request.start_at,
+        request.end_at,
+        request.enabled_sources,
+        group_by="topic",
+    )
+    matched = service.match_journey_pattern(
+        request.start_at,
+        request.end_at,
+        request.enabled_sources,
+    )
+    ranked = service.rank_customers(
+        request.start_at,
+        request.end_at,
+        request.enabled_sources,
+    )
+    representative = matched.customers[0]
+    journey = service.get_customer_journey(
+        representative.customer_id,
+        request.start_at,
+        request.end_at,
+        request.enabled_sources,
+    )
+    if evidence_kind == "representative":
+        evidence_ids = [
+            evidence_id
+            for evidence_id in journey.evidence_ids
+            if evidence_id in representative.evidence_ids
+        ]
+    elif evidence_kind == "journey_all":
+        evidence_ids = list(journey.evidence_ids)
+    elif evidence_kind == "journey_only":
+        evidence_ids = [
+            next(
+                evidence_id
+                for evidence_id in journey.evidence_ids
+                if evidence_id not in representative.evidence_ids
+            )
+        ]
+    else:
+        raise AssertionError(f"unsupported evidence_kind: {evidence_kind}")
+    evidence = service.get_evidence(evidence_ids)
+    draft = fixture_outcome.report.model_copy(deep=True)
+    if evidence_kind == "representative":
+        draft.findings[0].evidence_ids = list(evidence_ids)
+        draft.recommendations[0].evidence_ids = list(evidence_ids)
+    elif evidence_kind == "journey_all":
+        draft.findings[0].evidence_ids = [evidence_ids[0]]
+        draft.recommendations[0].evidence_ids = [evidence_ids[0]]
+    typed_calls = [
+        (
+            "catalog_sources",
+            {"start_at": scope["start_at"], "end_at": scope["end_at"]},
+            catalog,
+        ),
+        ("aggregate_events", {**scope, "group_by": "topic"}, aggregate),
+        ("match_journey_pattern", scope, matched),
+        ("rank_customers", scope, ranked),
+        (
+            "get_customer_journey",
+            {**scope, "customer_id": representative.customer_id},
+            journey,
+        ),
+        ("get_evidence", {"evidence_ids": evidence_ids}, evidence),
+    ]
+    calls = [
+        (
+            name,
+            arguments,
+            CallToolResult(content=[], structuredContent=result.model_dump(mode="json")),
+        )
+        for name, arguments, result in typed_calls
+    ]
+    return (
+        request,
+        _PreparedAnalysis(
+            fixture_outcome=fixture_outcome,
+            report=draft,
+            calls=calls,
+        ),
+        evidence_ids,
     )
 
 
@@ -558,6 +666,26 @@ async def test_bounded_mcp_tools_accept_only_omitted_or_exact_integer_100_limits
     assert outcome.agent_mode == "gemini"
 
 
+async def test_positive_run_rejects_when_fetched_evidence_has_no_matched_signal(
+    repository: DuckDBRepository,
+) -> None:
+    request, prepared, _evidence_ids = await _prepare_five_source_evidence_case(
+        repository,
+        evidence_kind="journey_only",
+    )
+    runner, _mcp_factory, _model_factory, _agent_factory = _runner(prepared)
+    events: list[RunnerEvent] = []
+
+    with pytest.raises(GeminiRunnerError) as caught:
+        await runner.run(request, emit=events.append)
+
+    assert caught.value.code == "gemini_validation_failed"
+    assert "get_evidence" in [
+        event.payload["tool"] for event in events if event.type == "tool_completed"
+    ]
+    assert "result" not in [event.type for event in events]
+
+
 def _empty_fabricated_draft(report: InsightReport) -> InsightReport:
     draft = report.model_copy(deep=True)
     draft.headline = "검색 실패 후 문의로 이어진 고객 42명"
@@ -725,6 +853,63 @@ async def test_positive_run_rejects_noncanonical_narrative_even_with_valid_evide
         await runner.run(_request(), emit=lambda _event: None)
 
     assert caught.value.code == "gemini_validation_failed"
+
+
+async def test_positive_run_preserves_all_fetched_representative_evidence(
+    repository: DuckDBRepository,
+) -> None:
+    request, prepared, evidence_ids = await _prepare_five_source_evidence_case(
+        repository,
+        evidence_kind="representative",
+    )
+    assert len(evidence_ids) > 1
+    runner, _mcp_factory, _model_factory, _agent_factory = _runner(prepared)
+
+    outcome = await runner.run(request, emit=lambda _event: None)
+
+    assert outcome.report.findings[0].evidence_ids == evidence_ids
+    assert outcome.report.recommendations[0].evidence_ids == evidence_ids
+
+
+async def test_positive_run_accepts_a_verified_model_evidence_subset_but_publishes_all(
+    repository: DuckDBRepository,
+) -> None:
+    request, prepared, evidence_ids = await _prepare_five_source_evidence_case(
+        repository,
+        evidence_kind="representative",
+    )
+    prepared.report.findings[0].evidence_ids = [evidence_ids[0]]
+    prepared.report.recommendations[0].evidence_ids = [evidence_ids[0]]
+    runner, _mcp_factory, _model_factory, _agent_factory = _runner(prepared)
+
+    outcome = await runner.run(request, emit=lambda _event: None)
+
+    assert outcome.report.findings[0].evidence_ids == evidence_ids
+    assert outcome.report.recommendations[0].evidence_ids == evidence_ids
+
+
+async def test_positive_run_filters_broad_journey_evidence_to_matched_signal_evidence(
+    repository: DuckDBRepository,
+) -> None:
+    request, prepared, fetched_ids = await _prepare_five_source_evidence_case(
+        repository,
+        evidence_kind="journey_all",
+    )
+    service = AnalyticsService(repository)
+    matched = service.match_journey_pattern(
+        request.start_at,
+        request.end_at,
+        request.enabled_sources,
+    )
+    representative_ids = set(matched.customers[0].evidence_ids)
+    expected_ids = [evidence_id for evidence_id in fetched_ids if evidence_id in representative_ids]
+    assert len(fetched_ids) > len(expected_ids) > 0
+    runner, _mcp_factory, _model_factory, _agent_factory = _runner(prepared)
+
+    outcome = await runner.run(request, emit=lambda _event: None)
+
+    assert outcome.report.findings[0].evidence_ids == expected_ids
+    assert outcome.report.recommendations[0].evidence_ids == expected_ids
 
 
 async def test_model_narrative_rejects_same_number_with_unsupported_semantics(

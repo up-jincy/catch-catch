@@ -141,8 +141,9 @@ Always call catalog_sources, aggregate_events(group_by='topic'),
 match_journey_pattern, and rank_customers. When match_journey_pattern returns a
 positive customer_count, you MUST call get_customer_journey exactly once for the
 first matched customer, then MUST call get_evidence exactly once for evidence IDs
-shared by that Journey and the representative evidence allowlist. When
-customer_count is zero, omit both detail calls.
+from that Journey. The server will publish only the fetched Evidence that also
+supports the matched representative signals. When customer_count is zero, omit both
+detail calls.
 Omit bounded-tool limits or set them to exactly the integer 100.
 Never invent customer IDs, evidence IDs, result IDs, counts, scores, or sources.
 The server verifies every narrative field against its own canonical report. Copy the

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import cast
 
 from customer_signal.agent.contracts import RunFacts, RunRequest, UnsupportedClaimError
 from customer_signal.agent.facts import MATCHED_CUSTOMER_METRIC_LABEL, SIGNAL_SOURCES
@@ -52,31 +51,32 @@ def _source_contributions(
     ]
 
 
-def _selected_evidence_id(
+def _validated_evidence_ids(
     matched: PatternMatchResult,
     journey: CustomerJourneyResult,
     evidence: EvidenceResult,
-) -> str:
+) -> list[str]:
     representative = matched.customers[0]
     if journey.customer_id != representative.customer_id:
         raise UnsupportedClaimError("대표 고객과 Journey 고객 ID가 일치하지 않습니다.")
 
-    fetched_ids = set(evidence.evidence_ids)
+    fetched_ids = list(evidence.evidence_ids)
     representative_ids = set(representative.evidence_ids)
-    selected = next(
-        (
-            evidence_id
-            for evidence_id in reversed(journey.evidence_ids)
-            if evidence_id in representative_ids and evidence_id in fetched_ids
-        ),
-        None,
-    )
-    if selected is None:
+    journey_ids = set(journey.evidence_ids)
+    selected_ids = [
+        evidence_id
+        for evidence_id in fetched_ids
+        if evidence_id in representative_ids and evidence_id in journey_ids
+    ]
+    if not fetched_ids or len(fetched_ids) != len(set(fetched_ids)) or not selected_ids:
         raise UnsupportedClaimError("대표 Journey를 뒷받침하는 Evidence가 없습니다.")
-    selected_events = [event for event in journey.events if event.evidence_id == selected]
-    if journey.evidence_ids.count(selected) != 1 or len(selected_events) != 1:
-        raise UnsupportedClaimError("대표 Evidence에 대응하는 Journey Event가 유일하지 않습니다.")
-    return selected
+    for evidence_id in selected_ids:
+        selected_events = [event for event in journey.events if event.evidence_id == evidence_id]
+        if journey.evidence_ids.count(evidence_id) != 1 or len(selected_events) != 1:
+            raise UnsupportedClaimError(
+                "대표 Evidence에 대응하는 Journey Event가 유일하지 않습니다."
+            )
+    return selected_ids
 
 
 def _validate_match_and_rank(
@@ -129,13 +129,13 @@ def compose_verified_report(
     _validate_match_and_rank(matched, ranked)
 
     customer_count = matched.customer_count
-    selected_evidence_id: str | None = None
+    selected_evidence_ids: list[str] = []
     if customer_count > 0:
         if journey is None or evidence is None or not matched.customers:
             raise UnsupportedClaimError(
                 "양수 Journey 결과에는 대표 Journey와 Evidence가 필요합니다."
             )
-        selected_evidence_id = _selected_evidence_id(matched, journey, evidence)
+        selected_evidence_ids = _validated_evidence_ids(matched, journey, evidence)
     elif journey is not None or evidence is not None:
         raise UnsupportedClaimError("0명 Journey 결과에는 상세 Tool 결과를 포함할 수 없습니다.")
 
@@ -161,7 +161,7 @@ def compose_verified_report(
                     f"검색 실패와 후속 문의 조건을 모두 충족한 고객은 {customer_count}명입니다."
                 ),
                 confidence="high",
-                evidence_ids=[cast(str, selected_evidence_id)],
+                evidence_ids=list(selected_evidence_ids),
             )
         ]
         recommendations = [
@@ -169,7 +169,7 @@ def compose_verified_report(
                 action_id="care_call",
                 title="대표 고위험 고객 후속 확인",
                 reason="반복 검색과 미해결 문의가 연결된 대표 Journey가 확인됐습니다.",
-                evidence_ids=[cast(str, selected_evidence_id)],
+                evidence_ids=list(selected_evidence_ids),
             )
         ]
     else:
@@ -245,20 +245,67 @@ def apply_verified_model_narrative(
     ):
         raise UnsupportedClaimError("검증된 보고서의 Evidence 출처가 완전하지 않습니다.")
 
+    def evidence_is_verified_subset(evidence_ids: list[str]) -> bool:
+        return (
+            bool(evidence_ids)
+            and len(evidence_ids) == len(set(evidence_ids))
+            and set(evidence_ids) <= facts.fetched_evidence_ids
+        )
+
+    findings_match = len(draft.findings) == len(canonical.findings) and all(
+        draft_finding.title == canonical_finding.title
+        and draft_finding.description == canonical_finding.description
+        and draft_finding.confidence == canonical_finding.confidence
+        and evidence_is_verified_subset(draft_finding.evidence_ids)
+        for draft_finding, canonical_finding in zip(
+            draft.findings,
+            canonical.findings,
+            strict=True,
+        )
+    )
+    recommendations_match = len(draft.recommendations) == len(canonical.recommendations) and all(
+        draft_recommendation.action_id == canonical_recommendation.action_id
+        and draft_recommendation.title == canonical_recommendation.title
+        and draft_recommendation.reason == canonical_recommendation.reason
+        and evidence_is_verified_subset(draft_recommendation.evidence_ids)
+        for draft_recommendation, canonical_recommendation in zip(
+            draft.recommendations,
+            canonical.recommendations,
+            strict=True,
+        )
+    )
     if (
         draft.headline != canonical.headline
         or draft.executive_summary != canonical.executive_summary
-        or draft.findings != canonical.findings
-        or draft.recommendations != canonical.recommendations
+        or not findings_match
+        or not recommendations_match
     ):
         raise UnsupportedClaimError("Gemini 설명이 검증된 보고서와 일치하지 않습니다.")
 
     published = canonical.model_copy(deep=True)
     published.headline = draft.headline
     published.executive_summary = draft.executive_summary
-    published.findings = [finding.model_copy(deep=True) for finding in draft.findings]
+    published.findings = [
+        draft_finding.model_copy(
+            update={"evidence_ids": list(canonical_finding.evidence_ids)},
+            deep=True,
+        )
+        for draft_finding, canonical_finding in zip(
+            draft.findings,
+            canonical.findings,
+            strict=True,
+        )
+    ]
     published.recommendations = [
-        recommendation.model_copy(deep=True) for recommendation in draft.recommendations
+        draft_recommendation.model_copy(
+            update={"evidence_ids": list(canonical_recommendation.evidence_ids)},
+            deep=True,
+        )
+        for draft_recommendation, canonical_recommendation in zip(
+            draft.recommendations,
+            canonical.recommendations,
+            strict=True,
+        )
     ]
     return published
 
