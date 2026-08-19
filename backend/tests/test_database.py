@@ -121,6 +121,32 @@ def test_database_readiness_accepts_only_a_current_managed_database(tmp_path: Pa
     assert readiness(current_path) is True
 
 
+@pytest.mark.parametrize(
+    "alter_statement",
+    [
+        "ALTER TABLE events ALTER COLUMN occurred_at SET DATA TYPE VARCHAR",
+        "ALTER TABLE evidence ALTER COLUMN occurred_at SET DATA TYPE VARCHAR",
+        "ALTER TABLE events ALTER COLUMN identities SET DATA TYPE VARCHAR",
+        "ALTER TABLE events ALTER COLUMN attributes SET DATA TYPE VARCHAR",
+        "ALTER TABLE evidence ALTER COLUMN raw_fields SET DATA TYPE VARCHAR",
+        "ALTER TABLE identity_edges ALTER COLUMN confidence SET DATA TYPE VARCHAR",
+    ],
+)
+def test_database_readiness_rejects_wrong_required_column_types(
+    tmp_path: Path,
+    alter_statement: str,
+) -> None:
+    database_path = tmp_path / "wrong-type.duckdb"
+    seed_database(database_path, generate_dataset())
+    connection = duckdb.connect(str(database_path))
+    try:
+        connection.execute(alter_statement)
+    finally:
+        connection.close()
+
+    assert database.is_database_ready(database_path) is False
+
+
 def test_agent_database_contains_identity_provenance_but_not_evaluation_truth(
     database_path: Path,
     synthetic_dataset: SyntheticDataset,

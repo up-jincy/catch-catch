@@ -304,6 +304,55 @@ def test_startup_preserves_an_already_current_database(
     assert database_path.stat().st_mtime_ns == before_mtime
 
 
+def test_startup_atomically_reseeds_current_version_database_with_wrong_column_type(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "customer-signal.duckdb"
+    seed_database(database_path, generate_dataset())
+    connection = duckdb.connect(str(database_path))
+    try:
+        connection.execute(
+            "ALTER TABLE events ALTER COLUMN occurred_at SET DATA TYPE VARCHAR"
+        )
+    finally:
+        connection.close()
+    replacements: list[tuple[Path, Path]] = []
+    real_replace = database_module.os.replace
+
+    def recording_replace(source: str | Path, destination: str | Path) -> None:
+        replacements.append((Path(source), Path(destination)))
+        real_replace(source, destination)
+
+    monkeypatch.setattr(database_module.os, "replace", recording_replace)
+
+    assert database_module.is_database_ready(database_path) is False
+    with TestClient(_create_app(database_path)) as client:
+        health = client.get("/health")
+        accepted = client.post(
+            "/api/runs",
+            json={**_run_request(), "enabled_sources": FIVE_SOURCES},
+        ).json()
+        snapshot = _wait_for_terminal(client, accepted["status_url"])
+
+    assert health.status_code == 200
+    assert len(replacements) == 1
+    assert replacements[0][0].parent == database_path.parent
+    assert replacements[0][1] == database_path
+    connection = duckdb.connect(str(database_path), read_only=True)
+    try:
+        occurred_at_type = next(
+            row[1]
+            for row in connection.execute("DESCRIBE events").fetchall()
+            if row[0] == "occurred_at"
+        )
+    finally:
+        connection.close()
+    assert occurred_at_type == "TIMESTAMP WITH TIME ZONE"
+    assert snapshot["status"] == "completed"
+    assert snapshot["report"]["metrics"][0]["value"] == 6
+
+
 def test_startup_safely_replaces_a_malformed_database_file(tmp_path: Path) -> None:
     database_path = tmp_path / "customer-signal.duckdb"
     malformed_bytes = b"not-a-duckdb-file"

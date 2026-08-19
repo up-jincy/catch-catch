@@ -67,31 +67,45 @@ CREATE TABLE identity_edges (
 );
 """
 
-_REQUIRED_TABLES = frozenset(
-    {
-        "database_metadata",
-        "customers",
-        "evidence",
-        "events",
-        "identity_edges",
-    }
-)
-_REQUIRED_EVENT_COLUMNS = frozenset(
-    {
-        "event_id",
-        "evidence_id",
-        "source_id",
-        "occurred_at",
-        "event_type",
-        "action",
-        "topic",
-        "outcome",
-        "text",
-        "identities",
-        "canonical_customer_id",
-        "attributes",
-    }
-)
+_REQUIRED_COLUMN_TYPES = {
+    "database_metadata": {
+        "schema_version": "INTEGER",
+        "dataset_version": "INTEGER",
+    },
+    "customers": {"customer_id": "VARCHAR"},
+    "evidence": {
+        "evidence_id": "VARCHAR",
+        "source_id": "VARCHAR",
+        "occurred_at": "TIMESTAMP WITH TIME ZONE",
+        "masked_customer_id": "VARCHAR",
+        "summary": "VARCHAR",
+        "raw_fields": "JSON",
+    },
+    "events": {
+        "event_id": "VARCHAR",
+        "evidence_id": "VARCHAR",
+        "source_id": "VARCHAR",
+        "occurred_at": "TIMESTAMP WITH TIME ZONE",
+        "event_type": "VARCHAR",
+        "action": "VARCHAR",
+        "topic": "VARCHAR",
+        "outcome": "VARCHAR",
+        "text": "VARCHAR",
+        "identities": "JSON",
+        "canonical_customer_id": "VARCHAR",
+        "attributes": "JSON",
+    },
+    "identity_edges": {
+        "left_namespace": "VARCHAR",
+        "left_value": "VARCHAR",
+        "right_namespace": "VARCHAR",
+        "right_value": "VARCHAR",
+        "link_type": "VARCHAR",
+        "confidence": "DOUBLE",
+        "provenance": "VARCHAR",
+    },
+}
+_REQUIRED_TABLES = frozenset(_REQUIRED_COLUMN_TYPES)
 _REQUIRED_SOURCE_IDS = frozenset(
     {
         "search_history",
@@ -201,11 +215,13 @@ def is_database_ready(path: str | Path) -> bool:
         if versions != [(DATABASE_SCHEMA_VERSION, SYNTHETIC_DATASET_VERSION)]:
             return False
 
-        event_columns = {
-            row[0] for row in connection.execute("DESCRIBE events").fetchall()
-        }
-        if event_columns != _REQUIRED_EVENT_COLUMNS:
-            return False
+        for table, required_column_types in _REQUIRED_COLUMN_TYPES.items():
+            column_types = {
+                row[0]: row[1]
+                for row in connection.execute(f"DESCRIBE {table}").fetchall()
+            }
+            if column_types != required_column_types:
+                return False
 
         row_counts = {
             table: connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
