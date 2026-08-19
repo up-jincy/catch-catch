@@ -7,10 +7,16 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
+from deepagents import create_deep_agent
 from fastapi.testclient import TestClient
 from langchain.agents.middleware import TodoListMiddleware
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.tools import StructuredTool
 from langchain_mcp_adapters.interceptors import MCPToolCallRequest
 from mcp.types import CallToolResult
+from pydantic import Field
 
 from customer_signal.agent.contracts import RunRequest, RunnerOutcome
 from customer_signal.agent.fixture import FixtureRunner
@@ -310,6 +316,7 @@ async def test_gemini_runner_lazily_builds_one_structured_agent_and_captures_fac
     assert [call["model"] for call in model_factory.calls] == [PRIMARY_MODEL]
     assert model_factory.calls[0]["api_key"] == "test-gemini-key"
     assert model_factory.calls[0]["include_thoughts"] is False
+    assert model_factory.calls[0]["request_timeout"] == 40
     assert len(agent_factory.calls) == 1
     assert agent_factory.calls[0]["response_format"] is InsightReport
     assert any(
@@ -330,6 +337,81 @@ async def test_gemini_runner_lazily_builds_one_structured_agent_and_captures_fac
     ).lower()
     for forbidden in ("reasoning", "messages", "provider transcript", "test-gemini-key"):
         assert forbidden not in public_trace
+
+
+class _CapturingGoogleModel(BaseChatModel):
+    visible_tool_names: set[str] = Field(default_factory=set)
+
+    @property
+    def _llm_type(self) -> str:
+        return "chat-google-generative-ai"
+
+    def _get_ls_params(self, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "ls_provider": "google_genai",
+            "ls_model_name": PRIMARY_MODEL,
+            "ls_model_type": "chat",
+        }
+
+    def bind_tools(self, tools: Any, **kwargs: Any) -> _CapturingGoogleModel:
+        self.visible_tool_names = {tool.name for tool in tools}
+        return self
+
+    def _generate(
+        self,
+        messages: Any,
+        stop: Any = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content="done"))])
+
+
+def _real_tool_stub() -> str:
+    return "ok"
+
+
+async def test_real_deep_agent_exposes_only_mcp_tools_and_write_todos(
+    prepared_analysis: _PreparedAnalysis,
+) -> None:
+    # Exercise the production registration path twice before inspecting the installed graph.
+    for _ in range(2):
+        runner, _mcp_factory, _model_factory, _agent_factory = _runner(prepared_analysis)
+        await runner._get_agent(PRIMARY_MODEL)
+
+    model = _CapturingGoogleModel()
+    mcp_tools = [
+        StructuredTool.from_function(
+            _real_tool_stub,
+            name=name,
+            description=name,
+        )
+        for name in (
+            "catalog_sources",
+            "aggregate_events",
+            "match_journey_pattern",
+            "rank_customers",
+            "get_customer_journey",
+            "get_evidence",
+        )
+    ]
+    graph = create_deep_agent(
+        model=model,
+        tools=mcp_tools,
+        middleware=[TodoListMiddleware()],
+    )
+
+    await graph.ainvoke({"messages": [{"role": "user", "content": "finish"}]})
+
+    assert model.visible_tool_names == {
+        "write_todos",
+        "catalog_sources",
+        "aggregate_events",
+        "match_journey_pattern",
+        "rank_customers",
+        "get_customer_journey",
+        "get_evidence",
+    }
 
 
 async def test_model_not_found_before_tools_retries_only_the_configured_fallback_model(
@@ -506,6 +588,16 @@ class _FailingGeminiRunner:
         raise GeminiRunnerError(self.code, "private provider response must be discarded")
 
 
+class _BlockingGeminiRunner:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+
+    async def run(self, request: RunRequest, *, emit: Any) -> RunnerOutcome:
+        self.started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+
 async def test_auto_mode_falls_back_to_fixture_without_publishing_a_gemini_error(
     prepared_analysis: _PreparedAnalysis,
     repository: DuckDBRepository,
@@ -620,22 +712,72 @@ async def test_forced_gemini_mode_fails_explicitly_without_running_fixture(
     )
 
 
+async def test_forced_gemini_timeout_fails_with_a_safe_typed_error(
+    repository: DuckDBRepository,
+) -> None:
+    gemini_runner = _BlockingGeminiRunner()
+    store = RunStore()
+    coordinator = RunCoordinator(
+        agent_mode="gemini",
+        gemini_runner=gemini_runner,
+        gemini_timeout_seconds=0.01,
+        analytics=AnalyticsService(repository),
+        store=store,
+    )
+    created = coordinator.create_run(_request())
+
+    try:
+        terminal = await asyncio.wait_for(coordinator.wait_for_run(created.run_id), timeout=0.5)
+    finally:
+        await coordinator.close()
+    events = [event async for event in store.stream_events(created.run_id)]
+
+    assert terminal.status == "failed"
+    assert terminal.error is not None
+    assert terminal.error.code == "gemini_timeout"
+    assert terminal.error.message == "Gemini 분석 시간이 초과됐습니다."
+    assert [event.type for event in events] == ["error", "done"]
+
+
+async def test_auto_gemini_timeout_emits_explicit_timeout_fallback(
+    prepared_analysis: _PreparedAnalysis,
+    repository: DuckDBRepository,
+) -> None:
+    fixture_runner = _StaticOutcomeRunner(prepared_analysis.fixture_outcome)
+    gemini_runner = _BlockingGeminiRunner()
+    store = RunStore()
+    coordinator = RunCoordinator(
+        agent_mode="auto",
+        fixture_runner=fixture_runner,
+        gemini_runner=gemini_runner,
+        gemini_timeout_seconds=0.01,
+        analytics=AnalyticsService(repository),
+        store=store,
+    )
+    created = coordinator.create_run(_request())
+
+    terminal = await asyncio.wait_for(coordinator.wait_for_run(created.run_id), timeout=0.5)
+    events = [event async for event in store.stream_events(created.run_id)]
+
+    assert terminal.status == "completed"
+    assert terminal.agent_mode == "fixture"
+    assert events[0].type == "fallback"
+    assert events[0].payload == {
+        "from": "gemini",
+        "to": "fixture",
+        "code": "gemini_timeout",
+        "message": "Gemini 분석 시간이 초과되어 fixture 모드로 전환했습니다.",
+    }
+    assert "error" not in [event.type for event in events]
+
+
 async def test_auto_mode_preserves_cancellation_without_fallback(
     prepared_analysis: _PreparedAnalysis,
     repository: DuckDBRepository,
 ) -> None:
     fixture_runner = _StaticOutcomeRunner(prepared_analysis.fixture_outcome)
 
-    class BlockingGeminiRunner:
-        def __init__(self) -> None:
-            self.started = asyncio.Event()
-
-        async def run(self, request: RunRequest, *, emit: Any) -> RunnerOutcome:
-            self.started.set()
-            await asyncio.Event().wait()
-            raise AssertionError("unreachable")
-
-    gemini_runner = BlockingGeminiRunner()
+    gemini_runner = _BlockingGeminiRunner()
     store = RunStore()
     coordinator = RunCoordinator(
         agent_mode="auto",

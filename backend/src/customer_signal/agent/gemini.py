@@ -9,10 +9,16 @@ from collections.abc import Awaitable, Callable, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
+from threading import Lock
 from time import perf_counter
 from typing import Any, Protocol, cast
 
-from deepagents import create_deep_agent
+from deepagents import (
+    GeneralPurposeSubagentProfile,
+    HarnessProfile,
+    create_deep_agent,
+    register_harness_profile,
+)
 from langchain.agents.middleware import TodoListMiddleware
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -65,6 +71,20 @@ _REQUIRED_TOOLS = frozenset(
         "rank_customers",
     }
 )
+_DEEP_AGENT_EXCLUDED_TOOLS = frozenset(
+    {
+        "ls",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "delete",
+        "glob",
+        "grep",
+        "execute",
+    }
+)
+_PROFILE_LOCK = Lock()
+_PROFILE_REGISTERED = False
 _SYSTEM_PROMPT = """You are a bounded customer-signal analytics agent.
 Use only the supplied read-only customer_signal MCP tools for data claims.
 Call each MCP tool at most once and make no more than six MCP calls total.
@@ -149,6 +169,23 @@ def _public_failure(error: Exception) -> GeminiRunnerError:
     )
 
 
+def _ensure_bounded_google_genai_profile() -> None:
+    global _PROFILE_REGISTERED
+    if _PROFILE_REGISTERED:
+        return
+    with _PROFILE_LOCK:
+        if _PROFILE_REGISTERED:
+            return
+        register_harness_profile(
+            "google_genai",
+            HarnessProfile(
+                excluded_tools=_DEEP_AGENT_EXCLUDED_TOOLS,
+                general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
+            ),
+        )
+        _PROFILE_REGISTERED = True
+
+
 class GeminiRunner:
     """Run a structured deep agent without exposing provider state or transcripts."""
 
@@ -207,10 +244,13 @@ class GeminiRunner:
             model = self._model_factory(
                 model=model_name,
                 api_key=self._api_key,
+                # Analytics runs favor repeatable structured output over creative variance.
                 temperature=0,
                 retries=0,
+                request_timeout=40,
                 include_thoughts=False,
             )
+            _ensure_bounded_google_genai_profile()
             agent = cast(
                 _Agent,
                 self._agent_factory(

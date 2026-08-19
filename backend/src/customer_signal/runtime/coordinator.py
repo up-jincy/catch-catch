@@ -32,6 +32,7 @@ _GEMINI_ERROR_MESSAGES = {
     "gemini_not_configured": "Gemini API Key가 설정되지 않았습니다.",
     "gemini_model_not_found": "사용 가능한 Gemini 분석 모델을 찾지 못했습니다.",
     "gemini_provider_failed": "Gemini 분석 서비스 호출에 실패했습니다.",
+    "gemini_timeout": "Gemini 분석 시간이 초과됐습니다.",
     "gemini_validation_failed": "Gemini 분석 결과 검증에 실패했습니다.",
     "gemini_tool_policy_failed": "Gemini Tool 호출 정책 검증에 실패했습니다.",
     "gemini_tool_execution_failed": "Gemini MCP Tool 실행에 실패했습니다.",
@@ -249,13 +250,12 @@ class RunCoordinator:
             assert self._fixture_runner is not None
             return await self._fixture_runner.run(request, emit=emit)
         if self._agent_mode == "gemini":
-            return await self._run_gemini(request, emit=emit)
+            return await self._run_gemini_with_timeout(request, emit=emit)
 
         fallback_code = "gemini_not_configured"
         if self._gemini_runner is not None:
             try:
-                async with asyncio.timeout(self._gemini_timeout_seconds):
-                    return await self._run_gemini(request, emit=emit)
+                return await self._run_gemini_with_timeout(request, emit=emit)
             except asyncio.CancelledError:
                 raise
             except Exception as error:
@@ -263,6 +263,11 @@ class RunCoordinator:
                     fallback_code = _safe_gemini_error(error).code
                 else:
                     fallback_code = "gemini_provider_failed"
+        fallback_message = (
+            "Gemini 분석 시간이 초과되어 fixture 모드로 전환했습니다."
+            if fallback_code == "gemini_timeout"
+            else "Gemini 분석을 사용할 수 없어 fixture 모드로 전환했습니다."
+        )
         await emit(
             RunnerEvent(
                 type="fallback",
@@ -270,12 +275,24 @@ class RunCoordinator:
                     "from": "gemini",
                     "to": "fixture",
                     "code": fallback_code,
-                    "message": "Gemini 분석을 사용할 수 없어 fixture 모드로 전환했습니다.",
+                    "message": fallback_message,
                 },
             )
         )
         assert self._fixture_runner is not None
         return await self._fixture_runner.run(request, emit=emit)
+
+    async def _run_gemini_with_timeout(self, request: RunRequest, *, emit) -> RunnerOutcome:
+        try:
+            async with asyncio.timeout(self._gemini_timeout_seconds):
+                return await self._run_gemini(request, emit=emit)
+        except asyncio.CancelledError:
+            raise
+        except TimeoutError as error:
+            raise GeminiRunnerError(
+                "gemini_timeout",
+                _GEMINI_ERROR_MESSAGES["gemini_timeout"],
+            ) from error
 
     async def _run_gemini(self, request: RunRequest, *, emit) -> RunnerOutcome:
         if self._gemini_runner is None:
