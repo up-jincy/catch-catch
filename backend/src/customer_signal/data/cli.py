@@ -18,7 +18,7 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
         help="Exact DuckDB destination path (required).",
     )
-    parser.add_argument("--seed", type=int, default=20260819)
+    parser.add_argument("--seed", type=int, required=True)
     return parser
 
 

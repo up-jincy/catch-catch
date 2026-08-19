@@ -262,13 +262,23 @@ def test_repository_raises_typed_error_for_missing_customer_or_evidence(
         repository.get_evidence([synthetic_dataset.evidence[0].evidence_id, "EVD-unknown"])
 
 
-@pytest.mark.parametrize("evidence_ids", [[], ["same", "same"], "EVD-unknown"])
-def test_get_evidence_rejects_empty_duplicate_or_non_sequence_ids(
+@pytest.mark.parametrize("evidence_ids", [[], "EVD-unknown"])
+def test_get_evidence_rejects_empty_or_non_sequence_ids(
     repository: DuckDBRepository,
     evidence_ids,
 ):
     with pytest.raises(ValueError, match="evidence_ids"):
         repository.get_evidence(evidence_ids)
+
+
+def test_get_evidence_preserves_duplicate_requested_ids(
+    repository: DuckDBRepository,
+    synthetic_dataset: SyntheticDataset,
+):
+    first, second = synthetic_dataset.evidence[:2]
+    requested_ids = [first.evidence_id, second.evidence_id, first.evidence_id, first.evidence_id]
+
+    assert repository.get_evidence(requested_ids) == [first, second, first, first]
 
 
 def test_repository_returns_only_masked_evidence(
@@ -371,3 +381,29 @@ def test_database_cli_requires_explicit_path_and_seeds_requested_file(tmp_path: 
     assert missing_path.returncode != 0
     assert "--database" in missing_path.stderr
     assert sorted(tmp_path.rglob("*.duckdb")) == [database_path]
+
+
+def test_database_cli_requires_explicit_seed(tmp_path: Path):
+    project_root = Path(__file__).parents[1]
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(project_root / "src")
+    database_path = tmp_path / "must-not-be-created.duckdb"
+
+    missing_seed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "customer_signal.data.cli",
+            "--database",
+            str(database_path),
+        ],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert missing_seed.returncode != 0
+    assert "--seed" in missing_seed.stderr
+    assert not database_path.exists()

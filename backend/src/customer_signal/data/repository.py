@@ -76,15 +76,13 @@ def _validate_limit(limit: int) -> None:
 
 def _validate_evidence_ids(evidence_ids: Sequence[str]) -> list[str]:
     if isinstance(evidence_ids, (str, bytes)) or not isinstance(evidence_ids, Sequence):
-        raise ValueError("evidence_ids must be a non-empty unique sequence")
+        raise ValueError("evidence_ids must be a non-empty sequence")
 
     identifiers = list(evidence_ids)
-    if (
-        not identifiers
-        or any(not isinstance(identifier, str) or not identifier for identifier in identifiers)
-        or len(identifiers) != len(set(identifiers))
+    if not identifiers or any(
+        not isinstance(identifier, str) or not identifier for identifier in identifiers
     ):
-        raise ValueError("evidence_ids must be a non-empty unique sequence")
+        raise ValueError("evidence_ids must be a non-empty sequence")
     return identifiers
 
 
