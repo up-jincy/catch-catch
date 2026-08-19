@@ -417,7 +417,12 @@ describe("CustomerIntelligencePage", () => {
       question: "AI 검색 실패 후 고객센터까지 문의한 고객이 얼마나 돼?",
       start_at: "2026-07-20T00:00:00+09:00",
       end_at: "2026-08-19T00:00:00+09:00",
-      enabled_sources: ["search_history", "search_feedback"],
+      enabled_sources: [
+        "search_history",
+        "search_feedback",
+        "digital_behavior",
+        "subscription",
+      ],
     });
     expect(screen.getByText(/종료일은 포함하지 않아요/)).toBeInTheDocument();
   });

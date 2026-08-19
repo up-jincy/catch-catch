@@ -238,6 +238,30 @@ describe("RunClient", () => {
     });
   });
 
+  it("accepts digital behavior and subscription source values at the stream boundary", async () => {
+    const fetchImpl: typeof fetch = async () =>
+      responseStream([
+        frame("run-1", 1, "tool_started", {
+          tool: "aggregate_events",
+          source: ["digital_behavior", "subscription"],
+        }),
+        frame("run-1", 2, "done", { status: "completed" }),
+      ]);
+    const client = new RunClient({ apiBaseUrl: "http://api.test", fetchImpl });
+
+    await expect(consume(client)).resolves.toEqual([
+      {
+        id: 1,
+        type: "tool_started",
+        data: {
+          tool: "aggregate_events",
+          source: ["digital_behavior", "subscription"],
+        },
+      },
+      { id: 2, type: "done", data: { status: "completed" } },
+    ]);
+  });
+
   it.each([
     ["plan", { steps: [1] }],
     ["tool_started", { tool: 1, source: [] }],

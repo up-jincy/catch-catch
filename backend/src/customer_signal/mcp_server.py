@@ -21,7 +21,7 @@ from customer_signal.analytics.service import AnalyticsService
 from customer_signal.domain.models import SourceId
 
 
-type EnabledSources = Annotated[list[SourceId], Field(min_length=1, max_length=3)]
+type EnabledSources = Annotated[list[SourceId], Field(min_length=1, max_length=5)]
 type ResultLimit = Annotated[int, Field(strict=True, ge=1, le=100)]
 type CustomerId = Annotated[str, Field(min_length=1)]
 type EvidenceId = Annotated[str, Field(min_length=1)]
@@ -62,7 +62,7 @@ def create_mcp_server(service: AnalyticsService) -> FastMCP:
         group_by: AggregateDimension = "source",
         limit: ResultLimit = 100,
     ) -> AggregateResult:
-        """Aggregate a 1-to-3-source allowlist over [start_at, end_at), limited 1 to 100."""
+        """Aggregate a 1-to-5-source allowlist over [start_at, end_at), limited 1 to 100."""
 
         return service.aggregate_events(
             start_at,
@@ -79,7 +79,7 @@ def create_mcp_server(service: AnalyticsService) -> FastMCP:
         enabled_sources: EnabledSources,
         limit: ResultLimit = 100,
     ) -> PatternMatchResult:
-        """Match journeys in a 1-to-3-source allowlist over [start_at, end_at), limited 1 to 100."""
+        """Match journeys in a 1-to-5-source allowlist over [start_at, end_at), limited 1 to 100."""
 
         return service.match_journey_pattern(
             start_at,
@@ -95,7 +95,7 @@ def create_mcp_server(service: AnalyticsService) -> FastMCP:
         enabled_sources: EnabledSources,
         limit: ResultLimit = 100,
     ) -> RankCustomersResult:
-        """Rank customers in a 1-to-3-source allowlist over [start_at, end_at), limited 1 to 100."""
+        """Rank customers in a 1-to-5-source allowlist over [start_at, end_at), limited 1 to 100."""
 
         return service.rank_customers(
             start_at,

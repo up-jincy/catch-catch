@@ -1,4 +1,9 @@
-export type SourceId = "search_history" | "search_feedback" | "voc";
+export type SourceId =
+  | "search_history"
+  | "search_feedback"
+  | "digital_behavior"
+  | "subscription"
+  | "voc";
 export type AgentMode = "fixture" | "gemini";
 export type RunStatus = "queued" | "running" | "completed" | "failed";
 export type RunPhase =
@@ -89,7 +94,12 @@ export interface RankedCustomer {
   last_event_at: string | null;
 }
 
-export type EventType = "search" | "feedback" | "voc";
+export type EventType =
+  | "search"
+  | "feedback"
+  | "digital_behavior"
+  | "subscription"
+  | "voc";
 
 export interface JourneyEvent {
   event_id: string;

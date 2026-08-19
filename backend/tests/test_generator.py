@@ -35,6 +35,13 @@ POSITIVE_CUSTOMER_IDS = [
     "CUST-022",
     "CUST-028",
 ]
+ALL_SOURCE_IDS = {
+    "search_history",
+    "search_feedback",
+    "digital_behavior",
+    "subscription",
+    "voc",
+}
 
 
 def _dataset_payload() -> dict:
@@ -134,12 +141,57 @@ def test_dataset_is_seeded_and_contains_exact_customers_and_ground_truth():
     assert first.model_dump() == second.model_dump()
     assert first.customers == [f"CUST-{index:03d}" for index in range(1, 31)]
     assert first.ground_truth_customer_ids == POSITIVE_CUSTOMER_IDS
-    assert {event.source_id for event in first.events} == {
-        "search_history",
-        "search_feedback",
-        "voc",
-    }
+    assert {event.source_id for event in first.events} == ALL_SOURCE_IDS
     assert generate_dataset(seed=20260820).model_dump() != first.model_dump()
+
+
+def test_dataset_exposes_all_five_customer_journey_source_families():
+    dataset = generate_dataset(seed=20260819)
+
+    assert {event.source_id for event in dataset.events} == ALL_SOURCE_IDS
+    assert all(
+        {event.source_id for event in dataset.events if event.canonical_customer_id == customer_id}
+        == ALL_SOURCE_IDS
+        for customer_id in dataset.customers
+    )
+
+
+def test_every_event_identity_reaches_its_canonical_customer_with_explicit_provenance():
+    payload = generate_dataset(seed=20260819).model_dump(mode="python")
+    edges = payload.get("identity_edges")
+
+    assert edges, "the synthetic dataset must include an explicit identity graph"
+    assert {edge["link_type"] for edge in edges} == {"EXACT", "DECLARED", "SYNTHETIC"}
+    assert all(edge["provenance"] for edge in edges)
+
+    graph: dict[tuple[str, str], set[tuple[str, str]]] = defaultdict(set)
+    for edge in edges:
+        left = (edge["left"]["namespace"], edge["left"]["value"])
+        right = (edge["right"]["namespace"], edge["right"]["value"])
+        graph[left].add(right)
+        graph[right].add(left)
+
+    def reaches_canonical(identity: dict, customer_id: str) -> bool:
+        start = (identity["namespace"], identity["value"])
+        target = ("canonical_customer", customer_id)
+        pending = [start]
+        visited: set[tuple[str, str]] = set()
+        while pending:
+            node = pending.pop()
+            if node == target:
+                return True
+            if node in visited:
+                continue
+            visited.add(node)
+            pending.extend(graph[node] - visited)
+        return False
+
+    for event in payload["events"]:
+        assert event.get("identities"), event["event_id"]
+        assert any(
+            reaches_canonical(identity, event["canonical_customer_id"])
+            for identity in event["identities"]
+        ), event["event_id"]
 
 
 @pytest.mark.parametrize("seed", [-1, 100_000_000])

@@ -24,6 +24,8 @@ const toolLabels: Record<ToolName, string> = {
 const sourceLabels: Record<SourceId, string> = {
   search_history: "검색 이력",
   search_feedback: "검색 피드백",
+  digital_behavior: "디지털 행동",
+  subscription: "가입 정보",
   voc: "VOC",
 };
 

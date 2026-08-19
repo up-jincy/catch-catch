@@ -81,10 +81,22 @@ class ContractValidationError extends Error {
   }
 }
 
-const SOURCE_IDS = ["search_history", "search_feedback", "voc"] as const;
+const SOURCE_IDS = [
+  "search_history",
+  "search_feedback",
+  "digital_behavior",
+  "subscription",
+  "voc",
+] as const;
 const AGENT_MODES = ["fixture", "gemini"] as const;
 const RUN_STATUSES = ["queued", "running", "completed", "failed"] as const;
-const EVENT_TYPES = ["search", "feedback", "voc"] as const;
+const EVENT_TYPES = [
+  "search",
+  "feedback",
+  "digital_behavior",
+  "subscription",
+  "voc",
+] as const;
 const RISK_LEVELS = ["high", "medium", "low"] as const;
 const CONFIDENCE_LEVELS = ["high", "medium", "low"] as const;
 const ANALYSIS_TYPES = [

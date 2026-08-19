@@ -14,7 +14,13 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from customer_signal.domain.models import CustomerEvent, EvidenceRecord, SourceId
 
 
-SOURCE_IDS = ("search_history", "search_feedback", "voc")
+SOURCE_IDS = (
+    "search_history",
+    "search_feedback",
+    "digital_behavior",
+    "subscription",
+    "voc",
+)
 _SOURCE_ID_SET = frozenset(SOURCE_IDS)
 _UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
@@ -133,7 +139,9 @@ class DuckDBRepository:
                 ORDER BY CASE source_id
                     WHEN 'search_history' THEN 1
                     WHEN 'search_feedback' THEN 2
-                    WHEN 'voc' THEN 3
+                    WHEN 'digital_behavior' THEN 3
+                    WHEN 'subscription' THEN 4
+                    WHEN 'voc' THEN 5
                 END
                 """,
                 [start_at, end_at],
@@ -198,6 +206,7 @@ class DuckDBRepository:
                     topic,
                     outcome,
                     text,
+                    identities,
                     canonical_customer_id,
                     attributes
                 FROM events
@@ -225,8 +234,11 @@ class DuckDBRepository:
                     "topic": row[6],
                     "outcome": row[7],
                     "text": row[8],
-                    "canonical_customer_id": row[9],
-                    "attributes": _parse_json(row[10]),
+                    "identities": (
+                        json.loads(row[9]) if isinstance(row[9], str) else row[9]
+                    ),
+                    "canonical_customer_id": row[10],
+                    "attributes": _parse_json(row[11]),
                 },
                 strict=True,
             )

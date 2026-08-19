@@ -36,7 +36,13 @@ from customer_signal.domain.models import CustomerEvent, EvidenceRecord
 SEOUL = ZoneInfo("Asia/Seoul")
 START_AT = datetime(2026, 7, 20, tzinfo=SEOUL)
 END_AT = datetime(2026, 8, 19, tzinfo=SEOUL)
-ALL_SOURCES = ["search_history", "search_feedback", "voc"]
+ALL_SOURCES = [
+    "search_history",
+    "search_feedback",
+    "digital_behavior",
+    "subscription",
+    "voc",
+]
 EXPECTED_MATCHES = [
     "CUST-003",
     "CUST-007",
@@ -217,7 +223,7 @@ def test_seeded_pattern_match_returns_exact_ordered_customers_and_stats(
     assert [customer.customer_id for customer in result.customers] == EXPECTED_MATCHES
     assert all(customer.risk_score >= 75 for customer in result.customers)
     assert result.missing_sources == []
-    assert result.stats == ToolStats(scanned_rows=108, returned_rows=6)
+    assert result.stats == ToolStats(scanned_rows=174, returned_rows=6)
     assert result.evidence_ids == [
         evidence_id for customer in result.customers for evidence_id in customer.evidence_ids
     ]
@@ -230,7 +236,12 @@ def test_disabling_voc_keeps_candidates_but_removes_complete_matches(
     result = analytics_service.match_journey_pattern(
         start_at=START_AT,
         end_at=END_AT,
-        enabled_sources=["search_history", "search_feedback"],
+        enabled_sources=[
+            "search_history",
+            "search_feedback",
+            "digital_behavior",
+            "subscription",
+        ],
     )
 
     assert result.customer_count == 0
@@ -238,7 +249,7 @@ def test_disabling_voc_keeps_candidates_but_removes_complete_matches(
     assert result.customers == []
     assert result.candidate_count >= 6
     assert result.missing_sources == ["voc"]
-    assert result.stats.scanned_rows == 84
+    assert result.stats.scanned_rows == 144
 
 
 def test_pattern_boundaries_include_exactly_24_and_72_hours_and_exclude_just_over():
@@ -479,13 +490,19 @@ def test_aggregate_events_is_deterministic_and_counts_filtered_events(
     assert first == second
     assert first.result_id == second.result_id
     assert first.group_by == group_by
-    assert sum(bucket.event_count for bucket in first.buckets) == 108
-    assert first.stats.scanned_rows == 108
+    assert sum(bucket.event_count for bucket in first.buckets) == 174
+    assert first.stats.scanned_rows == 174
     assert first.stats.returned_rows == len(first.buckets)
     assert [bucket.value for bucket in first.buckets] == sorted(
         [bucket.value for bucket in first.buckets],
         key=(
-            {"search_history": 0, "search_feedback": 1, "voc": 2}.get
+            {
+                "search_history": 0,
+                "search_feedback": 1,
+                "digital_behavior": 2,
+                "subscription": 3,
+                "voc": 4,
+            }.get
             if group_by == "source"
             else None
         ),
@@ -504,7 +521,9 @@ def test_source_aggregate_has_expected_counts(analytics_service: AnalyticsServic
     assert [(bucket.value, bucket.event_count) for bucket in result.buckets] == [
         ("search_history", 54),
         ("search_feedback", 30),
-        ("voc", 24),
+        ("digital_behavior", 30),
+        ("subscription", 30),
+        ("voc", 30),
     ]
     assert all(bucket.customer_count > 0 for bucket in result.buckets)
 
@@ -532,7 +551,7 @@ def test_ranking_is_score_descending_then_customer_id_and_is_limited(
     assert first.candidate_count >= first.customer_count
     assert first.result_id == second.result_id
     assert first == second
-    assert first.stats == ToolStats(scanned_rows=108, returned_rows=8)
+    assert first.stats == ToolStats(scanned_rows=174, returned_rows=8)
 
 
 def test_result_ids_change_when_normalized_operation_inputs_or_results_change(
@@ -626,7 +645,7 @@ def test_catalog_sources_is_stable_and_reports_scan_and_missing_source_stats(
     assert first == second
     assert [source.source_id for source in first.sources] == ALL_SOURCES
     assert first.missing_sources == []
-    assert first.stats == ToolStats(scanned_rows=108, returned_rows=3)
+    assert first.stats == ToolStats(scanned_rows=174, returned_rows=5)
     assert first.result_id.startswith("catalog_sources:")
 
 
@@ -644,6 +663,8 @@ def test_service_loads_each_enabled_source_separately_then_merges():
     assert [call["enabled_sources"] for call in repository.list_calls] == [
         ["search_history"],
         ["search_feedback"],
+        ["digital_behavior"],
+        ["subscription"],
         ["voc"],
     ]
     assert all(call["limit"] == 100 for call in repository.list_calls)

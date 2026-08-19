@@ -36,12 +36,26 @@ CREATE TABLE events (
     topic VARCHAR NOT NULL,
     outcome VARCHAR NOT NULL,
     text VARCHAR NOT NULL,
+    identities JSON NOT NULL,
     canonical_customer_id VARCHAR NOT NULL,
     attributes JSON NOT NULL
 );
 
-CREATE TABLE ground_truth (
-    customer_id VARCHAR PRIMARY KEY
+CREATE TABLE identity_edges (
+    left_namespace VARCHAR NOT NULL,
+    left_value VARCHAR NOT NULL,
+    right_namespace VARCHAR NOT NULL,
+    right_value VARCHAR NOT NULL,
+    link_type VARCHAR NOT NULL,
+    confidence DOUBLE NOT NULL,
+    provenance VARCHAR NOT NULL,
+    PRIMARY KEY (
+        left_namespace,
+        left_value,
+        right_namespace,
+        right_value,
+        link_type
+    )
 );
 """
 
@@ -74,7 +88,7 @@ def _write_database(path: Path, dataset: SyntheticDataset) -> None:
             ],
         )
         connection.executemany(
-            "INSERT INTO events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     event.event_id,
@@ -86,6 +100,7 @@ def _write_database(path: Path, dataset: SyntheticDataset) -> None:
                     event.topic,
                     event.outcome,
                     event.text,
+                    _json([identity.model_dump(mode="json") for identity in event.identities]),
                     event.canonical_customer_id,
                     _json(event.attributes),
                 )
@@ -93,8 +108,19 @@ def _write_database(path: Path, dataset: SyntheticDataset) -> None:
             ],
         )
         connection.executemany(
-            "INSERT INTO ground_truth VALUES (?)",
-            [(customer_id,) for customer_id in dataset.ground_truth_customer_ids],
+            "INSERT INTO identity_edges VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    edge.left.namespace,
+                    edge.left.value,
+                    edge.right.namespace,
+                    edge.right.value,
+                    edge.link_type,
+                    edge.confidence,
+                    edge.provenance,
+                )
+                for edge in dataset.identity_edges
+            ],
         )
         connection.execute("COMMIT")
     finally:

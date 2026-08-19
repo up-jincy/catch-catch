@@ -26,7 +26,13 @@ export const RECOMMENDED_QUESTION =
 export const DEFAULT_START_DATE = "2026-07-20";
 export const DEFAULT_END_DATE = "2026-08-19";
 
-const SOURCE_ORDER: SourceId[] = ["search_history", "search_feedback", "voc"];
+const SOURCE_ORDER: SourceId[] = [
+  "search_history",
+  "search_feedback",
+  "digital_behavior",
+  "subscription",
+  "voc",
+];
 
 export interface CustomerIntelligenceClient {
   createRun(request: RunRequest, signal?: AbortSignal): Promise<RunAccepted>;
@@ -109,6 +115,8 @@ export function useRunController(providedClient?: CustomerIntelligenceClient) {
   const [enabledSources, setEnabledSources] = useState<SourceId[]>([
     "search_history",
     "search_feedback",
+    "digital_behavior",
+    "subscription",
     "voc",
   ]);
   const [isCreating, setIsCreating] = useState(false);

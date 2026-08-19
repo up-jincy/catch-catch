@@ -10,6 +10,8 @@ from customer_signal.domain.models import (
     CustomerEvent,
     EventType,
     EvidenceRecord,
+    IdentityEdge,
+    IdentityRef,
     Scalar,
     SourceId,
     SyntheticDataset,
@@ -34,7 +36,102 @@ class _DatasetBuilder:
         self.seed = seed
         self.events: list[CustomerEvent] = []
         self.evidence: list[EvidenceRecord] = []
+        self.identity_edges: list[IdentityEdge] = []
         self._customer_sequences: dict[str, int] = {}
+        self._source_identities: dict[tuple[str, SourceId], IdentityRef] = {}
+
+    def register_customer_identity_graph(self, customer_id: str) -> None:
+        """Create the deterministic cross-source identity path for one customer."""
+
+        customer_number = int(customer_id.rsplit("-", maxsplit=1)[1])
+        search_run = IdentityRef(namespace="search_run", value=f"RUN-{customer_number:03d}")
+        search_thread = IdentityRef(
+            namespace="search_thread",
+            value=f"THREAD-{customer_number:03d}",
+        )
+        digital_session = IdentityRef(
+            namespace="digital_session",
+            value=f"SESSION-{customer_number:03d}",
+        )
+        canonical_customer = IdentityRef(
+            namespace="canonical_customer",
+            value=customer_id,
+        )
+        subscription = IdentityRef(
+            namespace="subscription_entry",
+            value=f"ENTR-{customer_number:03d}",
+        )
+        voc_case = IdentityRef(namespace="voc_case", value=f"VOC-{customer_number:03d}")
+
+        self._source_identities.update(
+            {
+                (customer_id, "search_history"): search_run,
+                (customer_id, "search_feedback"): search_run,
+                (customer_id, "digital_behavior"): digital_session,
+                (customer_id, "subscription"): subscription,
+                (customer_id, "voc"): voc_case,
+            }
+        )
+        self.identity_edges.extend(
+            [
+                IdentityEdge(
+                    left=search_run,
+                    right=search_thread,
+                    link_type="EXACT",
+                    confidence=1.0,
+                    provenance="shared search RUN_ID",
+                ),
+                IdentityEdge(
+                    left=search_thread,
+                    right=digital_session,
+                    link_type="SYNTHETIC",
+                    confidence=1.0,
+                    provenance="seeded cross-channel bridge",
+                ),
+                IdentityEdge(
+                    left=digital_session,
+                    right=canonical_customer,
+                    link_type="DECLARED",
+                    confidence=1.0,
+                    provenance="authenticated digital customer mapping",
+                ),
+                IdentityEdge(
+                    left=canonical_customer,
+                    right=subscription,
+                    link_type="EXACT",
+                    confidence=1.0,
+                    provenance="subscription CUST_NO mapping",
+                ),
+                IdentityEdge(
+                    left=subscription,
+                    right=voc_case,
+                    link_type="DECLARED",
+                    confidence=1.0,
+                    provenance="VOC ENTR_NO mapping",
+                ),
+            ]
+        )
+
+    def _canonical_customer_id(self, identity: IdentityRef) -> str:
+        graph: dict[tuple[str, str], set[tuple[str, str]]] = {}
+        for edge in self.identity_edges:
+            left = (edge.left.namespace, edge.left.value)
+            right = (edge.right.namespace, edge.right.value)
+            graph.setdefault(left, set()).add(right)
+            graph.setdefault(right, set()).add(left)
+
+        pending = [(identity.namespace, identity.value)]
+        visited: set[tuple[str, str]] = set()
+        while pending:
+            node = pending.pop()
+            if node in visited:
+                continue
+            visited.add(node)
+            pending.extend(graph.get(node, set()) - visited)
+        resolved = sorted(value for namespace, value in visited if namespace == "canonical_customer")
+        if len(resolved) != 1:
+            raise ValueError("source identity must resolve to exactly one canonical customer")
+        return resolved[0]
 
     def add_event(
         self,
@@ -49,6 +146,8 @@ class _DatasetBuilder:
         text: str,
         attributes: dict[str, Scalar] | None = None,
     ) -> None:
+        identity = self._source_identities[(customer_id, source_id)]
+        resolved_customer_id = self._canonical_customer_id(identity)
         sequence = self._customer_sequences.get(customer_id, 0) + 1
         self._customer_sequences[customer_id] = sequence
         customer_number = int(customer_id.rsplit("-", maxsplit=1)[1])
@@ -66,7 +165,8 @@ class _DatasetBuilder:
             topic=topic,
             outcome=outcome,
             text=text,
-            canonical_customer_id=customer_id,
+            identities=[identity],
+            canonical_customer_id=resolved_customer_id,
             attributes=attributes or {},
         )
         evidence = EvidenceRecord(
@@ -77,6 +177,8 @@ class _DatasetBuilder:
             summary=f"{topic} {event_type} 이벤트: {outcome}",
             raw_fields={
                 "customer_ref": masked_customer_id,
+                "identity_namespace": identity.namespace,
+                "identity_ref": identity.value,
                 "action": action,
                 "topic": topic,
                 "outcome": outcome,
@@ -92,6 +194,46 @@ def _base_time(rng: random.Random, *, latest_day: int) -> datetime:
         days=rng.randrange(latest_day + 1),
         hours=8 + rng.randrange(8),
         minutes=rng.randrange(6) * 10,
+    )
+
+
+def _add_cross_source_context(
+    builder: _DatasetBuilder,
+    *,
+    customer_id: str,
+    occurred_at: datetime,
+    topic: str,
+    risky: bool,
+) -> None:
+    builder.add_event(
+        customer_id=customer_id,
+        occurred_at=occurred_at,
+        source_id="digital_behavior",
+        event_type="digital_behavior",
+        action="visit_support_page",
+        topic=topic,
+        outcome="abandoned" if risky else "completed",
+        text=(
+            "장애 해결 페이지를 반복 방문했지만 절차를 완료하지 못했습니다."
+            if risky
+            else f"{topic} 안내 페이지에서 필요한 정보를 확인했습니다."
+        ),
+        attributes={"session_depth": 5 if risky else 2, "authenticated": True},
+    )
+    builder.add_event(
+        customer_id=customer_id,
+        occurred_at=occurred_at + timedelta(hours=2),
+        source_id="subscription",
+        event_type="subscription",
+        action="review_subscription",
+        topic=topic,
+        outcome="cancellation_inquiry" if risky else "active",
+        text=(
+            "현재 가입 상품의 해지 조건과 위약금을 확인했습니다."
+            if risky
+            else "현재 가입 상품이 정상 상태임을 확인했습니다."
+        ),
+        attributes={"product_family": "internet", "status": "active"},
     )
 
 
@@ -138,6 +280,13 @@ def _add_positive_journey(
         outcome="negative",
         text="안내 내용으로 문제가 해결되지 않았습니다.",
         attributes={"rating": 1},
+    )
+    _add_cross_source_context(
+        builder,
+        customer_id=customer_id,
+        occurred_at=feedback_at + timedelta(hours=2),
+        topic=topic,
+        risky=True,
     )
     builder.add_event(
         customer_id=customer_id,
@@ -342,6 +491,17 @@ def _add_failure_without_voc(
         text="다른 주제의 검색은 정상적으로 완료했습니다.",
         attributes={"result_count": 3, "is_repeat": False},
     )
+    builder.add_event(
+        customer_id=customer_id,
+        occurred_at=repeated_at + timedelta(hours=30),
+        source_id="voc",
+        event_type="voc",
+        action="contact_customer_service",
+        topic=TOPICS[(TOPICS.index(topic) + 1) % len(TOPICS)],
+        outcome="resolved",
+        text="분석 대상과 무관한 문의가 상담 중 해결되었습니다.",
+        attributes={"contact_channel": "chat", "noise": True},
+    )
 
 
 def generate_dataset(seed: int = 20260819) -> SyntheticDataset:
@@ -358,6 +518,7 @@ def generate_dataset(seed: int = 20260819) -> SyntheticDataset:
     near_miss_index = 0
 
     for customer_number, customer_id in enumerate(customers, start=1):
+        builder.register_customer_identity_graph(customer_id)
         if customer_id in POSITIVE_CUSTOMER_IDS:
             _add_positive_journey(builder, rng, customer_id)
             continue
@@ -373,6 +534,13 @@ def generate_dataset(seed: int = 20260819) -> SyntheticDataset:
             _add_failure_with_late_voc(builder, rng, customer_id, topic)
         else:
             _add_failure_without_voc(builder, rng, customer_id, topic)
+        _add_cross_source_context(
+            builder,
+            customer_id=customer_id,
+            occurred_at=_base_time(rng, latest_day=25),
+            topic=topic,
+            risky=False,
+        )
 
     builder.events.sort(key=lambda event: (event.occurred_at, event.event_id))
     builder.evidence.sort(key=lambda record: (record.occurred_at, record.evidence_id))
@@ -380,5 +548,6 @@ def generate_dataset(seed: int = 20260819) -> SyntheticDataset:
         customers=customers,
         events=builder.events,
         evidence=builder.evidence,
+        identity_edges=builder.identity_edges,
         ground_truth_customer_ids=list(POSITIVE_CUSTOMER_IDS),
     )

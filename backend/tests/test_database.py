@@ -27,7 +27,13 @@ from customer_signal.synthetic.generator import generate_dataset
 SEOUL = ZoneInfo("Asia/Seoul")
 START_AT = datetime(2026, 7, 20, tzinfo=SEOUL)
 END_AT = datetime(2026, 8, 19, tzinfo=SEOUL)
-ALL_SOURCES = ["search_history", "search_feedback", "voc"]
+ALL_SOURCES = [
+    "search_history",
+    "search_feedback",
+    "digital_behavior",
+    "subscription",
+    "voc",
+]
 
 
 def test_seed_database_atomically_creates_expected_schema_and_rows(
@@ -62,7 +68,7 @@ def test_seed_database_atomically_creates_expected_schema_and_rows(
     try:
         row_counts = {
             table: connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-            for table in ("customers", "events", "evidence", "ground_truth")
+            for table in ("customers", "events", "evidence", "identity_edges")
         }
         event_types = {row[0]: row[1] for row in connection.execute("DESCRIBE events").fetchall()}
         evidence_types = {
@@ -73,14 +79,46 @@ def test_seed_database_atomically_creates_expected_schema_and_rows(
 
     assert row_counts == {
         "customers": 30,
-        "events": 108,
-        "evidence": 108,
-        "ground_truth": 6,
+        "events": 174,
+        "evidence": 174,
+        "identity_edges": 150,
     }
     assert event_types["occurred_at"] == "TIMESTAMP WITH TIME ZONE"
+    assert event_types["identities"] == "JSON"
     assert event_types["attributes"] == "JSON"
     assert evidence_types["occurred_at"] == "TIMESTAMP WITH TIME ZONE"
     assert evidence_types["raw_fields"] == "JSON"
+
+
+def test_agent_database_contains_identity_provenance_but_not_evaluation_truth(
+    database_path: Path,
+    synthetic_dataset: SyntheticDataset,
+):
+    connection = duckdb.connect(str(database_path), read_only=True)
+    try:
+        tables = {row[0] for row in connection.execute("SHOW TABLES").fetchall()}
+        identity_edge_count = (
+            connection.execute("SELECT count(*) FROM identity_edges").fetchone()[0]
+            if "identity_edges" in tables
+            else 0
+        )
+        persisted_link_types = (
+            {
+                row[0]
+                for row in connection.execute(
+                    "SELECT DISTINCT link_type FROM identity_edges"
+                ).fetchall()
+            }
+            if "identity_edges" in tables
+            else set()
+        )
+    finally:
+        connection.close()
+
+    assert "ground_truth" not in tables
+    assert "identity_edges" in tables
+    assert identity_edge_count == len(synthetic_dataset.identity_edges)
+    assert persisted_link_types == {"EXACT", "DECLARED", "SYNTHETIC"}
 
 
 def test_seed_database_cleans_temporary_file_and_preserves_destination_on_failure(

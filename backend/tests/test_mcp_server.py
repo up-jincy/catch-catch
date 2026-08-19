@@ -15,7 +15,13 @@ from customer_signal.data.repository import DuckDBRepository
 
 START_AT = "2026-07-20T00:00:00+09:00"
 END_AT = "2026-08-19T00:00:00+09:00"
-ALL_SOURCES = ["search_history", "search_feedback", "voc"]
+ALL_SOURCES = [
+    "search_history",
+    "search_feedback",
+    "digital_behavior",
+    "subscription",
+    "voc",
+]
 EXPECTED_MATCHES = [
     "CUST-003",
     "CUST-007",
@@ -44,7 +50,7 @@ TIME_PROPERTIES = {
 }
 SOURCE_PROPERTY = {
     "items": {"enum": ALL_SOURCES, "type": "string"},
-    "maxItems": 3,
+    "maxItems": 5,
     "minItems": 1,
     "type": "array",
 }
@@ -248,11 +254,13 @@ async def test_all_six_tools_call_seeded_service_and_return_structured_data(
     ] == [
         ("search_history", 54),
         ("search_feedback", 30),
-        ("voc", 24),
+        ("digital_behavior", 30),
+        ("subscription", 30),
+        ("voc", 30),
     ]
     assert aggregate.structured_content["stats"] == {
-        "scanned_rows": 108,
-        "returned_rows": 3,
+        "scanned_rows": 174,
+        "returned_rows": 5,
     }
     assert matched.structured_content["customer_ids"] == EXPECTED_MATCHES
     assert matched.structured_content["customer_count"] == 6

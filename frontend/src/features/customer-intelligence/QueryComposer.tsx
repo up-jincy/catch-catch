@@ -38,6 +38,16 @@ const sources: Array<{
     note: "부정 피드백 신호",
   },
   {
+    id: "digital_behavior",
+    label: "디지털 행동",
+    note: "GA 기반 페이지·Funnel 행동",
+  },
+  {
+    id: "subscription",
+    label: "가입 정보",
+    note: "상품 가입·변경 상태",
+  },
+  {
     id: "voc",
     label: "VOC",
     note: "고객센터 미해결 문의",

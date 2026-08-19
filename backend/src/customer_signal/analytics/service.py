@@ -100,7 +100,7 @@ def _validate_time_range(
 
 def _validate_sources(enabled_sources: Sequence[str]) -> list[SourceId]:
     if isinstance(enabled_sources, (str, bytes)) or not isinstance(enabled_sources, Sequence):
-        raise AnalyticsInputError("enabled_sources must contain 1 to 3 unique allowlisted sources")
+        raise AnalyticsInputError("enabled_sources must contain 1 to 5 unique allowlisted sources")
     sources = list(enabled_sources)
     if (
         not 1 <= len(sources) <= len(SOURCE_IDS)
@@ -108,7 +108,7 @@ def _validate_sources(enabled_sources: Sequence[str]) -> list[SourceId]:
         or len(sources) != len(set(sources))
         or any(source not in _SOURCE_SET for source in sources)
     ):
-        raise AnalyticsInputError("enabled_sources must contain 1 to 3 unique allowlisted sources")
+        raise AnalyticsInputError("enabled_sources must contain 1 to 5 unique allowlisted sources")
     return [cast(SourceId, source) for source in SOURCE_IDS if source in sources]
 
 

@@ -1,19 +1,50 @@
-"""Canonical customer-event and evidence contracts."""
+"""Canonical customer-event, identity-provenance, and evidence contracts."""
 
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 
 type Scalar = str | int | float | bool | None
-type SourceId = Literal["search_history", "search_feedback", "voc"]
-type EventType = Literal["search", "feedback", "voc"]
+type SourceId = Literal[
+    "search_history",
+    "search_feedback",
+    "digital_behavior",
+    "subscription",
+    "voc",
+]
+type EventType = Literal["search", "feedback", "digital_behavior", "subscription", "voc"]
+type IdentityLinkType = Literal["EXACT", "DECLARED", "SYNTHETIC"]
+type IdentityConfidence = Annotated[FiniteFloat, Field(ge=0, le=1)]
 
 
 class DomainModel(BaseModel):
     """Shared strict base for portable, JSON-serializable domain contracts."""
 
     model_config = ConfigDict(extra="forbid")
+
+
+class IdentityRef(DomainModel):
+    """A source-native identifier participating in the customer identity graph."""
+
+    namespace: str = Field(min_length=1)
+    value: str = Field(min_length=1)
+
+
+class IdentityEdge(DomainModel):
+    """An explicit, provenance-bearing link between two identity nodes."""
+
+    left: IdentityRef
+    right: IdentityRef
+    link_type: IdentityLinkType
+    confidence: IdentityConfidence
+    provenance: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def reject_self_link(self) -> Self:
+        if self.left == self.right:
+            raise ValueError("identity edge endpoints must differ")
+        return self
 
 
 class CustomerEvent(DomainModel):
@@ -28,6 +59,7 @@ class CustomerEvent(DomainModel):
     topic: str
     outcome: str
     text: str
+    identities: list[IdentityRef] = Field(default_factory=list)
     canonical_customer_id: str
     attributes: dict[str, Scalar] = Field(default_factory=dict)
 
@@ -49,6 +81,7 @@ class SyntheticDataset(DomainModel):
     customers: list[str]
     events: list[CustomerEvent]
     evidence: list[EvidenceRecord]
+    identity_edges: list[IdentityEdge]
     ground_truth_customer_ids: list[str]
 
     @model_validator(mode="after")
@@ -70,6 +103,19 @@ class SyntheticDataset(DomainModel):
         if len(evidence_ids) != len(set(evidence_ids)):
             raise ValueError("evidence_id values must be unique")
 
+        edge_keys = [
+            (
+                edge.left.namespace,
+                edge.left.value,
+                edge.right.namespace,
+                edge.right.value,
+                edge.link_type,
+            )
+            for edge in self.identity_edges
+        ]
+        if len(edge_keys) != len(set(edge_keys)):
+            raise ValueError("identity edges must be unique")
+
         customer_ids = set(self.customers)
         if not set(self.ground_truth_customer_ids) <= customer_ids:
             raise ValueError("ground truth customers must belong to customers")
@@ -88,4 +134,34 @@ class SyntheticDataset(DomainModel):
                 raise ValueError("event and evidence source_id must align")
             if event.occurred_at != evidence.occurred_at:
                 raise ValueError("event and evidence occurred_at must align")
+
+        graph: dict[tuple[str, str], set[tuple[str, str]]] = {}
+        for edge in self.identity_edges:
+            left = (edge.left.namespace, edge.left.value)
+            right = (edge.right.namespace, edge.right.value)
+            graph.setdefault(left, set()).add(right)
+            graph.setdefault(right, set()).add(left)
+
+        canonical_nodes = {
+            ("canonical_customer", customer_id) for customer_id in self.customers
+        }
+        for event in self.events:
+            if not event.identities:
+                raise ValueError("every event must include a source identity")
+            pending = [
+                (identity.namespace, identity.value) for identity in event.identities
+            ]
+            visited: set[tuple[str, str]] = set()
+            while pending:
+                node = pending.pop()
+                if node in visited:
+                    continue
+                visited.add(node)
+                pending.extend(graph.get(node, set()) - visited)
+            resolved = visited & canonical_nodes
+            expected = {("canonical_customer", event.canonical_customer_id)}
+            if resolved != expected:
+                raise ValueError(
+                    "event identities must resolve to exactly one canonical customer"
+                )
         return self
