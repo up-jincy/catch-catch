@@ -695,6 +695,43 @@ describe("CustomerIntelligencePage", () => {
     },
   );
 
+  it("일반 run_failed를 Tool 실패와 구분해 안내한다", async () => {
+    const user = userEvent.setup();
+    const client = new ControlledClient();
+    render(<CustomerIntelligencePage client={client} />);
+
+    await startRun(user);
+    client.emit(
+      "run-1",
+      event({
+        id: 1,
+        type: "error",
+        data: {
+          code: "run_failed",
+          message: "분석 실행이 중단되었습니다.",
+        },
+      }),
+    );
+    client.emit(
+      "run-1",
+      event({ id: 2, type: "done", data: { status: "failed" } }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "분석 실행을 완료하지 못했어요" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("예상하지 못한 실행 문제가 발생했습니다."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "분석 도구 실행을 완료하지 못했어요" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("데이터 Source 조회 중 문제가 발생했습니다."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "다시 분석" })).toBeInTheDocument();
+  });
+
   it("VOC 제외 결과는 후보를 만들지 않고 0명과 Source 한계를 정직하게 안내한다", async () => {
     const user = userEvent.setup();
     const client = new ControlledClient();

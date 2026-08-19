@@ -63,10 +63,16 @@ function failurePresentation(code: string | null): FailurePresentation {
       guidance: "분석 응답 계약을 확인할 수 없어 안전하게 결과를 숨겼습니다.",
     };
   }
-  if (code === "tool_execution_failed" || code === "run_failed") {
+  if (code === "tool_execution_failed") {
     return {
       heading: "분석 도구 실행을 완료하지 못했어요",
       guidance: "데이터 Source 조회 중 문제가 발생했습니다.",
+    };
+  }
+  if (code === "run_failed") {
+    return {
+      heading: "분석 실행을 완료하지 못했어요",
+      guidance: "예상하지 못한 실행 문제가 발생했습니다.",
     };
   }
   if (
