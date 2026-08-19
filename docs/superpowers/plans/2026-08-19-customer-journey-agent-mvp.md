@@ -108,13 +108,15 @@ from customer_signal.config import Settings
 
 
 def test_settings_default_to_fixture_without_api_key(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.delenv("AGENT_MODE", raising=False)
 
     settings = Settings()
 
     assert settings.resolved_agent_mode == "fixture"
-    assert settings.gemini_model == "gemini-3.6-flash"
+    assert settings.gemini_model == "gemini-3.7-flash"
+    assert settings.gemini_fallback_model == "gemini-3.6-flash"
     assert settings.api_port == 8000
 ```
 
@@ -177,7 +179,7 @@ target-version = "py312"
 from pathlib import Path
 from typing import Literal
 
-from pydantic import computed_field
+from pydantic import AliasChoices, Field, SecretStr, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -185,8 +187,12 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     agent_mode: Literal["auto", "fixture", "gemini"] = "auto"
-    google_api_key: str | None = None
-    gemini_model: str = "gemini-3.6-flash"
+    gemini_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    )
+    gemini_model: str = "gemini-3.7-flash"
+    gemini_fallback_model: str = "gemini-3.6-flash"
     database_path: Path = Path("data/generated/customer_signal.duckdb")
     api_host: str = "127.0.0.1"
     api_port: int = 8000
@@ -199,7 +205,10 @@ class Settings(BaseSettings):
             return "fixture"
         if self.agent_mode == "gemini":
             return "gemini"
-        return "gemini" if self.google_api_key else "fixture"
+        has_api_key = bool(
+            self.gemini_api_key and self.gemini_api_key.get_secret_value().strip()
+        )
+        return "gemini" if has_api_key else "fixture"
 ```
 
 - [ ] **Step 5: 환경 설치와 테스트 통과 확인**

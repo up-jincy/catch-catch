@@ -65,7 +65,7 @@ flowchart LR
     ANALYSIS --> DB
 ```
 
-`GOOGLE_API_KEY`가 있고 `AGENT_MODE=gemini`이면 DeepAgents Coordinator가 MCP Tool을 선택합니다.
+`GEMINI_API_KEY`가 있고 `AGENT_MODE=gemini`이면 DeepAgents Coordinator가 MCP Tool을 선택합니다.
 그 외에는 `AGENT_MODE=fixture`가 같은 Analysis Service를 정해진 순서로 호출합니다.
 Fixture 모드는 화면에 표시해 실제 모델 실행으로 오해하지 않게 합니다.
 
@@ -164,6 +164,7 @@ UI는 단일 반응형 페이지로 구성합니다.
 - `langchain-google-genai==4.3.4`
 - `fastmcp==3.4.7`, `mcp==1.29.0`
 - `fastapi==0.140.8`, `duckdb==1.5.5`
+- Gemini 기본 모델 `gemini-3.7-flash`, Provider fallback `gemini-3.6-flash`
 - Node.js `20.18.1`
 - Next.js `16.3.x`, React `19.x`, TypeScript `5.x`
 - Backend `http://localhost:8000`, Frontend `http://localhost:3000`
