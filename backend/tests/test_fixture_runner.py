@@ -379,6 +379,30 @@ async def test_fixture_runner_rejects_a_different_scenario_wrapped_in_supported_
     assert [event.type for event in events] == ["error"]
 
 
+@pytest.mark.parametrize(
+    "question",
+    [
+        "검색 실패 후 문의한 고객의 평균 나이는?",
+        "검색 실패 후 문의한 고객의 주소를 알려 줘",
+        "검색 실패 후 상담한 고객의 전화번호를 알려 줘",
+        "검색 실패 후 고객센터에 문의한 고객의 수익은 얼마야?",
+    ],
+)
+async def test_fixture_runner_rejects_attribute_pivots_wrapped_in_supported_terms(
+    fixture_runner: FixtureRunner,
+    question: str,
+) -> None:
+    events: list[RunnerEvent] = []
+
+    with pytest.raises(UnsupportedQuestionError):
+        await fixture_runner.run(
+            _request(question=question),
+            emit=events.append,
+        )
+
+    assert [event.type for event in events] == ["error"]
+
+
 async def test_fixture_runner_rejects_unrelated_question(
     fixture_runner: FixtureRunner,
 ) -> None:
