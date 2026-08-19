@@ -35,6 +35,7 @@ from customer_signal.agent.contracts import (
     UnsupportedClaimError,
 )
 from customer_signal.agent.facts import build_run_facts
+from customer_signal.agent.report_composer import compose_verified_report
 from customer_signal.agent.validator import validate_report
 from customer_signal.analytics.models import (
     AggregateResult,
@@ -71,6 +72,14 @@ _REQUIRED_TOOLS = frozenset(
         "rank_customers",
     }
 )
+_BOUNDED_TOOLS = frozenset(
+    {
+        "aggregate_events",
+        "match_journey_pattern",
+        "rank_customers",
+        "get_customer_journey",
+    }
+)
 _DEEP_AGENT_EXCLUDED_TOOLS = frozenset(
     {
         "ls",
@@ -90,8 +99,12 @@ Use only the supplied read-only customer_signal MCP tools for data claims.
 Call each MCP tool at most once and make no more than six MCP calls total.
 Use the exact request time range and enabled source allowlist.
 Always call catalog_sources, aggregate_events(group_by='topic'),
-match_journey_pattern, and rank_customers. You may additionally call exactly one
-get_customer_journey and one get_evidence as a pair for a returned customer.
+match_journey_pattern, and rank_customers. When match_journey_pattern returns a
+positive customer_count, you MUST call get_customer_journey exactly once for the
+first matched customer, then MUST call get_evidence exactly once for evidence IDs
+shared by that Journey and the representative evidence allowlist. When
+customer_count is zero, omit both detail calls.
+Omit bounded-tool limits or set them to exactly the integer 100.
 Never invent customer IDs, evidence IDs, result IDs, counts, scores, or sources.
 Return only the InsightReport structured response. Do not expose reasoning or tool raw data.
 """
@@ -265,6 +278,13 @@ class GeminiRunner:
             return agent
 
     def _validate_scope(self, capture: _RunCapture, request: MCPToolCallRequest) -> None:
+        if request.name in _BOUNDED_TOOLS and "limit" in request.args:
+            limit = request.args["limit"]
+            if type(limit) is not int or limit != 100:
+                raise GeminiRunnerError(
+                    "gemini_tool_policy_failed",
+                    "Gemini bounded Tool limit은 100이어야 합니다.",
+                )
         if request.name == "get_evidence":
             evidence_ids = request.args.get("evidence_ids")
             journey = capture.results.get("get_customer_journey")
@@ -453,32 +473,55 @@ class GeminiRunner:
                 "gemini_tool_policy_failed",
                 "Gemini Journey와 Evidence Tool은 함께 호출해야 합니다.",
             )
+        matched = cast(PatternMatchResult, capture.results["match_journey_pattern"])
+        has_positive_matches = matched.customer_count > 0
+        if has_positive_matches and optional_tools != {"get_customer_journey", "get_evidence"}:
+            raise GeminiRunnerError(
+                "gemini_tool_policy_failed",
+                "양수 Gemini 결과에는 Journey와 Evidence Tool이 필요합니다.",
+            )
+        if not has_positive_matches and optional_tools:
+            raise GeminiRunnerError(
+                "gemini_tool_policy_failed",
+                "0명 Gemini 결과는 네 개의 집계 Tool로 완료해야 합니다.",
+            )
         structured = state.get("structured_response")
         try:
             if isinstance(structured, InsightReport):
-                report = structured
+                draft = structured
             else:
-                report = InsightReport.model_validate_json(
+                draft = InsightReport.model_validate_json(
                     json.dumps(structured, ensure_ascii=False)
                 )
             if (
-                report.scope.start_at != capture.request.start_at
-                or report.scope.end_at != capture.request.end_at
-                or report.scope.enabled_sources != list(capture.request.enabled_sources)
+                draft.scope.start_at != capture.request.start_at
+                or draft.scope.end_at != capture.request.end_at
+                or draft.scope.enabled_sources != list(capture.request.enabled_sources)
             ):
                 raise UnsupportedClaimError("Gemini 보고서 Scope가 Run 요청과 일치하지 않습니다.")
             journey = cast(
                 CustomerJourneyResult | None,
                 capture.results.get("get_customer_journey"),
             )
+            evidence = cast(EvidenceResult | None, capture.results.get("get_evidence"))
+            catalog = cast(CatalogSourcesResult, capture.results["catalog_sources"])
+            aggregate = cast(AggregateResult, capture.results["aggregate_events"])
+            report = compose_verified_report(
+                capture.request,
+                catalog=catalog,
+                aggregate=aggregate,
+                matched=matched,
+                journey=journey,
+                evidence=evidence,
+            )
             facts = build_run_facts(
                 capture.request,
-                catalog=cast(CatalogSourcesResult, capture.results["catalog_sources"]),
-                aggregate=cast(AggregateResult, capture.results["aggregate_events"]),
-                matched=cast(PatternMatchResult, capture.results["match_journey_pattern"]),
+                catalog=catalog,
+                aggregate=aggregate,
+                matched=matched,
                 ranked=cast(RankCustomersResult, capture.results["rank_customers"]),
                 journey=journey,
-                evidence=cast(EvidenceResult | None, capture.results.get("get_evidence")),
+                evidence=evidence,
                 representative_customer_id=(journey.customer_id if journey is not None else None),
             )
             self._validator(report, facts)

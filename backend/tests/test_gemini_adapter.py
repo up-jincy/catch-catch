@@ -39,12 +39,12 @@ PRIMARY_MODEL = "gemini-3.7-flash"
 FALLBACK_MODEL = "gemini-3.6-flash"
 
 
-def _request() -> RunRequest:
+def _request(*, enabled_sources: list[str] | None = None) -> RunRequest:
     return RunRequest(
         question="AI 검색에서 해결하지 못하고 고객센터에 문의한 고객이 몇 명이야?",
         start_at=START_AT,
         end_at=END_AT,
-        enabled_sources=ALL_SOURCES,
+        enabled_sources=enabled_sources if enabled_sources is not None else ALL_SOURCES,
     )
 
 
@@ -465,6 +465,182 @@ async def test_duplicate_mcp_tool_call_is_rejected_before_the_second_request(
 
     assert caught.value.code == "gemini_tool_policy_failed"
     assert [event.type for event in events] == ["plan", "tool_started", "tool_completed"]
+
+
+async def test_bounded_mcp_tools_accept_only_omitted_or_exact_integer_100_limits(
+    prepared_analysis: _PreparedAnalysis,
+) -> None:
+    bounded_tools = {
+        "aggregate_events",
+        "match_journey_pattern",
+        "rank_customers",
+        "get_customer_journey",
+    }
+    for tool_name in bounded_tools:
+        for invalid_limit in (1, "100", True):
+            tampered_calls = [
+                (
+                    name,
+                    {**arguments, "limit": invalid_limit} if name == tool_name else dict(arguments),
+                    response,
+                )
+                for name, arguments, response in prepared_analysis.calls
+            ]
+            tampered = _PreparedAnalysis(
+                fixture_outcome=prepared_analysis.fixture_outcome,
+                report=prepared_analysis.report,
+                calls=tampered_calls,
+            )
+            runner, _mcp_factory, _model_factory, _agent_factory = _runner(tampered)
+            events: list[RunnerEvent] = []
+
+            with pytest.raises(GeminiRunnerError) as caught:
+                await runner.run(_request(), emit=events.append)
+
+            assert caught.value.code == "gemini_tool_policy_failed"
+            assert tool_name not in [
+                event.payload["tool"] for event in events if event.type == "tool_started"
+            ]
+
+    exact_limit_calls = [
+        (
+            name,
+            {**arguments, "limit": 100} if name in bounded_tools else dict(arguments),
+            response,
+        )
+        for name, arguments, response in prepared_analysis.calls
+    ]
+    exact = _PreparedAnalysis(
+        fixture_outcome=prepared_analysis.fixture_outcome,
+        report=prepared_analysis.report,
+        calls=exact_limit_calls,
+    )
+    runner, _mcp_factory, _model_factory, _agent_factory = _runner(exact)
+
+    outcome = await runner.run(_request(), emit=lambda _event: None)
+
+    assert outcome.agent_mode == "gemini"
+
+
+def _empty_fabricated_draft(report: InsightReport) -> InsightReport:
+    draft = report.model_copy(deep=True)
+    draft.headline = "검색 실패 후 문의로 이어진 고객 42명"
+    draft.executive_summary = "근거 없이 42명이라고 주장합니다."
+    draft.metrics = []
+    draft.findings = []
+    draft.signal_contributions = []
+    draft.ranked_customers = []
+    draft.representative_journeys = []
+    draft.representative_journey_ids = []
+    draft.recommendations = []
+    draft.sources_used = []
+    draft.limitations = []
+    return draft
+
+
+async def test_positive_run_rebuilds_an_empty_fabricated_draft_from_mcp_results(
+    prepared_analysis: _PreparedAnalysis,
+) -> None:
+    fabricated = _PreparedAnalysis(
+        fixture_outcome=prepared_analysis.fixture_outcome,
+        report=_empty_fabricated_draft(prepared_analysis.report),
+        calls=prepared_analysis.calls,
+    )
+    runner, _mcp_factory, _model_factory, _agent_factory = _runner(fabricated)
+
+    outcome = await runner.run(_request(), emit=lambda _event: None)
+
+    assert outcome.report == prepared_analysis.fixture_outcome.report
+    assert outcome.report.headline == "검색 실패 후 문의로 이어진 고객 6명"
+    assert outcome.report.metrics[0].value == 6
+    assert outcome.report.findings
+    assert outcome.report.recommendations
+    assert outcome.report.ranked_customers
+    assert outcome.report.representative_journeys
+
+
+async def test_positive_run_requires_journey_and_evidence_tool_provenance(
+    prepared_analysis: _PreparedAnalysis,
+) -> None:
+    incomplete = _PreparedAnalysis(
+        fixture_outcome=prepared_analysis.fixture_outcome,
+        report=_empty_fabricated_draft(prepared_analysis.report),
+        calls=prepared_analysis.calls[:4],
+    )
+    runner, _mcp_factory, _model_factory, _agent_factory = _runner(incomplete)
+
+    with pytest.raises(GeminiRunnerError) as caught:
+        await runner.run(_request(), emit=lambda _event: None)
+
+    assert caught.value.code == "gemini_tool_policy_failed"
+
+
+async def test_zero_match_voc_off_run_completes_from_four_tools(
+    prepared_analysis: _PreparedAnalysis,
+    repository: DuckDBRepository,
+) -> None:
+    request = _request(enabled_sources=["search_history", "search_feedback"])
+    service = AnalyticsService(repository)
+    scope = {
+        "start_at": request.start_at.isoformat(),
+        "end_at": request.end_at.isoformat(),
+        "enabled_sources": list(request.enabled_sources),
+    }
+    catalog = service.catalog_sources(request.start_at, request.end_at)
+    aggregate = service.aggregate_events(
+        request.start_at,
+        request.end_at,
+        request.enabled_sources,
+        group_by="topic",
+    )
+    matched = service.match_journey_pattern(
+        request.start_at,
+        request.end_at,
+        request.enabled_sources,
+    )
+    ranked = service.rank_customers(
+        request.start_at,
+        request.end_at,
+        request.enabled_sources,
+    )
+    assert matched.customer_count == 0
+    results = [
+        ("catalog_sources", {"start_at": scope["start_at"], "end_at": scope["end_at"]}, catalog),
+        ("aggregate_events", {**scope, "group_by": "topic"}, aggregate),
+        ("match_journey_pattern", scope, matched),
+        ("rank_customers", scope, ranked),
+    ]
+    calls = [
+        (
+            name,
+            arguments,
+            CallToolResult(content=[], structuredContent=result.model_dump(mode="json")),
+        )
+        for name, arguments, result in results
+    ]
+    draft = _empty_fabricated_draft(prepared_analysis.report)
+    draft.scope.enabled_sources = list(request.enabled_sources)
+    zero = _PreparedAnalysis(
+        fixture_outcome=prepared_analysis.fixture_outcome,
+        report=draft,
+        calls=calls,
+    )
+    runner, _mcp_factory, _model_factory, _agent_factory = _runner(zero)
+
+    outcome = await runner.run(request, emit=lambda _event: None)
+
+    assert list(outcome.facts.tool_result_ids) == [
+        "catalog_sources",
+        "aggregate_events",
+        "match_journey_pattern",
+        "rank_customers",
+    ]
+    assert outcome.report.headline == "검색 실패 후 문의로 이어진 고객 0명"
+    assert outcome.report.metrics[0].value == 0
+    assert outcome.report.ranked_customers == []
+    assert outcome.report.representative_journeys == []
+    assert outcome.report.findings == []
+    assert outcome.report.recommendations == []
 
 
 async def test_evidence_must_match_the_captured_journey_event_provenance(
