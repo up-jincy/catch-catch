@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-from typing import cast
+from typing import Literal, cast
 
 from customer_signal.agent.contracts import (
     AnalysisRunner,
     RunRequest,
+    RunnerOutcome,
     UnsupportedClaimError,
     UnsupportedQuestionError,
 )
+from customer_signal.agent.gemini import GeminiRunnerError
 from customer_signal.analytics.models import CustomerJourneyResult, EvidenceResult
 from customer_signal.analytics.service import AnalyticsService
 from customer_signal.data.repository import EntityNotFoundError
@@ -24,6 +26,21 @@ class RunResourceNotFoundError(LookupError):
 
 class RunNotCompletedError(RuntimeError):
     """Raised when detail access is attempted before successful completion."""
+
+
+_GEMINI_ERROR_MESSAGES = {
+    "gemini_not_configured": "Gemini API Key가 설정되지 않았습니다.",
+    "gemini_model_not_found": "사용 가능한 Gemini 분석 모델을 찾지 못했습니다.",
+    "gemini_provider_failed": "Gemini 분석 서비스 호출에 실패했습니다.",
+    "gemini_validation_failed": "Gemini 분석 결과 검증에 실패했습니다.",
+    "gemini_tool_policy_failed": "Gemini Tool 호출 정책 검증에 실패했습니다.",
+    "gemini_tool_execution_failed": "Gemini MCP Tool 실행에 실패했습니다.",
+}
+
+
+def _safe_gemini_error(error: GeminiRunnerError) -> RunError:
+    code = error.code if error.code in _GEMINI_ERROR_MESSAGES else "gemini_provider_failed"
+    return RunError(code=code, message=_GEMINI_ERROR_MESSAGES[code])
 
 
 def _error_from_payload(payload: dict[str, object]) -> RunError:
@@ -41,6 +58,8 @@ def _error_from_payload(payload: dict[str, object]) -> RunError:
 
 
 def _error_from_exception(error: Exception) -> RunError:
+    if isinstance(error, GeminiRunnerError):
+        return _safe_gemini_error(error)
     if isinstance(error, UnsupportedQuestionError):
         return RunError(code=error.code, message=str(error))
     if isinstance(error, UnsupportedClaimError):
@@ -54,11 +73,31 @@ class RunCoordinator:
     def __init__(
         self,
         *,
-        runner: AnalysisRunner,
+        runner: AnalysisRunner | None = None,
+        agent_mode: Literal["auto", "fixture", "gemini"] = "fixture",
+        fixture_runner: AnalysisRunner | None = None,
+        gemini_runner: AnalysisRunner | None = None,
+        gemini_timeout_seconds: float = 45.0,
         analytics: AnalyticsService,
         store: RunStore,
     ) -> None:
-        self._runner = runner
+        if gemini_timeout_seconds <= 0:
+            raise ValueError("gemini_timeout_seconds must be positive")
+        if runner is not None:
+            if fixture_runner is not None or gemini_runner is not None:
+                raise ValueError("runner cannot be combined with mode-specific runners")
+            self._runner = runner
+            self._agent_mode: Literal["fixed", "auto", "fixture", "gemini"] = "fixed"
+        else:
+            if agent_mode in {"auto", "fixture"} and fixture_runner is None:
+                raise ValueError("fixture_runner is required for fixture and auto modes")
+            if agent_mode == "gemini" and gemini_runner is None:
+                raise ValueError("gemini_runner is required for gemini mode")
+            self._runner = None
+            self._agent_mode = agent_mode
+        self._fixture_runner = fixture_runner
+        self._gemini_runner = gemini_runner
+        self._gemini_timeout_seconds = gemini_timeout_seconds
         self._analytics = analytics
         self._store = store
         self._tasks: dict[str, asyncio.Task[None]] = {}
@@ -173,7 +212,7 @@ class RunCoordinator:
             await self._store.append_event(run_id, "done", {"status": "failed"})
 
         try:
-            outcome = await self._runner.run(request, emit=emit)
+            outcome = await self._run_selected(request, emit=emit)
         except asyncio.CancelledError:
             public_error = reported_error or RunError(
                 code="run_cancelled",
@@ -196,6 +235,76 @@ class RunCoordinator:
                 )
             await self._store.mark_completed(run_id, outcome)
             await self._store.append_event(run_id, "done", {"status": "completed"})
+
+    async def _run_selected(
+        self,
+        request: RunRequest,
+        *,
+        emit,
+    ) -> RunnerOutcome:
+        if self._agent_mode == "fixed":
+            assert self._runner is not None
+            return await self._runner.run(request, emit=emit)
+        if self._agent_mode == "fixture":
+            assert self._fixture_runner is not None
+            return await self._fixture_runner.run(request, emit=emit)
+        if self._agent_mode == "gemini":
+            return await self._run_gemini(request, emit=emit)
+
+        fallback_code = "gemini_not_configured"
+        if self._gemini_runner is not None:
+            try:
+                async with asyncio.timeout(self._gemini_timeout_seconds):
+                    return await self._run_gemini(request, emit=emit)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                if isinstance(error, GeminiRunnerError):
+                    fallback_code = _safe_gemini_error(error).code
+                else:
+                    fallback_code = "gemini_provider_failed"
+        await emit(
+            RunnerEvent(
+                type="fallback",
+                payload={
+                    "from": "gemini",
+                    "to": "fixture",
+                    "code": fallback_code,
+                    "message": "Gemini 분석을 사용할 수 없어 fixture 모드로 전환했습니다.",
+                },
+            )
+        )
+        assert self._fixture_runner is not None
+        return await self._fixture_runner.run(request, emit=emit)
+
+    async def _run_gemini(self, request: RunRequest, *, emit) -> RunnerOutcome:
+        if self._gemini_runner is None:
+            raise GeminiRunnerError(
+                "gemini_not_configured",
+                "Gemini 분석 모드가 설정되지 않았습니다.",
+            )
+        reported_error: RunnerEvent | None = None
+        pending_result: RunnerEvent | None = None
+
+        async def emit_without_error(event: RunnerEvent) -> None:
+            nonlocal pending_result, reported_error
+            if event.type == "error":
+                reported_error = event
+                return
+            if event.type == "result":
+                pending_result = event
+                return
+            await emit(event)
+
+        outcome = await self._gemini_runner.run(request, emit=emit_without_error)
+        if reported_error is not None:
+            raise GeminiRunnerError(
+                "gemini_provider_failed",
+                "Gemini 분석 서비스 호출에 실패했습니다.",
+            )
+        if pending_result is not None:
+            await emit(pending_result)
+        return outcome
 
     def _completed_outcome(self, run_id: str):
         snapshot = self._store.get_snapshot(run_id)

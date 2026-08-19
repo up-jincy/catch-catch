@@ -12,15 +12,13 @@ from fastmcp import Client, FastMCP
 
 from customer_signal.agent.contracts import (
     EventEmitter,
-    MetricFactValue,
     ReportValidator,
-    RunFacts,
     RunRequest,
     RunnerOutcome,
-    ToolName,
     UnsupportedClaimError,
     UnsupportedQuestionError,
 )
+from customer_signal.agent.facts import SIGNAL_SOURCES, build_run_facts
 from customer_signal.agent.validator import validate_report
 from customer_signal.analytics.models import (
     AggregateResult,
@@ -57,12 +55,6 @@ _SUPPORTED_INTENT_TERMS = (
     "문의",
     "리서치",
 )
-_SIGNAL_SOURCES: dict[str, SourceId] = {
-    "failed_search": "search_history",
-    "repeated_failed_search": "search_history",
-    "negative_feedback": "search_feedback",
-    "unresolved_voc": "voc",
-}
 _PLAN_STEPS = [
     "분석 가능한 Source와 기간 확인",
     "Topic별 이벤트 집계",
@@ -92,76 +84,6 @@ async def _emit(emit: EventEmitter, event: RunnerEvent) -> None:
 def _supports(question: str) -> bool:
     normalized = "".join(question.casefold().split())
     return any(term in normalized for term in _SUPPORTED_INTENT_TERMS)
-
-
-def _distinct_metric_values(values: Sequence[MetricFactValue]) -> tuple[MetricFactValue, ...]:
-    distinct: list[MetricFactValue] = []
-    for value in values:
-        if not any(type(value) is type(existing) and value == existing for existing in distinct):
-            distinct.append(value)
-    return tuple(distinct)
-
-
-def _metric_facts(
-    catalog: CatalogSourcesResult,
-    aggregate: AggregateResult,
-    matched: PatternMatchResult,
-    ranked: RankCustomersResult,
-    journey: CustomerJourneyResult | None,
-    evidence: EvidenceResult | None,
-) -> dict[str, tuple[MetricFactValue, ...]]:
-    facts: dict[str, tuple[MetricFactValue, ...]] = {}
-
-    def add(result_id: str, values: Sequence[MetricFactValue]) -> None:
-        if result_id not in facts:
-            facts[result_id] = _distinct_metric_values(values)
-
-    add(
-        catalog.result_id,
-        [
-            catalog.stats.scanned_rows,
-            catalog.stats.returned_rows,
-            *(source.row_count for source in catalog.sources),
-        ],
-    )
-    add(
-        aggregate.result_id,
-        [
-            aggregate.stats.scanned_rows,
-            aggregate.stats.returned_rows,
-            *(bucket.event_count for bucket in aggregate.buckets),
-            *(bucket.customer_count for bucket in aggregate.buckets),
-        ],
-    )
-    add(
-        matched.result_id,
-        [
-            matched.candidate_count,
-            matched.customer_count,
-            matched.stats.scanned_rows,
-            matched.stats.returned_rows,
-        ],
-    )
-    add(
-        ranked.result_id,
-        [
-            ranked.candidate_count,
-            ranked.customer_count,
-            ranked.stats.scanned_rows,
-            ranked.stats.returned_rows,
-        ],
-    )
-    if journey is not None:
-        add(
-            journey.result_id,
-            [journey.stats.scanned_rows, journey.stats.returned_rows],
-        )
-    if evidence is not None:
-        add(
-            evidence.result_id,
-            [evidence.stats.scanned_rows, evidence.stats.returned_rows],
-        )
-    return facts
 
 
 def _assert_selected_evidence(
@@ -198,9 +120,7 @@ def _bind_representative_journey(
         None,
     )
     if selected_evidence_id is None:
-        raise UnsupportedClaimError(
-            "대표 고객과 Journey가 공유하는 Evidence ID가 없습니다."
-        )
+        raise UnsupportedClaimError("대표 고객과 Journey가 공유하는 Evidence ID가 없습니다.")
     selected_events = [
         event for event in journey.events if event.evidence_id == selected_evidence_id
     ]
@@ -222,7 +142,7 @@ def _source_contributions(
 
     grouped: dict[SourceId, list[Signal]] = {}
     for signal in matched.customers[0].signals:
-        source_id = _SIGNAL_SOURCES.get(signal.code)
+        source_id = SIGNAL_SOURCES.get(signal.code)
         if source_id is None or source_id not in enabled_sources:
             continue
         grouped.setdefault(source_id, []).append(signal.model_copy(deep=True))
@@ -289,9 +209,7 @@ def _build_report(
         ]
     else:
         headline = "검색 실패 후 문의로 이어진 고객 0명"
-        executive_summary = (
-            "활성 Source 범위에서는 완전한 Journey 패턴이 확인되지 않았습니다."
-        )
+        executive_summary = "활성 Source 범위에서는 완전한 Journey 패턴이 확인되지 않았습니다."
         findings = []
         if selected_evidence_id is None:
             recommendations = []
@@ -312,8 +230,7 @@ def _build_report(
     elif journey is None:
         limitations.append("대표 Journey로 확인할 고객 후보가 없습니다.")
     limitations.extend(
-        f"{source_id} Source가 없어 완전한 패턴 판단이 제한됩니다."
-        for source_id in missing_sources
+        f"{source_id} Source가 없어 완전한 패턴 판단이 제한됩니다." for source_id in missing_sources
     )
     for source_id in request.enabled_sources:
         if source_id not in present_sources and source_id not in missing_sources:
@@ -341,101 +258,12 @@ def _build_report(
         signal_contributions=_source_contributions(matched, request.enabled_sources),
         ranked_customers=[customer.model_copy(deep=True) for customer in matched.customers],
         representative_journeys=(
-            [event.model_copy(deep=True) for event in journey.events]
-            if journey is not None
-            else []
+            [event.model_copy(deep=True) for event in journey.events] if journey is not None else []
         ),
         representative_journey_ids=[journey.result_id] if journey is not None else [],
         recommendations=recommendations,
         sources_used=sources_used,
         limitations=limitations,
-    )
-
-
-def _build_facts(
-    request: RunRequest,
-    *,
-    catalog: CatalogSourcesResult,
-    aggregate: AggregateResult,
-    matched: PatternMatchResult,
-    ranked: RankCustomersResult,
-    journey: CustomerJourneyResult | None,
-    evidence: EvidenceResult | None,
-    representative_customer_id: str | None,
-) -> RunFacts:
-    if (journey is None) != (evidence is None):
-        raise UnsupportedClaimError("Journey와 Evidence Tool 결과는 함께 존재해야 합니다.")
-    if journey is not None and journey.customer_id != representative_customer_id:
-        raise UnsupportedClaimError("대표 고객과 Journey 고객 ID가 일치하지 않습니다.")
-
-    allowed_evidence_ids = {
-        evidence_id
-        for customer in matched.customers
-        for evidence_id in customer.evidence_ids
-    }
-    if journey is not None:
-        allowed_evidence_ids.update(journey.evidence_ids)
-    allowed_customer_ids = {customer.customer_id for customer in ranked.customers}
-    allowed_customer_ids.update(matched.customer_ids)
-    if representative_customer_id is not None:
-        allowed_customer_ids.add(representative_customer_id)
-
-    tool_result_ids: dict[ToolName, str] = {
-        "catalog_sources": catalog.result_id,
-        "aggregate_events": aggregate.result_id,
-        "match_journey_pattern": matched.result_id,
-        "rank_customers": ranked.result_id,
-    }
-    if journey is not None and evidence is not None:
-        tool_result_ids["get_customer_journey"] = journey.result_id
-        tool_result_ids["get_evidence"] = evidence.result_id
-
-    fetched_evidence_ids = frozenset(evidence.evidence_ids if evidence is not None else [])
-    evidence_source_facts = (
-        {record.evidence_id: record.source_id for record in evidence.records}
-        if evidence is not None
-        else {}
-    )
-    evidence_customer_facts = (
-        {record.evidence_id: representative_customer_id for record in evidence.records}
-        if evidence is not None and representative_customer_id is not None
-        else {}
-    )
-
-    return RunFacts(
-        tool_result_ids=tool_result_ids,
-        allowed_customer_ids=frozenset(allowed_customer_ids),
-        allowed_evidence_ids=frozenset(allowed_evidence_ids),
-        fetched_evidence_ids=fetched_evidence_ids,
-        allowed_sources=frozenset(request.enabled_sources),
-        allowed_metric_values_by_result=_metric_facts(
-            catalog,
-            aggregate,
-            matched,
-            ranked,
-            journey,
-            evidence,
-        ),
-        ranked_customer_facts={
-            customer.customer_id: customer.model_copy(deep=True)
-            for customer in matched.customers
-        },
-        representative_journey_result_ids=(
-            frozenset([journey.result_id]) if journey is not None else frozenset()
-        ),
-        journey_event_facts=(
-            {event.event_id: event.model_copy(deep=True) for event in journey.events}
-            if journey is not None
-            else {}
-        ),
-        signal_source_facts={
-            signal.code: source_id
-            for customer in matched.customers
-            for signal in customer.signals
-            if (source_id := _SIGNAL_SOURCES.get(signal.code)) is not None
-        },
-        evidence_source_facts=evidence_source_facts,
-        evidence_customer_facts=evidence_customer_facts,
     )
 
 
@@ -498,9 +326,7 @@ class FixtureRunner:
         emit: EventEmitter,
     ) -> RunnerOutcome:
         if not _supports(request.question):
-            error = UnsupportedQuestionError(
-                "검색 실패와 고객 문의 Journey 질문만 지원합니다."
-            )
+            error = UnsupportedQuestionError("검색 실패와 고객 문의 Journey 질문만 지원합니다.")
             await _emit(
                 emit,
                 RunnerEvent(
@@ -598,7 +424,7 @@ class FixtureRunner:
                 journey=journey,
                 selected_evidence_id=selected_evidence_id,
             )
-            facts = _build_facts(
+            facts = build_run_facts(
                 request,
                 catalog=catalog,
                 aggregate=aggregate,

@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict
 
 from customer_signal.agent.contracts import RunRequest
 from customer_signal.agent.fixture import FixtureRunner
+from customer_signal.agent.gemini import GeminiRunner
 from customer_signal.analytics.models import CustomerJourneyResult, EvidenceResult
 from customer_signal.analytics.service import AnalyticsService
 from customer_signal.config import Settings
@@ -60,8 +61,18 @@ def _default_dependencies(settings: Settings) -> ApiDependencies:
     analytics = AnalyticsService(repository)
     mcp_server = create_mcp_server(analytics)
     store = RunStore()
+    api_key = (
+        settings.gemini_api_key.get_secret_value() if settings.gemini_api_key is not None else None
+    )
     coordinator = RunCoordinator(
-        runner=FixtureRunner(mcp_server),
+        agent_mode=settings.agent_mode,
+        fixture_runner=FixtureRunner(mcp_server),
+        gemini_runner=GeminiRunner(
+            api_key=api_key,
+            mcp_url=f"http://{settings.api_host}:{settings.api_port}/mcp/",
+            primary_model=settings.gemini_model,
+            fallback_model=settings.gemini_fallback_model,
+        ),
         analytics=analytics,
         store=store,
     )

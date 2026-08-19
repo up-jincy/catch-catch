@@ -146,7 +146,7 @@ class RunnerOutcome(RunnerContract):
 
     report: InsightReport
     facts: RunFacts
-    agent_mode: Literal["fixture"] = "fixture"
+    agent_mode: Literal["fixture", "gemini"] = "fixture"
 
 
 class AnalysisRunner(Protocol):
