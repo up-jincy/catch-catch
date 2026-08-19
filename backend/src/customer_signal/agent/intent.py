@@ -2,124 +2,62 @@
 
 from __future__ import annotations
 
+import re
 
-_SEARCH_INTENT_TERMS = ("검색",)
-_FAILED_OR_UNRESOLVED_TERMS = (
-    "검색실패",
-    "검색에실패",
-    "검색에서실패",
-    "검색으로실패",
-    "검색이실패",
-    "검색은실패",
-    "검색도실패",
-    "해결하지못",
-    "해결못",
-    "해결이안",
-    "해결안",
-    "해결되지않",
-    "해결되지못",
-    "미해결",
-    "찾지못",
-    "못찾",
-    "풀리지않",
-    "풀지못",
-    "답이없",
-    "답변이없",
-    "결과가없",
-    "결과없",
-    "만족하지못",
-    "불만족",
+_QUESTION_SEPARATORS = re.compile(r"[\s?!.。,]+")
+_NEGATED_FAILURE = re.compile(r"실패(?:하지(?:않|못)|(?:가|는|은)?아니)")
+_NEGATED_CONTACT = re.compile(
+    r"(?:문의|상담|접수)(?:"
+    r"(?:를|을)?하지(?:않|못)|"
+    r"(?:를|을)?받지(?:않|못)|"
+    r"(?:가|는|은)?아니"
+    r")|"
+    r"(?:고객(?:지원)?센터|콜센터)(?:에|로|까지)?(?:"
+    r"가지(?:않|못)|안간|못간|연결되지않"
+    r")"
 )
-_CONTACT_TRANSITION_TERMS = (
-    "고객센터에",
-    "고객센터로",
-    "고객센터까지",
-    "고객지원센터에",
-    "고객지원센터로",
-    "고객지원센터까지",
-    "콜센터",
-    "상담",
-    "문의",
-    "voc",
-)
-_OPPOSITE_INTENT_TERMS = (
-    "성공",
-    "해결완료",
-    "정상처리",
-    "정상적으로해결",
-    "문제없이",
-    "만족함",
-    "만족한",
-    "만족했",
-    "해결하고",
-    "해결한",
-    "해결된",
-    "해결됐",
-    "해결되어",
-    "해결되었",
-    "답을찾았",
-    "답변을얻었",
-    "답변을받았",
-)
-_OTHER_SCENARIO_TERMS = (
-    "신규가입",
-    "예측",
-    "전망",
-    "로밍",
-    "해지",
-    "인터넷품질",
-)
-_ATTRIBUTE_OR_AGGREGATION_PIVOT_TERMS = (
-    "평균",
-    "중앙값",
-    "합계",
-    "총액",
-    "최댓값",
-    "최솟값",
-    "비율",
-    "퍼센트",
-    "%",
-    "분포",
-    "상관",
-    "추이",
-    "나이",
-    "연령",
-    "성별",
-    "주소",
-    "전화번호",
-    "연락처",
-    "휴대폰",
-    "이메일",
-    "메일주소",
-    "생년월일",
-    "주민등록번호",
-    "매출",
-    "수익",
-    "소득",
-    "금액",
+_SUPPORTED_TARGET_JOURNEY = re.compile(
+    r"^(?:"
+    r"(?:ai)?검색(?:에|에서|으로|이|은|도)?실패|"
+    r"(?:ai)?검색(?:에|에서|으로)?(?:"
+    r"해결하지못|해결못|해결이안|해결안|해결되지않|해결되지못|미해결"
+    r")|"
+    r"(?:ai)?검색으로답을(?:찾지못|못찾)|"
+    r"검색결과로문제가(?:풀리지않|풀지못|해결되지않)|"
+    r"다시검색했지만(?:해결되지않|해결하지못|해결못)"
+    r")"
+    r"(?:후|뒤|한뒤|한후|하고|해|아|된뒤|된후|고)?"
+    r"(?:"
+    r"문의(?:한)?|"
+    r"상담(?:전환|한)|"
+    r"상담원에게문의한|"
+    r"고객(?:지원)?센터(?:에문의한|에연결된|로이동한|까지간)|"
+    r"콜센터(?:에문의한|로연결된|까지간)|"
+    r"voc를(?:접수한|남긴)"
+    r")"
+    r"(?:고객|이용자)"
+    r"(?:"
+    r"(?:은|는|이|가)?(?:"
+    r"몇명(?:이야|인가|인지|입니까|인가요)?|"
+    r"얼마나(?:돼|되는지|인지|입니까|인가요)?"
+    r")|"
+    r"수|"
+    r"(?:을|를)?(?:분석|리서치|확인)(?:해줘|해주세요)?|"
+    r"(?:여정|journey)(?:을|를)?(?:"
+    r"알려줘|알려주세요|분석해줘|분석해주세요|확인해줘|확인해주세요"
+    r")?|"
+    r"(?:은|는)?"
+    r")$"
 )
 
 
 def is_supported_target_journey_question(question: str) -> bool:
     """Return whether a question asks only for the bounded failure-to-contact Journey."""
 
-    normalized = "".join(question.casefold().split())
-    if any(term in normalized for term in _OTHER_SCENARIO_TERMS):
+    normalized = _QUESTION_SEPARATORS.sub("", question.casefold())
+    if _NEGATED_FAILURE.search(normalized) or _NEGATED_CONTACT.search(normalized):
         return False
-    if any(term in normalized for term in _ATTRIBUTE_OR_AGGREGATION_PIVOT_TERMS):
-        return False
-
-    resolution_scope = normalized
-    for term in _FAILED_OR_UNRESOLVED_TERMS:
-        resolution_scope = resolution_scope.replace(term, "")
-    if any(term in resolution_scope for term in _OPPOSITE_INTENT_TERMS):
-        return False
-
-    return (
-        any(term in normalized for term in _SEARCH_INTENT_TERMS)
-        and any(term in normalized for term in _FAILED_OR_UNRESOLVED_TERMS)
-        and any(term in normalized for term in _CONTACT_TRANSITION_TERMS)
-    )
+    return _SUPPORTED_TARGET_JOURNEY.fullmatch(normalized) is not None
 
 
 __all__ = ["is_supported_target_journey_question"]

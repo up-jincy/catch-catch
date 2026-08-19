@@ -464,6 +464,41 @@ def test_attribute_pivot_never_publishes_fixed_journey_report(
 
 
 @pytest.mark.parametrize(
+    "question",
+    [
+        "검색 실패 후 문의한 고객의 전화가 몇 번이야?",
+        "검색 실패 후 문의한 고객의 연락 가능한 번호",
+        "검색 실패 후 문의한 고객의 이름",
+        "검색 실패 후 문의한 고객에게 전화해 줘",
+        "검색에 실패하지 않고 고객센터에 문의한 고객은?",
+        "검색 실패가 아닌데 문의한 고객은?",
+        "검색에 실패한 고객 중 문의하지 않은 고객은?",
+        "검색 실패 후 고객센터에 가지 않은 고객",
+    ],
+)
+def test_semantic_bypass_never_publishes_fixed_journey_report(
+    tmp_path: Path,
+    question: str,
+) -> None:
+    with TestClient(_create_app(tmp_path / "customer-signal.duckdb")) as client:
+        accepted = client.post(
+            "/api/runs",
+            json=_run_request(question=question),
+        ).json()
+        snapshot = _wait_for_terminal(client, accepted["status_url"])
+        events = _parse_sse(client.get(accepted["events_url"]).text)
+
+    assert snapshot["status"] == "failed"
+    assert snapshot["report"] is None
+    assert snapshot["error"] == {
+        "code": "unsupported_question",
+        "message": "검색 실패와 고객 문의 Journey 질문만 지원합니다.",
+    }
+    assert [event["event"] for event in events] == ["error", "done"]
+    assert all(event["event"] != "result" for event in events)
+
+
+@pytest.mark.parametrize(
     "payload",
     [
         {},

@@ -403,6 +403,54 @@ async def test_fixture_runner_rejects_attribute_pivots_wrapped_in_supported_term
     assert [event.type for event in events] == ["error"]
 
 
+@pytest.mark.parametrize(
+    "question",
+    [
+        "검색 실패 후 문의한 고객의 전화가 몇 번이야?",
+        "검색 실패 후 문의한 고객의 연락 가능한 번호",
+        "검색 실패 후 문의한 고객의 이름",
+        "검색 실패 후 문의한 고객에게 전화해 줘",
+    ],
+)
+async def test_fixture_runner_rejects_non_journey_targets_with_supported_tokens(
+    fixture_runner: FixtureRunner,
+    question: str,
+) -> None:
+    events: list[RunnerEvent] = []
+
+    with pytest.raises(UnsupportedQuestionError):
+        await fixture_runner.run(
+            _request(question=question),
+            emit=events.append,
+        )
+
+    assert [event.type for event in events] == ["error"]
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "검색에 실패하지 않고 고객센터에 문의한 고객은?",
+        "검색 실패가 아닌데 문의한 고객은?",
+        "검색에 실패한 고객 중 문의하지 않은 고객은?",
+        "검색 실패 후 고객센터에 가지 않은 고객",
+    ],
+)
+async def test_fixture_runner_rejects_negated_failure_or_contact_conditions(
+    fixture_runner: FixtureRunner,
+    question: str,
+) -> None:
+    events: list[RunnerEvent] = []
+
+    with pytest.raises(UnsupportedQuestionError):
+        await fixture_runner.run(
+            _request(question=question),
+            emit=events.append,
+        )
+
+    assert [event.type for event in events] == ["error"]
+
+
 async def test_fixture_runner_rejects_unrelated_question(
     fixture_runner: FixtureRunner,
 ) -> None:
