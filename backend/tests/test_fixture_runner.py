@@ -301,6 +301,7 @@ async def test_fixture_runner_is_deterministic_for_the_same_request(
 @pytest.mark.parametrize(
     "question",
     [
+        "AI 검색 실패 후 고객센터까지 문의한 고객이 얼마나 돼?",
         "검색 실패 뒤 상담 전환 고객을 분석해 줘",
         "AI 검색으로 답을 찾지 못해 고객 지원 센터에 연결된 이용자는 몇 명이야?",
         "검색 결과로 문제가 풀리지 않아 상담원에게 문의한 고객 여정을 알려 줘",
