@@ -88,6 +88,7 @@ button:disabled {
   width: min(100%, 1600px);
   min-height: 100vh;
   margin: 0 auto;
+  overflow-x: clip;
   padding: 0 32px 32px;
 }
 
