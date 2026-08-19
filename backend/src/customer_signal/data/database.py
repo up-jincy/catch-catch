@@ -12,7 +12,15 @@ import duckdb
 from customer_signal.domain.models import SyntheticDataset
 
 
+DATABASE_SCHEMA_VERSION = 1
+SYNTHETIC_DATASET_VERSION = 1
+
 _SCHEMA = """
+CREATE TABLE database_metadata (
+    schema_version INTEGER NOT NULL,
+    dataset_version INTEGER NOT NULL
+);
+
 CREATE TABLE customers (
     customer_id VARCHAR PRIMARY KEY
 );
@@ -59,6 +67,48 @@ CREATE TABLE identity_edges (
 );
 """
 
+_REQUIRED_TABLES = frozenset(
+    {
+        "database_metadata",
+        "customers",
+        "evidence",
+        "events",
+        "identity_edges",
+    }
+)
+_REQUIRED_EVENT_COLUMNS = frozenset(
+    {
+        "event_id",
+        "evidence_id",
+        "source_id",
+        "occurred_at",
+        "event_type",
+        "action",
+        "topic",
+        "outcome",
+        "text",
+        "identities",
+        "canonical_customer_id",
+        "attributes",
+    }
+)
+_REQUIRED_SOURCE_IDS = frozenset(
+    {
+        "search_history",
+        "search_feedback",
+        "digital_behavior",
+        "subscription",
+        "voc",
+    }
+)
+_REQUIRED_LINK_TYPES = frozenset({"EXACT", "DECLARED", "SYNTHETIC"})
+_REQUIRED_ROW_COUNTS = {
+    "customers": 30,
+    "events": 174,
+    "evidence": 174,
+    "identity_edges": 150,
+}
+
 
 def _json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
@@ -69,6 +119,10 @@ def _write_database(path: Path, dataset: SyntheticDataset) -> None:
     try:
         connection.execute("BEGIN TRANSACTION")
         connection.execute(_SCHEMA)
+        connection.execute(
+            "INSERT INTO database_metadata VALUES (?, ?)",
+            [DATABASE_SCHEMA_VERSION, SYNTHETIC_DATASET_VERSION],
+        )
         connection.executemany(
             "INSERT INTO customers VALUES (?)",
             [(customer_id,) for customer_id in dataset.customers],
@@ -125,6 +179,66 @@ def _write_database(path: Path, dataset: SyntheticDataset) -> None:
         connection.execute("COMMIT")
     finally:
         connection.close()
+
+
+def is_database_ready(path: str | Path) -> bool:
+    """Return whether ``path`` is the complete current managed demo database."""
+
+    database_path = Path(path)
+    if not database_path.is_file():
+        return False
+
+    connection = None
+    try:
+        connection = duckdb.connect(str(database_path), read_only=True)
+        tables = {row[0] for row in connection.execute("SHOW TABLES").fetchall()}
+        if tables != _REQUIRED_TABLES:
+            return False
+
+        versions = connection.execute(
+            "SELECT schema_version, dataset_version FROM database_metadata"
+        ).fetchall()
+        if versions != [(DATABASE_SCHEMA_VERSION, SYNTHETIC_DATASET_VERSION)]:
+            return False
+
+        event_columns = {
+            row[0] for row in connection.execute("DESCRIBE events").fetchall()
+        }
+        if event_columns != _REQUIRED_EVENT_COLUMNS:
+            return False
+
+        row_counts = {
+            table: connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            for table in _REQUIRED_ROW_COUNTS
+        }
+        if row_counts != _REQUIRED_ROW_COUNTS:
+            return False
+
+        source_ids = {
+            row[0]
+            for row in connection.execute("SELECT DISTINCT source_id FROM events").fetchall()
+        }
+        if source_ids != _REQUIRED_SOURCE_IDS:
+            return False
+
+        link_types = {
+            row[0]
+            for row in connection.execute(
+                "SELECT DISTINCT link_type FROM identity_edges"
+            ).fetchall()
+        }
+        if link_types != _REQUIRED_LINK_TYPES:
+            return False
+
+        identityless_events = connection.execute(
+            "SELECT count(*) FROM events WHERE json_array_length(identities) = 0"
+        ).fetchone()[0]
+        return identityless_events == 0
+    except (duckdb.Error, OSError, ValueError):
+        return False
+    finally:
+        if connection is not None:
+            connection.close()
 
 
 def seed_database(path: str | Path, dataset: SyntheticDataset) -> Path:

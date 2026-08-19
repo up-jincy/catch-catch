@@ -18,7 +18,7 @@ from customer_signal.agent.gemini import GeminiRunner
 from customer_signal.analytics.models import CustomerJourneyResult, EvidenceResult
 from customer_signal.analytics.service import AnalyticsService
 from customer_signal.config import Settings
-from customer_signal.data.database import seed_database
+from customer_signal.data.database import is_database_ready, seed_database
 from customer_signal.data.repository import DuckDBRepository
 from customer_signal.mcp_server import create_mcp_server
 from customer_signal.runtime.coordinator import (
@@ -55,7 +55,7 @@ class ApiDependencies:
 
 
 def _default_dependencies(settings: Settings) -> ApiDependencies:
-    if not settings.database_path.is_file():
+    if not is_database_ready(settings.database_path):
         seed_database(settings.database_path, generate_dataset())
     repository = DuckDBRepository(settings.database_path)
     analytics = AnalyticsService(repository)

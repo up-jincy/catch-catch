@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from uuid import UUID
 
+import duckdb
 import pytest
 from fastapi.testclient import TestClient
 from mcp.types import LATEST_PROTOCOL_VERSION
@@ -16,6 +17,7 @@ from customer_signal.agent.contracts import RunRequest
 from customer_signal.agent.fixture import FixtureRunner
 from customer_signal.analytics.service import AnalyticsService
 from customer_signal.config import Settings
+from customer_signal.data import database as database_module
 from customer_signal.data.database import seed_database
 from customer_signal.data.repository import DuckDBRepository
 from customer_signal.mcp_server import create_mcp_server
@@ -28,6 +30,13 @@ from customer_signal.synthetic.generator import generate_dataset
 START_AT = "2026-07-20T00:00:00+09:00"
 END_AT = "2026-08-19T00:00:00+09:00"
 ALL_SOURCES = ["search_history", "search_feedback", "voc"]
+FIVE_SOURCES = [
+    "search_history",
+    "search_feedback",
+    "digital_behavior",
+    "subscription",
+    "voc",
+]
 TOOL_NAMES = [
     "catalog_sources",
     "aggregate_events",
@@ -90,6 +99,79 @@ def _create_app(database_path: Path):
     )
 
 
+def _seed_legacy_database(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = duckdb.connect(str(path))
+    try:
+        connection.execute(
+            """
+            CREATE TABLE customers (customer_id VARCHAR PRIMARY KEY);
+            CREATE TABLE evidence (
+                evidence_id VARCHAR PRIMARY KEY,
+                source_id VARCHAR NOT NULL,
+                occurred_at TIMESTAMPTZ NOT NULL,
+                masked_customer_id VARCHAR NOT NULL,
+                summary VARCHAR NOT NULL,
+                raw_fields JSON NOT NULL
+            );
+            CREATE TABLE events (
+                event_id VARCHAR PRIMARY KEY,
+                evidence_id VARCHAR NOT NULL,
+                source_id VARCHAR NOT NULL,
+                occurred_at TIMESTAMPTZ NOT NULL,
+                event_type VARCHAR NOT NULL,
+                action VARCHAR NOT NULL,
+                topic VARCHAR NOT NULL,
+                outcome VARCHAR NOT NULL,
+                text VARCHAR NOT NULL,
+                canonical_customer_id VARCHAR NOT NULL,
+                attributes JSON NOT NULL
+            );
+            CREATE TABLE ground_truth (customer_id VARCHAR PRIMARY KEY);
+            """
+        )
+        connection.execute("INSERT INTO customers VALUES ('CUST-OLD')")
+        for index, (source_id, event_type) in enumerate(
+            (
+                ("search_history", "search"),
+                ("search_feedback", "feedback"),
+                ("voc", "voc"),
+            ),
+            start=1,
+        ):
+            evidence_id = f"EVD-OLD-{index}"
+            connection.execute(
+                "INSERT INTO evidence VALUES (?, ?, ?, ?, ?, ?)",
+                [
+                    evidence_id,
+                    source_id,
+                    "2026-08-01T00:00:00+09:00",
+                    "CU***OLD",
+                    "legacy evidence",
+                    "{}",
+                ],
+            )
+            connection.execute(
+                "INSERT INTO events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    f"EVT-OLD-{index}",
+                    evidence_id,
+                    source_id,
+                    "2026-08-01T00:00:00+09:00",
+                    event_type,
+                    "legacy_action",
+                    "legacy_topic",
+                    "legacy_outcome",
+                    "legacy text",
+                    "CUST-OLD",
+                    "{}",
+                ],
+            )
+        connection.execute("INSERT INTO ground_truth VALUES ('CUST-OLD')")
+    finally:
+        connection.close()
+
+
 def _create_blocked_app(database_path: Path):
     module = importlib.import_module("customer_signal.api")
     coordinator_module = importlib.import_module("customer_signal.runtime.coordinator")
@@ -133,6 +215,110 @@ def test_health_uses_factory_without_requiring_an_api_key(tmp_path: Path) -> Non
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
     assert database_path.is_file()
+
+
+def test_startup_atomically_reseeds_a_legacy_three_source_database(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "generated" / "customer-signal.duckdb"
+    _seed_legacy_database(database_path)
+    replacements: list[tuple[Path, Path]] = []
+    real_replace = database_module.os.replace
+
+    def recording_replace(source: str | Path, destination: str | Path) -> None:
+        source_path = Path(source)
+        destination_path = Path(destination)
+        replacements.append((source_path, destination_path))
+        real_replace(source_path, destination_path)
+
+    monkeypatch.setattr(database_module.os, "replace", recording_replace)
+
+    with TestClient(_create_app(database_path)) as client:
+        health = client.get("/health")
+
+    assert health.status_code == 200
+    assert len(replacements) == 1
+    temporary_path, destination_path = replacements[0]
+    assert temporary_path.parent == database_path.parent
+    assert temporary_path != database_path
+    assert destination_path == database_path
+    assert not temporary_path.exists()
+
+    connection = duckdb.connect(str(database_path), read_only=True)
+    try:
+        tables = {row[0] for row in connection.execute("SHOW TABLES").fetchall()}
+        event_columns = {row[0] for row in connection.execute("DESCRIBE events").fetchall()}
+        sources = {
+            row[0]
+            for row in connection.execute("SELECT DISTINCT source_id FROM events").fetchall()
+        }
+    finally:
+        connection.close()
+
+    assert tables == {
+        "database_metadata",
+        "customers",
+        "events",
+        "evidence",
+        "identity_edges",
+    }
+    assert "ground_truth" not in tables
+    assert "identities" in event_columns
+    assert sources == set(FIVE_SOURCES)
+
+    with TestClient(_create_app(database_path)) as client:
+        accepted = client.post(
+            "/api/runs",
+            json={**_run_request(), "enabled_sources": FIVE_SOURCES},
+        ).json()
+        snapshot = _wait_for_terminal(client, accepted["status_url"])
+
+    assert snapshot["status"] == "completed"
+    assert snapshot["report"]["metrics"][0]["value"] == 6
+
+
+def test_startup_preserves_an_already_current_database(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "customer-signal.duckdb"
+    seed_database(database_path, generate_dataset())
+    before_bytes = database_path.read_bytes()
+    before_mtime = database_path.stat().st_mtime_ns
+    replacements: list[tuple[Path, Path]] = []
+    real_replace = database_module.os.replace
+
+    def recording_replace(source: str | Path, destination: str | Path) -> None:
+        replacements.append((Path(source), Path(destination)))
+        real_replace(source, destination)
+
+    monkeypatch.setattr(database_module.os, "replace", recording_replace)
+
+    with TestClient(_create_app(database_path)) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert replacements == []
+    assert database_path.read_bytes() == before_bytes
+    assert database_path.stat().st_mtime_ns == before_mtime
+
+
+def test_startup_safely_replaces_a_malformed_database_file(tmp_path: Path) -> None:
+    database_path = tmp_path / "customer-signal.duckdb"
+    malformed_bytes = b"not-a-duckdb-file"
+    database_path.write_bytes(malformed_bytes)
+
+    with TestClient(_create_app(database_path)) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert database_path.read_bytes() != malformed_bytes
+    connection = duckdb.connect(str(database_path), read_only=True)
+    try:
+        assert connection.execute("SELECT count(*) FROM events").fetchone()[0] == 174
+    finally:
+        connection.close()
 
 
 def test_run_completes_with_public_snapshot_and_contiguous_sse(tmp_path: Path) -> None:

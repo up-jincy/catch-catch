@@ -68,8 +68,17 @@ def test_seed_database_atomically_creates_expected_schema_and_rows(
     try:
         row_counts = {
             table: connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-            for table in ("customers", "events", "evidence", "identity_edges")
+            for table in (
+                "database_metadata",
+                "customers",
+                "events",
+                "evidence",
+                "identity_edges",
+            )
         }
+        database_version = connection.execute(
+            "SELECT schema_version, dataset_version FROM database_metadata"
+        ).fetchone()
         event_types = {row[0]: row[1] for row in connection.execute("DESCRIBE events").fetchall()}
         evidence_types = {
             row[0]: row[1] for row in connection.execute("DESCRIBE evidence").fetchall()
@@ -78,16 +87,38 @@ def test_seed_database_atomically_creates_expected_schema_and_rows(
         connection.close()
 
     assert row_counts == {
+        "database_metadata": 1,
         "customers": 30,
         "events": 174,
         "evidence": 174,
         "identity_edges": 150,
     }
+    assert database_version == (
+        database.DATABASE_SCHEMA_VERSION,
+        database.SYNTHETIC_DATASET_VERSION,
+    )
     assert event_types["occurred_at"] == "TIMESTAMP WITH TIME ZONE"
     assert event_types["identities"] == "JSON"
     assert event_types["attributes"] == "JSON"
     assert evidence_types["occurred_at"] == "TIMESTAMP WITH TIME ZONE"
     assert evidence_types["raw_fields"] == "JSON"
+
+
+def test_database_readiness_accepts_only_a_current_managed_database(tmp_path: Path) -> None:
+    readiness = getattr(database, "is_database_ready", None)
+    assert callable(readiness), "database readiness validation must be explicit"
+
+    missing_path = tmp_path / "missing.duckdb"
+    malformed_path = tmp_path / "malformed.duckdb"
+    current_path = tmp_path / "current.duckdb"
+    malformed_path.write_bytes(b"not-a-duckdb-file")
+    seed_database(current_path, generate_dataset())
+
+    assert readiness(missing_path) is False
+    assert not missing_path.exists()
+    assert readiness(malformed_path) is False
+    assert malformed_path.read_bytes() == b"not-a-duckdb-file"
+    assert readiness(current_path) is True
 
 
 def test_agent_database_contains_identity_provenance_but_not_evaluation_truth(
