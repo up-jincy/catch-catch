@@ -11,5 +11,7 @@ __pycache__/
 *.duckdb.wal
 node_modules/
 .next/
+frontend/AGENTS.md
+frontend/CLAUDE.md
 coverage/
 dist/

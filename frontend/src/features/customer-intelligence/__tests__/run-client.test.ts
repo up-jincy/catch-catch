@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RunRequest } from "../contracts";
 import { RunClient, RunClientError } from "../run-client";
@@ -79,6 +79,33 @@ function responseStream(chunks: string[]): Response {
 }
 
 describe("RunClient", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("uses NEXT_PUBLIC_API_BASE_URL when no explicit base is provided", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_BASE_URL", "http://configured-api.test/");
+    vi.resetModules();
+    const { RunClient: EnvironmentRunClient } = await import("../run-client");
+    const urls: string[] = [];
+    const fetchImpl: typeof fetch = async (input) => {
+      urls.push(String(input));
+      return Response.json(
+        {
+          run_id: "run-1",
+          status_url: "/api/runs/run-1",
+          events_url: "/api/runs/run-1/events",
+        },
+        { status: 202 },
+      );
+    };
+
+    await new EnvironmentRunClient({ fetchImpl }).createRun(request);
+
+    expect(urls).toEqual(["http://configured-api.test/api/runs"]);
+  });
+
   it("creates a run against a configurable API base", async () => {
     const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
     const fetchImpl: typeof fetch = async (input, init) => {
@@ -104,6 +131,31 @@ describe("RunClient", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
     });
+  });
+
+  it("calls a browser-style fetch with the global receiver", async () => {
+    const fetchImpl = vi.fn(function (this: unknown) {
+      if (this !== globalThis) {
+        throw new TypeError("Illegal invocation");
+      }
+      return Promise.resolve(
+        Response.json(
+          {
+            run_id: "run-1",
+            status_url: "/api/runs/run-1",
+            events_url: "/api/runs/run-1/events",
+          },
+          { status: 202 },
+        ),
+      );
+    }) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchImpl);
+    const client = new RunClient({ apiBaseUrl: "http://api.test" });
+
+    await expect(client.createRun(request)).resolves.toMatchObject({
+      run_id: "run-1",
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
   it("throws a typed HTTP error with the public API detail", async () => {

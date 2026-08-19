@@ -29,7 +29,8 @@ import {
   type ParsedSseEvent,
 } from "./parse-sse";
 
-export const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
+export const DEFAULT_API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || "http://127.0.0.1:8000";
 
 export type RunClientErrorCode =
   | "http_error"
@@ -609,7 +610,7 @@ export class RunClient {
 
   constructor(options: RunClientOptions = {}) {
     this.apiBaseUrl = (options.apiBaseUrl ?? DEFAULT_API_BASE_URL).replace(/\/+$/, "");
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.maxReconnectAttempts = validateReconnectAttempts(
       options.maxReconnectAttempts ?? 2,
     );
