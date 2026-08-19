@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from pydantic import ValidationError
 
-from customer_signal.domain.models import CustomerEvent, EvidenceRecord
+from customer_signal.domain.models import CustomerEvent, EvidenceRecord, SyntheticDataset
 from customer_signal.domain.reports import (
     AnalysisScope,
     Finding,
@@ -35,6 +35,10 @@ POSITIVE_CUSTOMER_IDS = [
     "CUST-022",
     "CUST-028",
 ]
+
+
+def _dataset_payload() -> dict:
+    return generate_dataset().model_dump()
 
 
 def _events_by_customer(dataset) -> dict[str, list[CustomerEvent]]:
@@ -138,6 +142,18 @@ def test_dataset_is_seeded_and_contains_exact_customers_and_ground_truth():
     assert generate_dataset(seed=20260820).model_dump() != first.model_dump()
 
 
+@pytest.mark.parametrize("seed", [-1, 100_000_000])
+def test_generate_dataset_rejects_seed_outside_stable_id_range(seed):
+    with pytest.raises(ValueError, match="seed must be between 0 and 99999999"):
+        generate_dataset(seed=seed)
+
+
+@pytest.mark.parametrize("seed", [True, 1.5, "20260819"])
+def test_generate_dataset_rejects_non_integer_seed(seed):
+    with pytest.raises(TypeError, match="seed must be an integer"):
+        generate_dataset(seed=seed)
+
+
 def test_events_are_stably_ordered_inside_the_seoul_time_window():
     dataset = generate_dataset()
 
@@ -221,6 +237,83 @@ def test_every_event_has_matching_unique_masked_evidence_without_id_leakage():
 
 
 @pytest.mark.parametrize(
+    ("duplicate", "message"),
+    [
+        ("customer", "customers must be unique"),
+        ("ground_truth", "ground_truth_customer_ids must be unique"),
+        ("event_id", "event_id values must be unique"),
+        ("event_evidence_id", "event evidence_id references must be unique"),
+        ("evidence_id", "evidence_id values must be unique"),
+    ],
+)
+def test_dataset_rejects_duplicate_identity_fields(duplicate, message):
+    payload = _dataset_payload()
+    if duplicate == "customer":
+        payload["customers"].append(payload["customers"][0])
+    elif duplicate == "ground_truth":
+        payload["ground_truth_customer_ids"].append(payload["ground_truth_customer_ids"][0])
+    elif duplicate == "event_id":
+        payload["events"][1]["event_id"] = payload["events"][0]["event_id"]
+    elif duplicate == "event_evidence_id":
+        payload["events"][1]["evidence_id"] = payload["events"][0]["evidence_id"]
+    else:
+        payload["evidence"][1]["evidence_id"] = payload["evidence"][0]["evidence_id"]
+
+    with pytest.raises(ValidationError, match=message):
+        SyntheticDataset.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("invalid_relation", "message"),
+    [
+        ("unknown_ground_truth", "ground truth customers must belong to customers"),
+        ("unknown_event_customer", "event customers must belong to customers"),
+        ("missing_evidence", "every event evidence_id must exist"),
+        ("orphan_evidence", "evidence records must not be orphaned"),
+    ],
+)
+def test_dataset_rejects_invalid_membership_and_evidence_relations(invalid_relation, message):
+    payload = _dataset_payload()
+    if invalid_relation == "unknown_ground_truth":
+        payload["ground_truth_customer_ids"].append("CUST-999")
+    elif invalid_relation == "unknown_event_customer":
+        payload["events"][0]["canonical_customer_id"] = "CUST-999"
+    elif invalid_relation == "missing_evidence":
+        payload["events"][0]["evidence_id"] = "EVD-MISSING"
+    else:
+        orphan = payload["evidence"][0].copy()
+        orphan["evidence_id"] = "EVD-ORPHAN"
+        payload["evidence"].append(orphan)
+
+    with pytest.raises(ValidationError, match=message):
+        SyntheticDataset.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("misalignment", "message"),
+    [
+        ("source", "event and evidence source_id must align"),
+        ("timestamp", "event and evidence occurred_at must align"),
+    ],
+)
+def test_dataset_rejects_misaligned_event_evidence_pairs(misalignment, message):
+    payload = _dataset_payload()
+    evidence_id = payload["events"][0]["evidence_id"]
+    evidence = next(
+        record for record in payload["evidence"] if record["evidence_id"] == evidence_id
+    )
+    if misalignment == "source":
+        evidence["source_id"] = (
+            "voc" if payload["events"][0]["source_id"] != "voc" else "search_history"
+        )
+    else:
+        evidence["occurred_at"] += timedelta(seconds=1)
+
+    with pytest.raises(ValidationError, match=message):
+        SyntheticDataset.model_validate(payload)
+
+
+@pytest.mark.parametrize(
     ("model", "payload"),
     [
         (
@@ -268,6 +361,96 @@ def test_every_event_has_matching_unique_masked_evidence_without_id_leakage():
 def test_domain_timestamps_reject_naive_datetimes(model, payload):
     with pytest.raises(ValidationError, match="timezone"):
         model.model_validate(payload)
+
+
+@pytest.mark.parametrize("end_at", [START_AT, START_AT - timedelta(seconds=1)])
+def test_analysis_scope_requires_strictly_increasing_time_bounds(end_at):
+    with pytest.raises(ValidationError, match="start_at must be before end_at"):
+        AnalysisScope(
+            start_at=START_AT,
+            end_at=end_at,
+            enabled_sources=["search_history"],
+            population_description="검색 고객",
+        )
+
+
+@pytest.mark.parametrize("naive_field", ["start_at", "end_at"])
+def test_analysis_scope_rejects_naive_time_bounds(naive_field):
+    payload = {
+        "start_at": START_AT,
+        "end_at": END_AT,
+        "enabled_sources": ["search_history"],
+        "population_description": "검색 고객",
+    }
+    payload[naive_field] = payload[naive_field].replace(tzinfo=None)
+
+    with pytest.raises(ValidationError, match="timezone"):
+        AnalysisScope.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("model", "score_field", "payload"),
+    [
+        (
+            Signal,
+            "score",
+            {"code": "failed_search", "label": "검색 실패", "evidence_ids": []},
+        ),
+        (
+            SignalContribution,
+            "score",
+            {"source_id": "search_history", "signals": []},
+        ),
+        (
+            RankedCustomer,
+            "risk_score",
+            {
+                "customer_id": "CUST-003",
+                "risk_level": "high",
+                "signals": [],
+                "evidence_ids": [],
+            },
+        ),
+    ],
+)
+@pytest.mark.parametrize("invalid_score", [-1, 101, float("nan"), float("inf"), float("-inf")])
+def test_report_scores_reject_out_of_range_and_non_finite_values(
+    model,
+    score_field,
+    payload,
+    invalid_score,
+):
+    payload[score_field] = invalid_score
+
+    with pytest.raises(ValidationError) as error:
+        model.model_validate(payload)
+
+    assert error.value.errors()[0]["loc"] == (score_field,)
+
+
+@pytest.mark.parametrize(
+    ("model", "score_field", "payload"),
+    [
+        (Signal, "score", {"code": "failed_search", "label": "검색 실패"}),
+        (SignalContribution, "score", {"source_id": "search_history"}),
+        (
+            RankedCustomer,
+            "risk_score",
+            {"customer_id": "CUST-003", "risk_level": "high"},
+        ),
+    ],
+)
+@pytest.mark.parametrize("boundary", [0, 100])
+def test_report_scores_accept_inclusive_boundaries(model, score_field, payload, boundary):
+    payload[score_field] = boundary
+
+    assert getattr(model.model_validate(payload), score_field) == boundary
+
+
+@pytest.mark.parametrize("invalid_value", [float("nan"), float("inf"), float("-inf")])
+def test_metric_rejects_non_finite_numeric_values(invalid_value):
+    with pytest.raises(ValidationError):
+        Metric(label="비율", value=invalid_value, result_id="RESULT-1")
 
 
 def test_report_contracts_are_framework_independent_json_models():

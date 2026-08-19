@@ -1,10 +1,13 @@
 """Contracts shared by deterministic analytics, agents, APIs, and the UI."""
 
-from typing import Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import AwareDatetime, Field
+from pydantic import AwareDatetime, Field, FiniteFloat, model_validator
 
 from customer_signal.domain.models import DomainModel, EventType, SourceId
+
+
+type Score = Annotated[float, Field(ge=0, le=100, allow_inf_nan=False)]
 
 
 class AnalysisScope(DomainModel):
@@ -15,12 +18,18 @@ class AnalysisScope(DomainModel):
     enabled_sources: list[SourceId]
     population_description: str
 
+    @model_validator(mode="after")
+    def validate_time_range(self) -> Self:
+        if self.start_at >= self.end_at:
+            raise ValueError("start_at must be before end_at")
+        return self
+
 
 class Metric(DomainModel):
     """A deterministic aggregate linked to its tool result."""
 
     label: str
-    value: float | int | str
+    value: FiniteFloat | int | str
     unit: str | None = None
     result_id: str
 
@@ -55,7 +64,7 @@ class Signal(DomainModel):
 
     code: str
     label: str
-    score: float
+    score: Score
     evidence_ids: list[str] = Field(default_factory=list)
 
 
@@ -63,7 +72,7 @@ class SignalContribution(DomainModel):
     """Signals and score contributed by one source."""
 
     source_id: SourceId
-    score: float
+    score: Score
     signals: list[Signal] = Field(default_factory=list)
 
 
@@ -71,7 +80,7 @@ class RankedCustomer(DomainModel):
     """A scored customer projection for ranked result views."""
 
     customer_id: str
-    risk_score: float
+    risk_score: Score
     risk_level: Literal["high", "medium", "low"]
     signals: list[Signal] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)

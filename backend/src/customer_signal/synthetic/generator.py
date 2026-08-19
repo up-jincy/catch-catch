@@ -347,6 +347,11 @@ def _add_failure_without_voc(
 def generate_dataset(seed: int = 20260819) -> SyntheticDataset:
     """Build the deterministic 30-customer Journey demo dataset."""
 
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise TypeError("seed must be an integer")
+    if not 0 <= seed <= 99_999_999:
+        raise ValueError("seed must be between 0 and 99999999")
+
     rng = random.Random(seed)
     builder = _DatasetBuilder(seed)
     customers = [f"CUST-{index:03d}" for index in range(1, 31)]
