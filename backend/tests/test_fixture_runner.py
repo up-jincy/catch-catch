@@ -307,10 +307,10 @@ async def test_fixture_runner_is_deterministic_for_the_same_request(
     "question",
     [
         "검색 실패 뒤 상담 전환 고객을 분석해 줘",
-        "고객 지원 센터까지 연결된 이용자는 몇 명이야?",
-        "상담원 연결 전 행동을 확인해 줘",
-        "문의로 이어진 고객 여정을 알려 줘",
-        "다시 찾아본 뒤 VOC를 남긴 고객을 리서치해 줘",
+        "AI 검색으로 답을 찾지 못해 고객 지원 센터에 연결된 이용자는 몇 명이야?",
+        "검색 결과로 문제가 풀리지 않아 상담원에게 문의한 고객 여정을 알려 줘",
+        "AI검색에서 미해결된 뒤 VOC를 접수한 고객을 리서치해 줘",
+        "다시 검색했지만 해결되지 않아 고객센터까지 간 고객은?",
     ],
 )
 async def test_fixture_runner_recognizes_supported_korean_paraphrases(
@@ -323,6 +323,65 @@ async def test_fixture_runner_recognizes_supported_korean_paraphrases(
     )
 
     assert outcome.report.metrics[0].value == 6
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "검색 성공 고객은 몇 명이야?",
+        "AI 검색에서 성공하거나 실패한 뒤 고객센터에 문의한 고객을 알려 줘",
+        "AI 검색에서 해결하고 고객센터에 문의한 고객이 몇 명이야?",
+    ],
+)
+async def test_fixture_runner_rejects_opposite_resolved_intent(
+    fixture_runner: FixtureRunner,
+    question: str,
+) -> None:
+    events: list[RunnerEvent] = []
+
+    with pytest.raises(UnsupportedQuestionError):
+        await fixture_runner.run(
+            _request(question=question),
+            emit=events.append,
+        )
+
+    assert [event.type for event in events] == ["error"]
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "AI 검색 실패 고객은 몇 명이야?",
+        "고객센터에 문의한 고객은 몇 명이야?",
+    ],
+)
+async def test_fixture_runner_requires_both_failed_search_and_contact_transition(
+    fixture_runner: FixtureRunner,
+    question: str,
+) -> None:
+    events: list[RunnerEvent] = []
+
+    with pytest.raises(UnsupportedQuestionError):
+        await fixture_runner.run(
+            _request(question=question),
+            emit=events.append,
+        )
+
+    assert [event.type for event in events] == ["error"]
+
+
+async def test_fixture_runner_rejects_a_different_scenario_wrapped_in_supported_terms(
+    fixture_runner: FixtureRunner,
+) -> None:
+    events: list[RunnerEvent] = []
+
+    with pytest.raises(UnsupportedQuestionError):
+        await fixture_runner.run(
+            _request(question="검색 실패 후 상담 전환 고객의 신규 가입 매출을 예측해 줘"),
+            emit=events.append,
+        )
+
+    assert [event.type for event in events] == ["error"]
 
 
 async def test_fixture_runner_rejects_unrelated_question(

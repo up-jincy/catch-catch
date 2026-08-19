@@ -227,6 +227,27 @@ def test_unsupported_question_fails_with_one_error_then_done(tmp_path: Path) -> 
     assert events[-1]["data"]["payload"] == {"status": "failed"}
 
 
+def test_opposite_search_success_question_never_publishes_fixed_failure_report(
+    tmp_path: Path,
+) -> None:
+    with TestClient(_create_app(tmp_path / "customer-signal.duckdb")) as client:
+        accepted = client.post(
+            "/api/runs",
+            json=_run_request(question="검색 성공 고객은 몇 명이야?"),
+        ).json()
+        snapshot = _wait_for_terminal(client, accepted["status_url"])
+        events = _parse_sse(client.get(accepted["events_url"]).text)
+
+    assert snapshot["status"] == "failed"
+    assert snapshot["report"] is None
+    assert snapshot["error"] == {
+        "code": "unsupported_question",
+        "message": "검색 실패와 고객 문의 Journey 질문만 지원합니다.",
+    }
+    assert [event["event"] for event in events] == ["error", "done"]
+    assert all(event["event"] != "result" for event in events)
+
+
 @pytest.mark.parametrize(
     "payload",
     [
