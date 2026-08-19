@@ -35,7 +35,10 @@ from customer_signal.agent.contracts import (
     UnsupportedClaimError,
 )
 from customer_signal.agent.facts import build_run_facts
-from customer_signal.agent.report_composer import compose_verified_report
+from customer_signal.agent.report_composer import (
+    apply_verified_model_narrative,
+    compose_verified_report,
+)
 from customer_signal.agent.validator import validate_report
 from customer_signal.analytics.models import (
     AggregateResult,
@@ -52,9 +55,7 @@ from customer_signal.runtime.events import RunnerEvent
 
 
 _PLAN_STEPS = [
-    "요청 범위와 분석 계획 확인",
-    "MCP 분석 Tool로 근거 수집",
-    "구조화 보고서와 Run 근거 검증",
+    "Gemini가 분석 계획을 작성하고 있습니다.",
 ]
 _TOOL_RESULT_TYPES: dict[ToolName, type[AnalyticsResultModel]] = {
     "catalog_sources": CatalogSourcesResult,
@@ -96,6 +97,8 @@ _PROFILE_LOCK = Lock()
 _PROFILE_REGISTERED = False
 _SYSTEM_PROMPT = """You are a bounded customer-signal analytics agent.
 Use only the supplied read-only customer_signal MCP tools for data claims.
+Before any MCP call, use write_todos once with three to six concise analysis steps.
+Keep the todo list current and return it in the final agent state.
 Call each MCP tool at most once and make no more than six MCP calls total.
 Use the exact request time range and enabled source allowlist.
 Always call catalog_sources, aggregate_events(group_by='topic'),
@@ -106,6 +109,8 @@ shared by that Journey and the representative evidence allowlist. When
 customer_count is zero, omit both detail calls.
 Omit bounded-tool limits or set them to exactly the integer 100.
 Never invent customer IDs, evidence IDs, result IDs, counts, scores, or sources.
+For positive results, include evidence-backed findings and a care_call recommendation.
+Narrative text may cite only the exact matched-customer metric returned by the tools.
 Return only the InsightReport structured response. Do not expose reasoning or tool raw data.
 """
 
@@ -180,6 +185,35 @@ def _public_failure(error: Exception) -> GeminiRunnerError:
         "gemini_provider_failed",
         "Gemini 분석 서비스 호출에 실패했습니다.",
     )
+
+
+def _extract_todo_steps(state: dict[str, Any]) -> list[str]:
+    todos = state.get("todos")
+    if not isinstance(todos, list) or not 3 <= len(todos) <= 6:
+        raise GeminiRunnerError(
+            "gemini_validation_failed",
+            "Gemini 분석 계획 검증에 실패했습니다.",
+        )
+    steps: list[str] = []
+    for todo in todos:
+        if not isinstance(todo, dict):
+            break
+        content = todo.get("content")
+        status = todo.get("status")
+        if (
+            not isinstance(content, str)
+            or not content.strip()
+            or len(content) > 120
+            or status not in {"pending", "in_progress", "completed"}
+        ):
+            break
+        steps.append(content.strip())
+    if len(steps) != len(todos):
+        raise GeminiRunnerError(
+            "gemini_validation_failed",
+            "Gemini 분석 계획 검증에 실패했습니다.",
+        )
+    return steps
 
 
 def _ensure_bounded_google_genai_profile() -> None:
@@ -507,15 +541,6 @@ class GeminiRunner:
             catalog = cast(CatalogSourcesResult, capture.results["catalog_sources"])
             aggregate = cast(AggregateResult, capture.results["aggregate_events"])
             ranked = cast(RankCustomersResult, capture.results["rank_customers"])
-            report = compose_verified_report(
-                capture.request,
-                catalog=catalog,
-                aggregate=aggregate,
-                matched=matched,
-                ranked=ranked,
-                journey=journey,
-                evidence=evidence,
-            )
             facts = build_run_facts(
                 capture.request,
                 catalog=catalog,
@@ -526,6 +551,16 @@ class GeminiRunner:
                 evidence=evidence,
                 representative_customer_id=(journey.customer_id if journey is not None else None),
             )
+            canonical = compose_verified_report(
+                capture.request,
+                catalog=catalog,
+                aggregate=aggregate,
+                matched=matched,
+                ranked=ranked,
+                journey=journey,
+                evidence=evidence,
+            )
+            report = apply_verified_model_narrative(canonical, draft, facts)
             self._validator(report, facts)
         except (UnsupportedClaimError, ValidationError, TypeError, ValueError, KeyError) as error:
             raise GeminiRunnerError(
@@ -576,6 +611,13 @@ class GeminiRunner:
                     result_state = await self._invoke(self._fallback_model, state)
                 else:
                     raise _public_failure(error) from error
+            await _emit(
+                emit,
+                RunnerEvent(
+                    type="plan",
+                    payload={"steps": _extract_todo_steps(result_state)},
+                ),
+            )
             outcome = self._build_outcome(capture, result_state)
             await _emit(
                 emit,

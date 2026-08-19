@@ -38,6 +38,11 @@ END_AT = "2026-08-19T00:00:00+09:00"
 ALL_SOURCES = ["search_history", "search_feedback", "voc"]
 PRIMARY_MODEL = "gemini-3.7-flash"
 FALLBACK_MODEL = "gemini-3.6-flash"
+MODEL_TODO_STEPS = [
+    "분석 가능한 Source와 기간 확인",
+    "실패 검색과 후속 문의 Journey 탐색",
+    "대표 고객 Evidence 검증",
+]
 
 
 def _request(*, enabled_sources: list[str] | None = None) -> RunRequest:
@@ -228,6 +233,7 @@ class _ReplayAgent:
         return {
             "structured_response": self._report.model_dump(mode="json"),
             "messages": [{"private": "reasoning and provider transcript"}],
+            "todos": [{"content": step, "status": "completed"} for step in MODEL_TODO_STEPS],
         }
 
 
@@ -328,9 +334,10 @@ async def test_gemini_runner_lazily_builds_one_structured_agent_and_captures_fac
     expected_types = ["plan"]
     for _ in prepared_analysis.calls:
         expected_types.extend(("tool_started", "tool_completed"))
-    expected_types.extend(("validating", "result"))
+    expected_types.extend(("plan", "validating", "result"))
     assert [event.type for event in first_events] == expected_types
     assert [event.type for event in second_events] == expected_types
+    assert first_events[-3].payload == {"steps": MODEL_TODO_STEPS}
     assert first_events[-1].payload["agent_mode"] == "gemini"
     public_trace = json.dumps(
         [event.model_dump(mode="json") for event in first_events],
@@ -651,7 +658,7 @@ async def test_each_matched_customer_must_be_present_as_the_exact_ranked_custome
     )
 
 
-async def test_positive_run_rebuilds_an_empty_fabricated_draft_from_mcp_results(
+async def test_positive_run_rejects_an_empty_fabricated_structured_draft(
     prepared_analysis: _PreparedAnalysis,
 ) -> None:
     fabricated = _PreparedAnalysis(
@@ -661,20 +668,79 @@ async def test_positive_run_rebuilds_an_empty_fabricated_draft_from_mcp_results(
     )
     runner, _mcp_factory, _model_factory, _agent_factory = _runner(fabricated)
 
+    events: list[RunnerEvent] = []
+
+    with pytest.raises(GeminiRunnerError) as caught:
+        await runner.run(_request(), emit=events.append)
+
+    assert caught.value.code == "gemini_validation_failed"
+    assert "result" not in [event.type for event in events]
+
+
+async def test_positive_run_publishes_only_provenance_validated_model_narrative(
+    prepared_analysis: _PreparedAnalysis,
+) -> None:
+    draft = prepared_analysis.report.model_copy(deep=True)
+    draft.executive_summary = "Gemini가 검증된 Journey를 바탕으로 후속 확인 필요성을 요약했습니다."
+    draft.findings[0].title = "Gemini 분석: 반복 실패 뒤 상담 전환"
+    draft.findings[0].description = "동일 고객의 실패 검색과 미해결 문의가 연결됩니다."
+    draft.recommendations[0].title = "Gemini 제안: 대표 고객 후속 확인"
+    draft.recommendations[0].reason = "검증된 Evidence가 있어 선제 확인이 필요합니다."
+    authored = _PreparedAnalysis(
+        fixture_outcome=prepared_analysis.fixture_outcome,
+        report=draft,
+        calls=prepared_analysis.calls,
+    )
+    runner, _mcp_factory, _model_factory, _agent_factory = _runner(authored)
+
     outcome = await runner.run(_request(), emit=lambda _event: None)
 
-    matched = prepared_analysis.calls[2][2].structuredContent
-    ranked = prepared_analysis.calls[3][2].structuredContent
-    assert matched is not None and matched["customer_count"] == 6
-    assert ranked is not None and ranked["customer_count"] == 24
-    assert outcome.report == prepared_analysis.fixture_outcome.report
-    assert outcome.report.headline == "검색 실패 후 문의로 이어진 고객 6명"
-    assert outcome.report.metrics[0].value == 6
-    assert len(outcome.report.ranked_customers) == 6
-    assert outcome.report.findings
-    assert outcome.report.recommendations
-    assert outcome.report.ranked_customers
-    assert outcome.report.representative_journeys
+    assert outcome.report.executive_summary == draft.executive_summary
+    assert outcome.report.findings == draft.findings
+    assert outcome.report.recommendations == draft.recommendations
+    assert outcome.report.metrics == prepared_analysis.fixture_outcome.report.metrics
+    assert (
+        outcome.report.ranked_customers == prepared_analysis.fixture_outcome.report.ranked_customers
+    )
+
+
+async def test_model_narrative_rejects_duplicate_fetched_evidence(
+    prepared_analysis: _PreparedAnalysis,
+) -> None:
+    draft = prepared_analysis.report.model_copy(deep=True)
+    draft.findings[0].evidence_ids *= 2
+    duplicated = _PreparedAnalysis(
+        fixture_outcome=prepared_analysis.fixture_outcome,
+        report=draft,
+        calls=prepared_analysis.calls,
+    )
+    runner, _mcp_factory, _model_factory, _agent_factory = _runner(duplicated)
+
+    with pytest.raises(GeminiRunnerError) as caught:
+        await runner.run(_request(), emit=lambda _event: None)
+
+    assert caught.value.code == "gemini_validation_failed"
+
+
+async def test_model_narrative_may_reference_only_returned_customer_and_evidence_ids(
+    prepared_analysis: _PreparedAnalysis,
+) -> None:
+    draft = prepared_analysis.report.model_copy(deep=True)
+    customer_id = draft.ranked_customers[0].customer_id
+    evidence_id = draft.findings[0].evidence_ids[0]
+    draft.findings[
+        0
+    ].description = f"반환된 {customer_id} 고객의 {evidence_id} 근거로 상담 전환을 확인했습니다."
+    referenced = _PreparedAnalysis(
+        fixture_outcome=prepared_analysis.fixture_outcome,
+        report=draft,
+        calls=prepared_analysis.calls,
+    )
+    runner, _mcp_factory, _model_factory, _agent_factory = _runner(referenced)
+
+    outcome = await runner.run(_request(), emit=lambda _event: None)
+
+    assert outcome.report.findings[0].description == draft.findings[0].description
 
 
 async def test_positive_run_requires_journey_and_evidence_tool_provenance(

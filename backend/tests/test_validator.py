@@ -49,9 +49,7 @@ async def test_validator_accepts_actual_run_facts(valid_outcome: RunnerOutcome) 
         *(event.evidence_id for event in valid_outcome.report.representative_journeys),
     }
     assert len(valid_outcome.facts.fetched_evidence_ids) == 1
-    assert valid_outcome.facts.fetched_evidence_ids <= (
-        valid_outcome.facts.allowed_evidence_ids
-    )
+    assert valid_outcome.facts.fetched_evidence_ids <= (valid_outcome.facts.allowed_evidence_ids)
     assert set(valid_outcome.facts.evidence_source_facts) == set(
         valid_outcome.facts.fetched_evidence_ids
     )
@@ -118,6 +116,22 @@ async def test_validator_rejects_fabricated_metric_result(valid_outcome: RunnerO
 async def test_validator_rejects_fabricated_metric_value(valid_outcome: RunnerOutcome) -> None:
     invalid = valid_outcome.report.model_copy(deep=True)
     invalid.metrics[0].value = 7
+
+    with pytest.raises(UnsupportedClaimError, match="metric"):
+        validate_report(invalid, valid_outcome.facts)
+
+
+async def test_validator_rejects_wrong_semantic_metric_even_when_value_exists_in_result(
+    valid_outcome: RunnerOutcome,
+) -> None:
+    invalid = valid_outcome.report.model_copy(deep=True)
+    metric = invalid.metrics[0]
+    allowed_metrics = valid_outcome.facts.allowed_metrics_by_result[metric.result_id]
+    metric.value = next(
+        supported.value
+        for supported in allowed_metrics
+        if type(supported.value) is type(metric.value) and supported.value != metric.value
+    )
 
     with pytest.raises(UnsupportedClaimError, match="metric"):
         validate_report(invalid, valid_outcome.facts)
@@ -207,8 +221,9 @@ def _empty_facts_values() -> dict[str, object]:
         "allowed_customer_ids": frozenset(),
         "allowed_evidence_ids": frozenset(),
         "allowed_sources": frozenset(ALL_SOURCES),
-        "allowed_metric_values_by_result": {
-            result_id: (0,) for result_id in tool_result_ids.values()
+        "allowed_metrics_by_result": {
+            result_id: ({"label": "count", "value": 0, "unit": None},)
+            for result_id in tool_result_ids.values()
         },
         "ranked_customer_facts": {},
     }
@@ -223,7 +238,7 @@ def _empty_facts_values() -> dict[str, object]:
         lambda values: values["tool_result_ids"].update(  # type: ignore[union-attr]
             {"rank_customers": "aggregate_events:not-ranked"}
         ),
-        lambda values: values["allowed_metric_values_by_result"].pop(  # type: ignore[union-attr]
+        lambda values: values["allowed_metrics_by_result"].pop(  # type: ignore[union-attr]
             "rank_customers:four"
         ),
     ],
@@ -233,4 +248,17 @@ def test_run_facts_rejects_ambiguous_or_unbound_result_provenance(mutate) -> Non
     mutate(values)
 
     with pytest.raises(ValidationError, match="result_id"):
+        RunFacts.model_validate(values)
+
+
+def test_run_facts_rejects_duplicate_metric_semantics_for_one_result() -> None:
+    values = _empty_facts_values()
+    metrics = values["allowed_metrics_by_result"]
+    assert isinstance(metrics, dict)
+    metrics["match_journey_pattern:three"] = (
+        {"label": "완전한 Journey 패턴 고객 수", "value": 0, "unit": "명"},
+        {"label": "완전한 Journey 패턴 고객 수", "value": 1, "unit": "명"},
+    )
+
+    with pytest.raises(ValidationError, match="metric"):
         RunFacts.model_validate(values)

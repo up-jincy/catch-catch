@@ -51,8 +51,7 @@ def fixture_runner(repository: DuckDBRepository) -> FixtureRunner:
 
 def _request(*, enabled_sources: list[str] | None = None, question: str | None = None):
     return RunRequest(
-        question=question
-        or "AI 검색에서 해결하지 못하고 고객센터에 문의한 고객이 몇 명이야?",
+        question=question or "AI 검색에서 해결하지 못하고 고객센터에 문의한 고객이 몇 명이야?",
         start_at=START_AT,
         end_at=END_AT,
         enabled_sources=enabled_sources or ALL_SOURCES,
@@ -144,13 +143,13 @@ async def test_fixture_runner_uses_six_real_mcp_tools_and_returns_exact_report(
     assert list(outcome.facts.tool_result_ids) == TOOL_NAMES
     assert set(outcome.facts.allowed_customer_ids) >= set(EXPECTED_MATCHES)
     assert set(outcome.facts.allowed_evidence_ids) >= {
-        evidence_id
-        for customer in report.ranked_customers
-        for evidence_id in customer.evidence_ids
+        evidence_id for customer in report.ranked_customers for evidence_id in customer.evidence_ids
     }
-    assert (
-        report.metrics[0].value
-        in outcome.facts.allowed_metric_values_by_result[report.metrics[0].result_id]
+    assert any(
+        report.metrics[0].label == supported.label
+        and report.metrics[0].value == supported.value
+        and report.metrics[0].unit == supported.unit
+        for supported in outcome.facts.allowed_metrics_by_result[report.metrics[0].result_id]
     )
     for customer in report.ranked_customers:
         assert outcome.facts.ranked_customer_facts[customer.customer_id] == customer
@@ -160,9 +159,7 @@ async def test_fixture_runner_uses_six_real_mcp_tools_and_returns_exact_report(
         expected_event_types.extend(("tool_started", "tool_completed"))
     expected_event_types.extend(("validating", "result"))
     assert [event.type for event in events] == expected_event_types
-    assert [
-        event.payload["tool"] for event in events if event.type == "tool_started"
-    ] == TOOL_NAMES
+    assert [event.payload["tool"] for event in events if event.type == "tool_started"] == TOOL_NAMES
     assert [
         event.payload["tool"] for event in events if event.type == "tool_completed"
     ] == TOOL_NAMES
@@ -235,9 +232,7 @@ async def test_fixture_runner_reports_zero_matches_when_voc_is_disabled(
     assert outcome.report.ranked_customers == []
     assert outcome.report.representative_journeys
     assert any("voc" in limitation.lower() for limitation in outcome.report.limitations)
-    assert [
-        event.payload["tool"] for event in events if event.type == "tool_started"
-    ] == TOOL_NAMES
+    assert [event.payload["tool"] for event in events if event.type == "tool_started"] == TOOL_NAMES
 
 
 async def test_fixture_runner_completes_empty_range_without_inventing_representative_data(

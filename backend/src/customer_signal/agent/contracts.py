@@ -46,7 +46,7 @@ class RunRequest(RunnerContract):
     question: str
     start_at: AwareDatetime
     end_at: AwareDatetime
-    enabled_sources: list[SourceId] = Field(min_length=1, max_length=3)
+    enabled_sources: list[SourceId] = Field(min_length=1, max_length=5)
 
     @field_validator("start_at", "end_at", mode="before")
     @classmethod
@@ -80,6 +80,14 @@ class RunRequest(RunnerContract):
         return self
 
 
+class MetricFact(RunnerContract):
+    """One exact, displayable metric authorized by a Tool result."""
+
+    label: str
+    value: MetricFactValue
+    unit: str | None = None
+
+
 class RunFacts(RunnerContract):
     """Claims authorized by structured tool results from one run."""
 
@@ -88,7 +96,7 @@ class RunFacts(RunnerContract):
     allowed_evidence_ids: frozenset[str]
     fetched_evidence_ids: frozenset[str] = frozenset()
     allowed_sources: frozenset[SourceId]
-    allowed_metric_values_by_result: dict[str, tuple[MetricFactValue, ...]]
+    allowed_metrics_by_result: dict[str, tuple[MetricFact, ...]]
     ranked_customer_facts: dict[str, RankedCustomer]
     representative_journey_result_ids: frozenset[str] = frozenset()
     journey_event_facts: dict[str, JourneyEvent] = Field(default_factory=dict)
@@ -117,8 +125,12 @@ class RunFacts(RunnerContract):
         for tool_name, result_id in self.tool_result_ids.items():
             if not result_id.startswith(f"{tool_name}:"):
                 raise ValueError(f"result_id is not bound to tool {tool_name}")
-        if set(self.allowed_metric_values_by_result) != set(result_ids):
+        if set(self.allowed_metrics_by_result) != set(result_ids):
             raise ValueError("metric facts must exist for every unique tool result_id")
+        for metrics in self.allowed_metrics_by_result.values():
+            semantics = [(metric.label, metric.unit) for metric in metrics]
+            if len(semantics) != len(set(semantics)):
+                raise ValueError("metric facts must have unique label and unit semantics")
 
         if not self.fetched_evidence_ids <= self.allowed_evidence_ids:
             raise ValueError("fetched evidence must be included in allowed evidence")
@@ -175,6 +187,7 @@ class UnsupportedClaimError(ValueError):
 __all__ = [
     "AnalysisRunner",
     "EventEmitter",
+    "MetricFact",
     "MetricFactValue",
     "ReportValidator",
     "RunFacts",

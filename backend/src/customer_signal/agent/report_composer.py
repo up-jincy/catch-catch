@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from typing import cast
 
-from customer_signal.agent.contracts import RunRequest, UnsupportedClaimError
-from customer_signal.agent.facts import SIGNAL_SOURCES
+from customer_signal.agent.contracts import RunFacts, RunRequest, UnsupportedClaimError
+from customer_signal.agent.facts import MATCHED_CUSTOMER_METRIC_LABEL, SIGNAL_SOURCES
 from customer_signal.analytics.models import (
     AggregateResult,
     CatalogSourcesResult,
@@ -208,7 +209,7 @@ def compose_verified_report(
         executive_summary=executive_summary,
         metrics=[
             Metric(
-                label="완전한 Journey 패턴 고객 수",
+                label=MATCHED_CUSTOMER_METRIC_LABEL,
                 value=customer_count,
                 unit="명",
                 result_id=matched.result_id,
@@ -227,4 +228,92 @@ def compose_verified_report(
     )
 
 
-__all__ = ["compose_verified_report"]
+_CLAIM_ID_PATTERN = re.compile(
+    r"(?:CUST-[A-Za-z0-9-]+|EVD-[A-Za-z0-9-]+|(?:catalog_sources|aggregate_events|"
+    r"match_journey_pattern|rank_customers|get_customer_journey|get_evidence):[A-Za-z0-9_-]+)"
+)
+_NUMBER_PATTERN = re.compile(r"(?<![A-Za-z0-9])\d+(?:\.\d+)?(?![A-Za-z0-9])")
+
+
+def _validate_model_text(text: str, canonical: InsightReport, facts: RunFacts) -> None:
+    if not text.strip() or len(text) > 1_000:
+        raise UnsupportedClaimError("Gemini 설명은 비어 있지 않은 제한된 길이여야 합니다.")
+
+    allowed_ids = {
+        *facts.allowed_customer_ids,
+        *facts.fetched_evidence_ids,
+        *facts.tool_result_ids.values(),
+    }
+    referenced_ids = _CLAIM_ID_PATTERN.findall(text)
+    if any(identifier not in allowed_ids for identifier in referenced_ids):
+        raise UnsupportedClaimError("Gemini 설명에 반환되지 않은 식별자가 포함됐습니다.")
+
+    allowed_numbers = {
+        str(metric.value)
+        for metric in canonical.metrics
+        if isinstance(metric.value, (int, float)) and not isinstance(metric.value, bool)
+    }
+    allowed_numbers.add("72")
+    for component in (
+        canonical.scope.start_at.year,
+        canonical.scope.start_at.month,
+        canonical.scope.start_at.day,
+        canonical.scope.end_at.year,
+        canonical.scope.end_at.month,
+        canonical.scope.end_at.day,
+    ):
+        allowed_numbers.add(str(component))
+    prose_without_ids = text
+    for identifier in sorted(referenced_ids, key=len, reverse=True):
+        prose_without_ids = prose_without_ids.replace(identifier, "")
+    if any(number not in allowed_numbers for number in _NUMBER_PATTERN.findall(prose_without_ids)):
+        raise UnsupportedClaimError("Gemini 설명에 검증되지 않은 수치가 포함됐습니다.")
+
+
+def apply_verified_model_narrative(
+    canonical: InsightReport,
+    draft: InsightReport,
+    facts: RunFacts,
+) -> InsightReport:
+    """Merge only evidence-bound model prose into the server-owned factual report."""
+
+    if not canonical.findings:
+        return canonical
+    if not draft.findings or not draft.recommendations:
+        raise UnsupportedClaimError("양수 Gemini 보고서에는 Finding과 Recommendation이 필요합니다.")
+
+    fetched = set(facts.fetched_evidence_ids)
+    if any(
+        len(finding.evidence_ids) != len(fetched) or set(finding.evidence_ids) != fetched
+        for finding in draft.findings
+    ):
+        raise UnsupportedClaimError("Gemini Finding이 검증된 Evidence와 일치하지 않습니다.")
+    if any(
+        recommendation.action_id != "care_call"
+        or len(recommendation.evidence_ids) != len(fetched)
+        or set(recommendation.evidence_ids) != fetched
+        for recommendation in draft.recommendations
+    ):
+        raise UnsupportedClaimError("Gemini Recommendation이 검증된 정책과 일치하지 않습니다.")
+
+    narrative = [
+        draft.headline,
+        draft.executive_summary,
+        *(finding.title for finding in draft.findings),
+        *(finding.description for finding in draft.findings),
+        *(recommendation.title for recommendation in draft.recommendations),
+        *(recommendation.reason for recommendation in draft.recommendations),
+    ]
+    for text in narrative:
+        _validate_model_text(text, canonical, facts)
+
+    published = canonical.model_copy(deep=True)
+    published.executive_summary = draft.executive_summary
+    published.findings = [finding.model_copy(deep=True) for finding in draft.findings]
+    published.recommendations = [
+        recommendation.model_copy(deep=True) for recommendation in draft.recommendations
+    ]
+    return published
+
+
+__all__ = ["apply_verified_model_narrative", "compose_verified_report"]

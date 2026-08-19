@@ -34,11 +34,17 @@ def validate_report(report: InsightReport, facts: RunFacts) -> InsightReport:
 
     result_ids = set(facts.tool_result_ids.values())
     for metric in report.metrics:
-        values = facts.allowed_metric_values_by_result.get(metric.result_id)
-        if metric.result_id not in result_ids or values is None:
+        supported_metrics = facts.allowed_metrics_by_result.get(metric.result_id)
+        if metric.result_id not in result_ids or supported_metrics is None:
             _raise("metric references an unsupported result")
-        if not any(type(metric.value) is type(value) and metric.value == value for value in values):
-            _raise("metric value is not present in its tool result")
+        if not any(
+            metric.label == supported.label
+            and type(metric.value) is type(supported.value)
+            and metric.value == supported.value
+            and metric.unit == supported.unit
+            for supported in supported_metrics
+        ):
+            _raise("metric does not match an exact semantic Tool fact")
 
     if len(report.sources_used) != len(set(report.sources_used)):
         _raise("source list contains duplicates")
