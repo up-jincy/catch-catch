@@ -20,7 +20,11 @@ from customer_signal.analytics.policies import (
     SAME_TOPIC_UNRESOLVED_VOC_SCORE,
     risk_level_for_score,
 )
-from customer_signal.analytics.service import AnalyticsInputError, AnalyticsService
+from customer_signal.analytics.service import (
+    AnalyticsDataLimitError,
+    AnalyticsInputError,
+    AnalyticsService,
+)
 from customer_signal.data.repository import (
     DuckDBRepository,
     EntityNotFoundError,
@@ -278,6 +282,109 @@ def test_pattern_boundaries_include_exactly_24_and_72_hours_and_exclude_just_ove
     ]
 
 
+def test_voc_before_selected_repeat_is_not_a_match_or_scored_voc_signal():
+    events = _full_pattern(
+        "CUST-001",
+        repeat_delta=timedelta(hours=2),
+        voc_delta=timedelta(hours=1),
+        include_feedback=False,
+    )
+    service = AnalyticsService(FakeRepository(events))
+    start_at = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    end_at = datetime(2026, 8, 2, tzinfo=timezone.utc)
+
+    matched = service.match_journey_pattern(start_at, end_at, ALL_SOURCES)
+    ranked = service.rank_customers(start_at, end_at, ALL_SOURCES)
+
+    assert matched.customer_ids == []
+    assert ranked.customers[0].risk_score == 50
+    assert [signal.code for signal in ranked.customers[0].signals] == [
+        "failed_search",
+        "repeated_failed_search",
+    ]
+
+
+def test_multiple_failures_topics_and_repeats_select_a_valid_chronological_triple():
+    failed_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    customer_id = "CUST-001"
+    events = [
+        _event(
+            "EVT-INVALID-FAILED",
+            customer_id,
+            failed_at,
+            source_id="search_history",
+            event_type="search",
+            action="search",
+            outcome="failed",
+            topic="요금",
+        ),
+        _event(
+            "EVT-INVALID-VOC",
+            customer_id,
+            failed_at + timedelta(hours=1),
+            source_id="voc",
+            event_type="voc",
+            action="contact_customer_service",
+            outcome="unresolved",
+            topic="요금",
+        ),
+        _event(
+            "EVT-INVALID-REPEAT",
+            customer_id,
+            failed_at + timedelta(hours=2),
+            source_id="search_history",
+            event_type="search",
+            action="repeat_search",
+            outcome="failed",
+            topic="요금",
+        ),
+        _event(
+            "EVT-VALID-FAILED",
+            customer_id,
+            failed_at + timedelta(hours=3),
+            source_id="search_history",
+            event_type="search",
+            action="search",
+            outcome="failed",
+            topic="인터넷 장애",
+        ),
+        _event(
+            "EVT-VALID-REPEAT",
+            customer_id,
+            failed_at + timedelta(hours=4),
+            source_id="search_history",
+            event_type="search",
+            action="repeat_search",
+            outcome="failed",
+            topic="인터넷 장애",
+        ),
+        _event(
+            "EVT-VALID-VOC",
+            customer_id,
+            failed_at + timedelta(hours=5),
+            source_id="voc",
+            event_type="voc",
+            action="contact_customer_service",
+            outcome="unresolved",
+            topic="인터넷 장애",
+        ),
+    ]
+    service = AnalyticsService(FakeRepository(events))
+
+    result = service.match_journey_pattern(
+        start_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
+        end_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
+        enabled_sources=["search_history", "voc"],
+    )
+
+    assert result.customer_ids == [customer_id]
+    assert result.customers[0].evidence_ids == [
+        "EVD-VALID-FAILED",
+        "EVD-VALID-REPEAT",
+        "EVD-VALID-VOC",
+    ]
+
+
 def test_negative_feedback_same_topic_adds_twenty_points_but_is_not_required():
     events = [
         *_full_pattern("CUST-WITH", include_feedback=True),
@@ -302,19 +409,30 @@ def test_negative_feedback_same_topic_adds_twenty_points_but_is_not_required():
     assert feedback_signal.score == 20
 
 
-def test_negative_feedback_same_topic_is_supportive_regardless_of_event_order():
+def test_negative_feedback_only_counts_after_failure_and_no_later_than_valid_voc():
     events = _full_pattern("CUST-001", include_feedback=False)
     failed_at = min(event.occurred_at for event in events)
-    events.append(
-        _event(
-            "EVT-CUST-001-00",
-            "CUST-001",
-            failed_at - timedelta(minutes=1),
-            source_id="search_feedback",
-            event_type="feedback",
-            action="submit_feedback",
-            outcome="negative",
-        )
+    events.extend(
+        [
+            _event(
+                "EVT-CUST-001-00",
+                "CUST-001",
+                failed_at - timedelta(minutes=1),
+                source_id="search_feedback",
+                event_type="feedback",
+                action="submit_feedback",
+                outcome="negative",
+            ),
+            _event(
+                "EVT-CUST-001-05",
+                "CUST-001",
+                failed_at + timedelta(hours=3),
+                source_id="search_feedback",
+                event_type="feedback",
+                action="submit_feedback",
+                outcome="negative",
+            ),
+        ]
     )
     service = AnalyticsService(FakeRepository(events))
 
@@ -324,7 +442,10 @@ def test_negative_feedback_same_topic_is_supportive_regardless_of_event_order():
         enabled_sources=ALL_SOURCES,
     )
 
-    assert result.customers[0].risk_score == 100
+    assert result.customers[0].risk_score == 80
+    assert "negative_feedback" not in {
+        signal.code for signal in result.customers[0].signals
+    }
 
 
 def test_policy_scores_and_risk_thresholds_are_exact():
@@ -534,6 +655,36 @@ def test_service_loads_each_enabled_source_separately_then_merges():
         ["voc"],
     ]
     assert all(call["limit"] == 100 for call in repository.list_calls)
+
+
+def test_service_rejects_source_with_more_rows_than_repository_read_limit():
+    occurred_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    events = [
+        _event(
+            f"EVT-{index:03d}",
+            "CUST-001",
+            occurred_at + timedelta(minutes=index),
+            source_id="search_history",
+            event_type="search",
+            action="search",
+            outcome="success",
+        )
+        for index in range(101)
+    ]
+    repository = FakeRepository(events)
+    service = AnalyticsService(repository)
+
+    with pytest.raises(
+        AnalyticsDataLimitError,
+        match=r"search_history.*101",
+    ):
+        service.aggregate_events(
+            start_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            end_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
+            enabled_sources=["search_history"],
+        )
+
+    assert repository.list_calls == []
 
 
 @pytest.mark.parametrize(

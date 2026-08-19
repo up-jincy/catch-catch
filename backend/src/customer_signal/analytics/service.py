@@ -40,10 +40,15 @@ _SOURCE_ORDER = {source_id: index for index, source_id in enumerate(SOURCE_IDS)}
 _SOURCE_SET = frozenset(SOURCE_IDS)
 _REQUIRED_PATTERN_SOURCES = ("search_history", "voc")
 _AGGREGATE_DIMENSIONS = frozenset(("source", "topic", "outcome"))
+_REPOSITORY_READ_LIMIT = 100
 
 
 class AnalyticsInputError(ValueError):
     """Raised when a public analytics input violates its bounded contract."""
+
+
+class AnalyticsDataLimitError(RuntimeError):
+    """Raised rather than returning analytics from a truncated source read."""
 
 
 class AnalyticsRepository(Protocol):
@@ -205,20 +210,32 @@ def _score_sequence(
         and event.topic == failed.topic
         and failed.occurred_at < event.occurred_at <= repeat_deadline
     ]
-    feedback = [
-        event
-        for event in events
-        if event.event_type == "feedback"
-        and event.outcome == "negative"
-        and event.topic == failed.topic
-    ]
-    vocs = [
+    unresolved_vocs = [
         event
         for event in events
         if event.event_type == "voc"
         and event.outcome == "unresolved"
         and event.topic == failed.topic
         and failed.occurred_at < event.occurred_at <= voc_deadline
+    ]
+    selected_repeat = repeats[0] if repeats else None
+    selected_voc = None
+    for repeat in repeats:
+        following_vocs = [
+            voc for voc in unresolved_vocs if voc.occurred_at > repeat.occurred_at
+        ]
+        if following_vocs:
+            selected_repeat = repeat
+            selected_voc = following_vocs[0]
+            break
+    feedback = [
+        event
+        for event in events
+        if event.event_type == "feedback"
+        and event.outcome == "negative"
+        and event.topic == failed.topic
+        and event.occurred_at > failed.occurred_at
+        and (selected_voc is None or event.occurred_at <= selected_voc.occurred_at)
     ]
 
     signals = [
@@ -229,13 +246,13 @@ def _score_sequence(
             evidence_ids=[failed.evidence_id],
         )
     ]
-    if repeats:
+    if selected_repeat is not None:
         signals.append(
             Signal(
                 code="repeated_failed_search",
                 label="Same-topic failed repeat within 24 hours",
                 score=SAME_TOPIC_FAILED_REPEAT_SCORE,
-                evidence_ids=[repeats[0].evidence_id],
+                evidence_ids=[selected_repeat.evidence_id],
             )
         )
     if feedback:
@@ -247,13 +264,13 @@ def _score_sequence(
                 evidence_ids=[feedback[0].evidence_id],
             )
         )
-    if vocs:
+    if selected_voc is not None:
         signals.append(
             Signal(
                 code="unresolved_voc",
                 label="Same-topic unresolved VOC within 72 hours",
                 score=SAME_TOPIC_UNRESOLVED_VOC_SCORE,
-                evidence_ids=[vocs[0].evidence_id],
+                evidence_ids=[selected_voc.evidence_id],
             )
         )
 
@@ -271,7 +288,7 @@ def _score_sequence(
     )
     return _ScoredSequence(
         customer,
-        matched=bool(repeats and vocs),
+        matched=selected_voc is not None,
         failed_at=failed.occurred_at,
         topic=failed.topic,
     )
@@ -328,6 +345,16 @@ class AnalyticsService:
         *,
         customer_id: str | None = None,
     ) -> list[CustomerEvent]:
+        catalog = self._repository.catalog_sources(start_at, end_at)
+        row_counts = {entry.source_id: entry.row_count for entry in catalog}
+        for source_id in enabled_sources:
+            row_count = row_counts.get(source_id, 0)
+            if row_count > _REPOSITORY_READ_LIMIT:
+                raise AnalyticsDataLimitError(
+                    f"source {source_id} has {row_count} rows; "
+                    f"maximum supported is {_REPOSITORY_READ_LIMIT}"
+                )
+
         events: list[CustomerEvent] = []
         for source_id in enabled_sources:
             events.extend(
@@ -336,7 +363,7 @@ class AnalyticsService:
                     end_at=end_at,
                     enabled_sources=[source_id],
                     customer_id=customer_id,
-                    limit=100,
+                    limit=_REPOSITORY_READ_LIMIT,
                 )
             )
         return sorted(events, key=lambda event: (event.occurred_at, event.event_id))
@@ -572,4 +599,4 @@ class AnalyticsService:
         return EvidenceResult(result_id=result_id, **result_payload)
 
 
-__all__ = ["AnalyticsInputError", "AnalyticsService"]
+__all__ = ["AnalyticsDataLimitError", "AnalyticsInputError", "AnalyticsService"]
