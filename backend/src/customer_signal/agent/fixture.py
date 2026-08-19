@@ -1,0 +1,551 @@
+"""Deterministic fixture analysis orchestrated through the real MCP boundary."""
+
+from __future__ import annotations
+
+import inspect
+import json
+from collections.abc import Sequence
+from time import perf_counter
+from typing import Any, Protocol, cast
+
+from fastmcp import Client, FastMCP
+
+from customer_signal.agent.contracts import (
+    EventEmitter,
+    MetricFactValue,
+    ReportValidator,
+    RunFacts,
+    RunRequest,
+    RunnerOutcome,
+    UnsupportedClaimError,
+    UnsupportedQuestionError,
+)
+from customer_signal.agent.validator import validate_report
+from customer_signal.analytics.models import (
+    AggregateResult,
+    AnalyticsResultModel,
+    CatalogSourcesResult,
+    CustomerJourneyResult,
+    EvidenceResult,
+    PatternMatchResult,
+    RankCustomersResult,
+)
+from customer_signal.domain.models import SourceId
+from customer_signal.domain.reports import (
+    AnalysisScope,
+    Finding,
+    InsightReport,
+    Metric,
+    Recommendation,
+    Signal,
+    SignalContribution,
+)
+from customer_signal.runtime.events import RunnerEvent
+
+
+_SUPPORTED_INTENT_TERMS = (
+    "검색",
+    "재검색",
+    "다시 찾",
+    "찾아본",
+    "고객센터",
+    "고객지원센터",
+    "상담",
+    "문의",
+    "리서치",
+)
+_SIGNAL_SOURCES: dict[str, SourceId] = {
+    "failed_search": "search_history",
+    "repeated_failed_search": "search_history",
+    "negative_feedback": "search_feedback",
+    "unresolved_voc": "voc",
+}
+_PLAN_STEPS = [
+    "분석 가능한 Source와 기간 확인",
+    "Topic별 이벤트 집계",
+    "검색 실패 후 문의 Journey 패턴 확인",
+    "고객 위험 신호 순위 확인",
+    "대표 고객 Journey와 Evidence 확인",
+    "Run 근거와 최종 보고서 검증",
+]
+
+
+class ToolCaller(Protocol):
+    """The small subset of an already-connected FastMCP client used by the runner."""
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+    ) -> Any: ...
+
+
+async def _emit(emit: EventEmitter, event: RunnerEvent) -> None:
+    pending = emit(event)
+    if inspect.isawaitable(pending):
+        await pending
+
+
+def _supports(question: str) -> bool:
+    normalized = "".join(question.casefold().split())
+    return any(term in normalized for term in _SUPPORTED_INTENT_TERMS)
+
+
+def _distinct_metric_values(values: Sequence[MetricFactValue]) -> tuple[MetricFactValue, ...]:
+    distinct: list[MetricFactValue] = []
+    for value in values:
+        if not any(type(value) is type(existing) and value == existing for existing in distinct):
+            distinct.append(value)
+    return tuple(distinct)
+
+
+def _metric_facts(
+    catalog: CatalogSourcesResult,
+    aggregate: AggregateResult,
+    matched: PatternMatchResult,
+    ranked: RankCustomersResult,
+    journey: CustomerJourneyResult,
+    evidence: EvidenceResult,
+) -> dict[str, tuple[MetricFactValue, ...]]:
+    return {
+        catalog.result_id: _distinct_metric_values(
+            [
+                catalog.stats.scanned_rows,
+                catalog.stats.returned_rows,
+                *(source.row_count for source in catalog.sources),
+            ]
+        ),
+        aggregate.result_id: _distinct_metric_values(
+            [
+                aggregate.stats.scanned_rows,
+                aggregate.stats.returned_rows,
+                *(bucket.event_count for bucket in aggregate.buckets),
+                *(bucket.customer_count for bucket in aggregate.buckets),
+            ]
+        ),
+        matched.result_id: _distinct_metric_values(
+            [
+                matched.candidate_count,
+                matched.customer_count,
+                matched.stats.scanned_rows,
+                matched.stats.returned_rows,
+            ]
+        ),
+        ranked.result_id: _distinct_metric_values(
+            [
+                ranked.candidate_count,
+                ranked.customer_count,
+                ranked.stats.scanned_rows,
+                ranked.stats.returned_rows,
+            ]
+        ),
+        journey.result_id: _distinct_metric_values(
+            [journey.stats.scanned_rows, journey.stats.returned_rows]
+        ),
+        evidence.result_id: _distinct_metric_values(
+            [evidence.stats.scanned_rows, evidence.stats.returned_rows]
+        ),
+    }
+
+
+def _source_contributions(
+    matched: PatternMatchResult,
+    enabled_sources: Sequence[SourceId],
+) -> list[SignalContribution]:
+    if not matched.customers:
+        return []
+
+    grouped: dict[SourceId, list[Signal]] = {}
+    for signal in matched.customers[0].signals:
+        source_id = _SIGNAL_SOURCES.get(signal.code)
+        if source_id is None or source_id not in enabled_sources:
+            continue
+        grouped.setdefault(source_id, []).append(signal.model_copy(deep=True))
+
+    return [
+        SignalContribution(
+            source_id=source_id,
+            score=sum(signal.score for signal in grouped[source_id]),
+            signals=grouped[source_id],
+        )
+        for source_id in enabled_sources
+        if source_id in grouped
+    ]
+
+
+def _build_report(
+    request: RunRequest,
+    *,
+    catalog: CatalogSourcesResult,
+    aggregate: AggregateResult,
+    matched: PatternMatchResult,
+    journey: CustomerJourneyResult,
+    selected_evidence_id: str,
+) -> InsightReport:
+    present_sources = {source.source_id for source in catalog.sources}
+    sources_used = [
+        source_id for source_id in request.enabled_sources if source_id in present_sources
+    ]
+    customer_count = matched.customer_count
+    selected_event = next(
+        event for event in journey.events if event.evidence_id == selected_evidence_id
+    )
+    top_topic = selected_event.topic
+    if aggregate.buckets:
+        aggregate_top = min(
+            aggregate.buckets,
+            key=lambda bucket: (-bucket.event_count, bucket.value),
+        )
+        top_topic = aggregate_top.value
+
+    if customer_count:
+        headline = f"검색 실패 후 문의로 이어진 고객 {customer_count}명"
+        executive_summary = (
+            f"요청 기간에 완전한 Journey 패턴이 확인됐으며 주요 집계 Topic은 "
+            f"'{top_topic}'입니다."
+        )
+        findings = [
+            Finding(
+                title="완전한 Journey 패턴 확인",
+                description=(
+                    f"검색 실패와 후속 문의 조건을 모두 충족한 고객은 {customer_count}명입니다."
+                ),
+                confidence="high",
+                evidence_ids=[selected_evidence_id],
+            )
+        ]
+        recommendations = [
+            Recommendation(
+                action_id="care_call",
+                title="대표 고위험 고객 후속 확인",
+                reason="반복 검색과 미해결 문의가 연결된 대표 Journey가 확인됐습니다.",
+                evidence_ids=[selected_evidence_id],
+            )
+        ]
+    else:
+        headline = "검색 실패 후 문의로 이어진 고객 0명"
+        executive_summary = (
+            "활성 Source 범위에서는 완전한 Journey 패턴이 확인되지 않았습니다."
+        )
+        findings = []
+        recommendations = [
+            Recommendation(
+                action_id="further_analysis",
+                title="부분 Journey 후보 추가 분석",
+                reason="검색 신호가 있는 대표 후보를 확인하고 누락 Source를 보완해야 합니다.",
+                evidence_ids=[selected_evidence_id],
+            )
+        ]
+
+    missing_sources = list(dict.fromkeys(matched.missing_sources))
+    limitations = [
+        f"{source_id} Source가 없어 완전한 패턴 판단이 제한됩니다."
+        for source_id in missing_sources
+    ]
+    for source_id in request.enabled_sources:
+        if source_id not in present_sources and source_id not in missing_sources:
+            limitations.append(f"{source_id} Source에 요청 기간 데이터가 없습니다.")
+
+    return InsightReport(
+        analysis_type="journey",
+        scope=AnalysisScope(
+            start_at=request.start_at,
+            end_at=request.end_at,
+            enabled_sources=list(request.enabled_sources),
+            population_description="검색 실패 후 같은 Topic의 후속 문의 Journey",
+        ),
+        headline=headline,
+        executive_summary=executive_summary,
+        metrics=[
+            Metric(
+                label="완전한 Journey 패턴 고객 수",
+                value=customer_count,
+                unit="명",
+                result_id=matched.result_id,
+            )
+        ],
+        findings=findings,
+        signal_contributions=_source_contributions(matched, request.enabled_sources),
+        ranked_customers=[customer.model_copy(deep=True) for customer in matched.customers],
+        representative_journeys=[event.model_copy(deep=True) for event in journey.events],
+        representative_journey_ids=[journey.result_id],
+        recommendations=recommendations,
+        sources_used=sources_used,
+        limitations=limitations,
+    )
+
+
+def _build_facts(
+    request: RunRequest,
+    *,
+    catalog: CatalogSourcesResult,
+    aggregate: AggregateResult,
+    matched: PatternMatchResult,
+    ranked: RankCustomersResult,
+    journey: CustomerJourneyResult,
+    evidence: EvidenceResult,
+) -> RunFacts:
+    present_sources = {source.source_id for source in catalog.sources}
+    allowed_evidence_ids = {
+        evidence_id
+        for customer in matched.customers
+        for evidence_id in customer.evidence_ids
+    }
+    allowed_evidence_ids.update(journey.evidence_ids)
+    allowed_customer_ids = {customer.customer_id for customer in ranked.customers}
+    allowed_customer_ids.update(matched.customer_ids)
+    allowed_customer_ids.add(journey.customer_id)
+
+    return RunFacts(
+        tool_result_ids={
+            "catalog_sources": catalog.result_id,
+            "aggregate_events": aggregate.result_id,
+            "match_journey_pattern": matched.result_id,
+            "rank_customers": ranked.result_id,
+            "get_customer_journey": journey.result_id,
+            "get_evidence": evidence.result_id,
+        },
+        allowed_customer_ids=frozenset(allowed_customer_ids),
+        allowed_evidence_ids=frozenset(allowed_evidence_ids),
+        allowed_sources=frozenset(
+            source_id
+            for source_id in request.enabled_sources
+            if source_id in present_sources
+        ),
+        allowed_metric_values_by_result=_metric_facts(
+            catalog,
+            aggregate,
+            matched,
+            ranked,
+            journey,
+            evidence,
+        ),
+        ranked_customer_facts={
+            customer.customer_id: customer.model_copy(deep=True)
+            for customer in matched.customers
+        },
+        representative_journey_result_ids=frozenset([journey.result_id]),
+        journey_event_facts={
+            event.event_id: event.model_copy(deep=True) for event in journey.events
+        },
+        signal_source_facts={
+            signal.code: source_id
+            for customer in matched.customers
+            for signal in customer.signals
+            if (source_id := _SIGNAL_SOURCES.get(signal.code)) is not None
+        },
+    )
+
+
+class FixtureRunner:
+    """Execute the fixed six-tool path through one in-process FastMCP session."""
+
+    def __init__(
+        self,
+        server: FastMCP,
+        *,
+        validator: ReportValidator = validate_report,
+    ) -> None:
+        self._server = server
+        self._validator = validator
+
+    async def _call_tool[T: AnalyticsResultModel](
+        self,
+        client: ToolCaller,
+        *,
+        name: str,
+        arguments: dict[str, Any],
+        source: Sequence[SourceId],
+        result_type: type[T],
+        emit: EventEmitter,
+    ) -> T:
+        await _emit(
+            emit,
+            RunnerEvent(
+                type="tool_started",
+                payload={"tool": name, "source": list(source)},
+            ),
+        )
+        started_at = perf_counter()
+        response = await client.call_tool(name, arguments)
+        duration_ms = round((perf_counter() - started_at) * 1000, 3)
+        if response.is_error or not isinstance(response.structured_content, dict):
+            raise RuntimeError(f"MCP tool failed: {name}")
+        result = result_type.model_validate_json(
+            json.dumps(response.structured_content, ensure_ascii=False)
+        )
+        await _emit(
+            emit,
+            RunnerEvent(
+                type="tool_completed",
+                payload={
+                    "tool": name,
+                    "source": list(source),
+                    "count": result.stats.returned_rows,
+                    "duration_ms": duration_ms,
+                    "result_id": result.result_id,
+                },
+            ),
+        )
+        return result
+
+    async def run(
+        self,
+        request: RunRequest,
+        *,
+        emit: EventEmitter,
+    ) -> RunnerOutcome:
+        if not _supports(request.question):
+            error = UnsupportedQuestionError(
+                "검색 실패와 고객 문의 Journey 질문만 지원합니다."
+            )
+            await _emit(
+                emit,
+                RunnerEvent(
+                    type="error",
+                    payload={"code": error.code, "message": str(error)},
+                ),
+            )
+            raise error
+
+        await _emit(emit, RunnerEvent(type="plan", payload={"steps": _PLAN_STEPS}))
+        scope = {
+            "start_at": request.start_at.isoformat(),
+            "end_at": request.end_at.isoformat(),
+            "enabled_sources": list(request.enabled_sources),
+        }
+
+        try:
+            async with Client(self._server) as client:
+                caller = cast(ToolCaller, client)
+                catalog = await self._call_tool(
+                    caller,
+                    name="catalog_sources",
+                    arguments={
+                        "start_at": scope["start_at"],
+                        "end_at": scope["end_at"],
+                    },
+                    source=request.enabled_sources,
+                    result_type=CatalogSourcesResult,
+                    emit=emit,
+                )
+                aggregate = await self._call_tool(
+                    caller,
+                    name="aggregate_events",
+                    arguments={**scope, "group_by": "topic"},
+                    source=request.enabled_sources,
+                    result_type=AggregateResult,
+                    emit=emit,
+                )
+                matched = await self._call_tool(
+                    caller,
+                    name="match_journey_pattern",
+                    arguments=scope,
+                    source=request.enabled_sources,
+                    result_type=PatternMatchResult,
+                    emit=emit,
+                )
+                ranked = await self._call_tool(
+                    caller,
+                    name="rank_customers",
+                    arguments=scope,
+                    source=request.enabled_sources,
+                    result_type=RankCustomersResult,
+                    emit=emit,
+                )
+
+                representatives = matched.customers or ranked.customers
+                if not representatives:
+                    raise UnsupportedClaimError(
+                        "대표 Journey를 선택할 고객 후보가 없습니다."
+                    )
+                representative = representatives[0]
+                journey = await self._call_tool(
+                    caller,
+                    name="get_customer_journey",
+                    arguments={**scope, "customer_id": representative.customer_id},
+                    source=request.enabled_sources,
+                    result_type=CustomerJourneyResult,
+                    emit=emit,
+                )
+                if not journey.evidence_ids:
+                    raise UnsupportedClaimError("대표 Journey에 Evidence가 없습니다.")
+                representative_evidence = set(representative.evidence_ids)
+                selected_evidence_id = next(
+                    (
+                        evidence_id
+                        for evidence_id in reversed(journey.evidence_ids)
+                        if evidence_id in representative_evidence
+                    ),
+                    journey.evidence_ids[-1],
+                )
+                selected_event = next(
+                    event
+                    for event in journey.events
+                    if event.evidence_id == selected_evidence_id
+                )
+                evidence = await self._call_tool(
+                    caller,
+                    name="get_evidence",
+                    arguments={"evidence_ids": [selected_evidence_id]},
+                    source=[selected_event.source_id],
+                    result_type=EvidenceResult,
+                    emit=emit,
+                )
+
+            report = _build_report(
+                request,
+                catalog=catalog,
+                aggregate=aggregate,
+                matched=matched,
+                journey=journey,
+                selected_evidence_id=selected_evidence_id,
+            )
+            facts = _build_facts(
+                request,
+                catalog=catalog,
+                aggregate=aggregate,
+                matched=matched,
+                ranked=ranked,
+                journey=journey,
+                evidence=evidence,
+            )
+            await _emit(
+                emit,
+                RunnerEvent(
+                    type="validating",
+                    payload={"result_ids": list(facts.tool_result_ids.values())},
+                ),
+            )
+            self._validator(report, facts)
+            outcome = RunnerOutcome(report=report, facts=facts)
+            await _emit(
+                emit,
+                RunnerEvent(
+                    type="result",
+                    payload={
+                        "agent_mode": outcome.agent_mode,
+                        "report": report.model_dump(mode="json"),
+                    },
+                ),
+            )
+            return outcome
+        except Exception as error:
+            if isinstance(error, (UnsupportedClaimError, UnsupportedQuestionError)):
+                code = error.code
+                message = str(error)
+            else:
+                code = "tool_execution_failed"
+                message = "분석 Tool 실행에 실패했습니다."
+            await _emit(
+                emit,
+                RunnerEvent(
+                    type="error",
+                    payload={"code": code, "message": message},
+                ),
+            )
+            raise
+
+
+__all__ = ["FixtureRunner", "ToolCaller"]
+
