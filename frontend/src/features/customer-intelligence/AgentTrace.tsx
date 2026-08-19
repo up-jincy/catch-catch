@@ -110,7 +110,14 @@ function latestStatus(
         ? "Agent가 분석을 시작했습니다."
         : phaseLabels[phase];
   }
-  return eventView(latest).title;
+  const view = eventView(latest);
+  if (latest.type === "tool_started") {
+    return `${view.title} 시작 · ${view.detail}`;
+  }
+  if (latest.type === "tool_completed") {
+    return `${view.title} 완료 · ${latest.data.count.toLocaleString("ko-KR")}건 · ${Math.round(latest.data.duration_ms)}ms`;
+  }
+  return view.title;
 }
 
 export function AgentTrace({
@@ -134,7 +141,12 @@ export function AgentTrace({
         </span>
       </div>
 
-      <p className="sr-only" aria-live="polite" aria-atomic="true">
+      <p
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
         {latestStatus(displayPhase, events, isCreating)}
       </p>
 

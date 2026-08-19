@@ -14,10 +14,11 @@ import type {
   EvidenceResult,
   RunAccepted,
   RunRequest,
+  RunError,
   RunStreamEvent,
   SourceId,
 } from "./contracts";
-import { RunClient } from "./run-client";
+import { RunClient, RunClientError } from "./run-client";
 import { initialRunState, runReducer } from "./run-reducer";
 
 export const RECOMMENDED_QUESTION =
@@ -74,14 +75,24 @@ function isAbort(error: unknown): boolean {
   );
 }
 
-function publicError(error: unknown, area: "run" | "journey" | "evidence"): string {
-  if (area === "run") {
-    return "분석 서버에 연결하지 못했어요. 연결을 확인한 뒤 다시 분석해 주세요.";
-  }
+function detailError(area: "journey" | "evidence"): string {
   if (area === "journey") {
     return "고객 Journey를 불러오지 못했어요.";
   }
   return "Evidence를 불러오지 못했어요.";
+}
+
+function publicRunError(error: unknown): RunError {
+  if (error instanceof RunClientError) {
+    return {
+      code: error.code,
+      message: error.message,
+    };
+  }
+  return {
+    code: "network_error",
+    message: "분석 서버에 연결하지 못했습니다. 연결을 확인해 주세요.",
+  };
 }
 
 function dateAtSeoulMidnight(date: string): string {
@@ -104,6 +115,9 @@ export function useRunController(providedClient?: CustomerIntelligenceClient) {
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [submissionErrorKind, setSubmissionErrorKind] =
     useState<SubmissionErrorKind | null>(null);
+  const [submissionErrorCode, setSubmissionErrorCode] = useState<string | null>(
+    null,
+  );
   const [journeyState, setJourneyState] = useState<
     DetailState<CustomerJourneyResult>
   >(idleDetail);
@@ -187,7 +201,7 @@ export function useRunController(providedClient?: CustomerIntelligenceClient) {
           status: "error",
           key: customerId,
           data: null,
-          error: publicError(error, "journey"),
+          error: detailError("journey"),
         });
       }
     },
@@ -244,7 +258,7 @@ export function useRunController(providedClient?: CustomerIntelligenceClient) {
           status: "error",
           key: nextEvidenceId,
           data: null,
-          error: publicError(error, "evidence"),
+          error: detailError("evidence"),
         });
       }
     },
@@ -256,11 +270,13 @@ export function useRunController(providedClient?: CustomerIntelligenceClient) {
     if (!normalizedQuestion) {
       setSubmissionError("분석할 질문을 입력해 주세요.");
       setSubmissionErrorKind("validation");
+      setSubmissionErrorCode("local_validation");
       return;
     }
     if (!startDate || !endDate || startDate >= endDate) {
       setSubmissionError("종료일은 시작일보다 뒤여야 합니다.");
       setSubmissionErrorKind("validation");
+      setSubmissionErrorCode("local_validation");
       return;
     }
 
@@ -273,6 +289,7 @@ export function useRunController(providedClient?: CustomerIntelligenceClient) {
     dispatch({ kind: "reset" });
     setSubmissionError(null);
     setSubmissionErrorKind(null);
+    setSubmissionErrorCode(null);
     setIsCreating(true);
 
     const request: RunRequest = {
@@ -292,8 +309,10 @@ export function useRunController(providedClient?: CustomerIntelligenceClient) {
         !controller.signal.aborted &&
         !isAbort(error)
       ) {
-        setSubmissionError(publicError(error, "run"));
+        const failure = publicRunError(error);
+        setSubmissionError(failure.message);
         setSubmissionErrorKind("network");
+        setSubmissionErrorCode(failure.code);
       }
       if (mountedRef.current && runVersionRef.current === runVersion) {
         setIsCreating(false);
@@ -346,10 +365,11 @@ export function useRunController(providedClient?: CustomerIntelligenceClient) {
         !controller.signal.aborted &&
         !isAbort(error)
       ) {
+        const failure = publicRunError(error);
         dispatch({
           kind: "failed",
           runId: accepted.run_id,
-          error: { code: "stream_error", message: publicError(error, "run") },
+          error: failure,
         });
       }
       return;
@@ -476,6 +496,7 @@ export function useRunController(providedClient?: CustomerIntelligenceClient) {
     isCreating,
     submissionError,
     submissionErrorKind,
+    submissionErrorCode,
     run,
     selectCustomer,
     journeyState,

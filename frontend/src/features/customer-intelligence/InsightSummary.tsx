@@ -14,6 +14,7 @@ interface InsightSummaryProps {
   fallbackReason: string | null;
   submissionError: string | null;
   submissionErrorKind: SubmissionErrorKind | null;
+  submissionErrorCode: string | null;
   isCreating: boolean;
   error: RunError | null;
   onRetry: () => void;
@@ -35,36 +36,91 @@ function metricText(value: number | string, unit: string | null) {
   return `${typeof value === "number" ? value.toLocaleString("ko-KR") : value}${unit ?? ""}`;
 }
 
+interface FailurePresentation {
+  heading: string;
+  guidance: string;
+  unsupported?: boolean;
+}
+
+function failurePresentation(code: string | null): FailurePresentation {
+  if (code === "unsupported_question") {
+    return {
+      heading: "아직 이 질문은 지원하지 않아요",
+      guidance:
+        "현재는 검색 실패 후 고객센터 문의로 이어진 Journey를 분석할 수 있습니다.",
+      unsupported: true,
+    };
+  }
+  if (code === "unsupported_claim") {
+    return {
+      heading: "분석 결과의 근거를 검증하지 못했어요",
+      guidance: "안전하게 결과 표시를 중단했습니다.",
+    };
+  }
+  if (code === "protocol_error" || code === "invalid_response") {
+    return {
+      heading: "결과 근거를 검증하지 못했어요",
+      guidance: "분석 응답 계약을 확인할 수 없어 안전하게 결과를 숨겼습니다.",
+    };
+  }
+  if (code === "tool_execution_failed" || code === "run_failed") {
+    return {
+      heading: "분석 도구 실행을 완료하지 못했어요",
+      guidance: "데이터 Source 조회 중 문제가 발생했습니다.",
+    };
+  }
+  if (
+    code === "network_error" ||
+    code === "stream_error" ||
+    code === "stream_ended"
+  ) {
+    return {
+      heading: "분석 서버에 연결하지 못했어요",
+      guidance: "연결 상태를 확인한 뒤 같은 질문으로 다시 분석해 주세요.",
+    };
+  }
+  if (code === "http_error") {
+    return {
+      heading: "분석 요청을 처리하지 못했어요",
+      guidance: "서버가 요청을 거절했습니다. 입력과 서버 상태를 확인해 주세요.",
+    };
+  }
+  return {
+    heading: "분석을 완료하지 못했어요",
+    guidance: "잠시 후 같은 질문으로 다시 분석해 주세요.",
+  };
+}
+
 function FailureState({
-  unsupported,
+  code,
   message,
   onRetry,
 }: {
-  unsupported: boolean;
+  code: string | null;
   message: string;
   onRetry: () => void;
 }) {
+  const presentation = failurePresentation(code);
   return (
     <section className="panel insight-panel state-panel" aria-labelledby="failure-title">
       <div className="state-symbol state-symbol-error" aria-hidden="true">
         !
       </div>
       <p className="section-kicker">ANALYSIS PAUSED</p>
-      <h2 id="failure-title">
-        {unsupported
-          ? "아직 이 질문은 지원하지 않아요"
-          : "분석 서버에 연결하지 못했어요"}
-      </h2>
+      <h2 id="failure-title">{presentation.heading}</h2>
       <p>{message}</p>
-      {unsupported ? (
+      {presentation.unsupported ? (
         <p className="support-range">
           현재는 <strong>검색 실패 후 고객센터 문의로 이어진 Journey</strong>를
           분석할 수 있습니다. 왼쪽 추천 질문으로 다시 시도해 보세요.
         </p>
       ) : (
-        <button className="secondary-action" type="button" onClick={onRetry}>
-          다시 분석
-        </button>
+        <>
+          <p className="recovery-guidance">{presentation.guidance}</p>
+          <button className="secondary-action" type="button" onClick={onRetry}>
+            다시 분석
+          </button>
+        </>
       )}
     </section>
   );
@@ -77,20 +133,25 @@ export function InsightSummary({
   fallbackReason,
   submissionError,
   submissionErrorKind,
+  submissionErrorCode,
   isCreating,
   error,
   onRetry,
 }: InsightSummaryProps) {
   if (submissionError && submissionErrorKind === "network") {
     return (
-      <FailureState unsupported={false} message={submissionError} onRetry={onRetry} />
+      <FailureState
+        code={submissionErrorCode}
+        message={submissionError}
+        onRetry={onRetry}
+      />
     );
   }
 
   if (phase === "failed") {
     return (
       <FailureState
-        unsupported={error?.code === "unsupported_question"}
+        code={error?.code ?? null}
         message={error?.message ?? "분석을 완료하지 못했습니다."}
         onRetry={onRetry}
       />

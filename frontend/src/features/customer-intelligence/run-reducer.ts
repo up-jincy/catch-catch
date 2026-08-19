@@ -79,6 +79,17 @@ function reduceEvent(state: RunState, event: RunStreamEvent): RunState {
       if (event.data.status === "failed" || next.error) {
         return { ...next, phase: "failed" };
       }
+      if (!next.report || !next.agentMode) {
+        return {
+          ...next,
+          phase: "failed",
+          error: {
+            code: "protocol_error",
+            message:
+              "검증된 분석 결과 없이 Run이 완료되어 결과 표시를 중단했습니다.",
+          },
+        };
+      }
       return {
         ...next,
         phase: next.fallbackReason ? "degraded" : "completed",

@@ -21,6 +21,7 @@ import type {
 } from "../contracts";
 import { CustomerIntelligencePage } from "../CustomerIntelligencePage";
 import type { CustomerIntelligenceClient } from "../use-run-controller";
+import { RunClientError } from "../run-client";
 
 const scope = {
   start_at: "2026-07-20T00:00:00+09:00",
@@ -475,6 +476,27 @@ describe("CustomerIntelligencePage", () => {
     await waitFor(() => expect(client.getJourney).toHaveBeenCalledTimes(1));
   });
 
+  it("결과 없는 completed 이벤트는 계약 오류로 중단하고 재실행 경로를 제공한다", async () => {
+    const user = userEvent.setup();
+    const client = new ControlledClient();
+    render(<CustomerIntelligencePage client={client} />);
+
+    await startRun(user);
+    client.emit(
+      "run-1",
+      event({ id: 1, type: "done", data: { status: "completed" } }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "결과 근거를 검증하지 못했어요" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/검증된 분석 결과 없이 Run이 완료/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "다시 분석" })).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
   it("빈 질문과 잘못된 날짜는 서버 장애로 오해시키지 않고 입력 옆에서 안내한다", async () => {
     const user = userEvent.setup();
     const client = new ControlledClient();
@@ -621,7 +643,9 @@ describe("CustomerIntelligencePage", () => {
     unmount();
 
     const network = new ControlledClient();
-    network.createRun.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    network.createRun.mockRejectedValueOnce(
+      new RunClientError("network_error", "API 연결에 실패했습니다."),
+    );
     render(<CustomerIntelligencePage client={network} />);
     await user.click(screen.getByRole("button", { name: /검색 실패 후 상담 전환 고객 찾기/ }));
     await user.click(screen.getByRole("button", { name: /분석 시작/ }));
@@ -629,6 +653,47 @@ describe("CustomerIntelligencePage", () => {
     expect(await screen.findByText("분석 서버에 연결하지 못했어요")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "다시 분석" })).toBeInTheDocument();
   });
+
+  it.each([
+    [
+      "unsupported_claim",
+      "분석 결과의 근거를 검증하지 못했어요",
+      "안전하게 결과 표시를 중단했습니다.",
+    ],
+    [
+      "tool_execution_failed",
+      "분석 도구 실행을 완료하지 못했어요",
+      "데이터 Source 조회 중 문제가 발생했습니다.",
+    ],
+  ])(
+    "%s 분석 실패를 네트워크 장애와 구분해 안내한다",
+    async (code, heading, guidance) => {
+      const user = userEvent.setup();
+      const client = new ControlledClient();
+      render(<CustomerIntelligencePage client={client} />);
+
+      await startRun(user);
+      client.emit(
+        "run-1",
+        event({
+          id: 1,
+          type: "error",
+          data: { code, message: "분석을 안전하게 완료하지 못했습니다." },
+        }),
+      );
+      client.emit(
+        "run-1",
+        event({ id: 2, type: "done", data: { status: "failed" } }),
+      );
+
+      expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
+      expect(screen.getByText(guidance)).toBeInTheDocument();
+      expect(
+        screen.queryByRole("heading", { name: "분석 서버에 연결하지 못했어요" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "다시 분석" })).toBeInTheDocument();
+    },
+  );
 
   it("VOC 제외 결과는 후보를 만들지 않고 0명과 Source 한계를 정직하게 안내한다", async () => {
     const user = userEvent.setup();

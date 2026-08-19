@@ -205,6 +205,27 @@ describe("runReducer", () => {
     });
   });
 
+  it("rejects a completed terminal event without a validated result", () => {
+    const started = runReducer(initialRunState, {
+      kind: "start",
+      runId: "run-1",
+    });
+
+    const state = runReducer(started, {
+      kind: "event",
+      runId: "run-1",
+      event: event({ id: 1, type: "done", data: { status: "completed" } }),
+    });
+
+    expect(state.phase).toBe("failed");
+    expect(state.report).toBeNull();
+    expect(state.agentMode).toBeNull();
+    expect(state.error).toEqual({
+      code: "protocol_error",
+      message: "검증된 분석 결과 없이 Run이 완료되어 결과 표시를 중단했습니다.",
+    });
+  });
+
   it("allows customer selection only for the active report", () => {
     let state = runReducer(initialRunState, { kind: "start", runId: "run-1" });
     state = runReducer(state, {

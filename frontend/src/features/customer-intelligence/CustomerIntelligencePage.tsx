@@ -87,6 +87,7 @@ export function CustomerIntelligencePage({ client }: CustomerIntelligencePagePro
             fallbackReason={runState.fallbackReason}
             submissionError={controller.submissionError}
             submissionErrorKind={controller.submissionErrorKind}
+            submissionErrorCode={controller.submissionErrorCode}
             isCreating={controller.isCreating}
             error={runState.error}
             onRetry={() => void controller.run()}
