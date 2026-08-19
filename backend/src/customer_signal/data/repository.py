@@ -1,0 +1,287 @@
+"""Focused, read-only DuckDB access for canonical events and evidence."""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Sequence
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+import duckdb
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+
+from customer_signal.domain.models import CustomerEvent, EvidenceRecord, SourceId
+
+
+SOURCE_IDS = ("search_history", "search_feedback", "voc")
+_SOURCE_ID_SET = frozenset(SOURCE_IDS)
+_UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+class DatabaseNotFoundError(FileNotFoundError):
+    """Raised when the configured DuckDB file does not exist."""
+
+
+class EntityNotFoundError(LookupError):
+    """Raised when a requested customer or evidence record does not exist."""
+
+
+class SourceCatalogEntry(BaseModel):
+    """Availability summary for one canonical source inside a requested time range."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_id: SourceId
+    start_at: AwareDatetime
+    end_at: AwareDatetime
+    row_count: int = Field(ge=0)
+
+
+def _validate_time_range(start_at: datetime, end_at: datetime) -> None:
+    valid = (
+        isinstance(start_at, datetime)
+        and isinstance(end_at, datetime)
+        and start_at.tzinfo is not None
+        and end_at.tzinfo is not None
+        and start_at.utcoffset() is not None
+        and end_at.utcoffset() is not None
+        and start_at < end_at
+    )
+    if not valid:
+        raise ValueError(
+            "start_at and end_at must be timezone-aware and start_at must be before end_at"
+        )
+
+
+def _validate_sources(enabled_sources: Sequence[str]) -> list[str]:
+    if isinstance(enabled_sources, (str, bytes)) or not isinstance(enabled_sources, Sequence):
+        raise ValueError("enabled_sources must be a non-empty unique source allowlist")
+
+    sources = list(enabled_sources)
+    if (
+        not sources
+        or any(not isinstance(source, str) for source in sources)
+        or len(sources) != len(set(sources))
+        or any(source not in _SOURCE_ID_SET for source in sources)
+    ):
+        raise ValueError("enabled_sources must be a non-empty unique source allowlist")
+    return sources
+
+
+def _validate_limit(limit: int) -> None:
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+        raise ValueError("limit must be an integer between 1 and 100")
+
+
+def _validate_evidence_ids(evidence_ids: Sequence[str]) -> list[str]:
+    if isinstance(evidence_ids, (str, bytes)) or not isinstance(evidence_ids, Sequence):
+        raise ValueError("evidence_ids must be a non-empty unique sequence")
+
+    identifiers = list(evidence_ids)
+    if (
+        not identifiers
+        or any(not isinstance(identifier, str) or not identifier for identifier in identifiers)
+        or len(identifiers) != len(set(identifiers))
+    ):
+        raise ValueError("evidence_ids must be a non-empty unique sequence")
+    return identifiers
+
+
+def _parse_json(value: str | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(value, str):
+        parsed = json.loads(value)
+        if not isinstance(parsed, dict):
+            raise ValueError("stored JSON value must be an object")
+        return parsed
+    return value
+
+
+def _from_epoch_microseconds(value: int) -> datetime:
+    return _UNIX_EPOCH + timedelta(microseconds=value)
+
+
+class DuckDBRepository:
+    """Read canonical data through bounded queries and per-call read-only connections."""
+
+    def __init__(self, path: str | Path) -> None:
+        self._path = Path(path)
+
+    def _connect(self):
+        if not self._path.is_file():
+            raise DatabaseNotFoundError(f"database not found: {self._path}")
+        return duckdb.connect(str(self._path), read_only=True)
+
+    def catalog_sources(
+        self,
+        start_at: datetime,
+        end_at: datetime,
+    ) -> list[SourceCatalogEntry]:
+        """Return source availability within the half-open ``[start_at, end_at)`` range."""
+
+        _validate_time_range(start_at, end_at)
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                """
+                SELECT
+                    source_id,
+                    min(epoch_us(occurred_at)),
+                    max(epoch_us(occurred_at)),
+                    count(*)
+                FROM events
+                WHERE occurred_at >= ? AND occurred_at < ?
+                GROUP BY source_id
+                ORDER BY CASE source_id
+                    WHEN 'search_history' THEN 1
+                    WHEN 'search_feedback' THEN 2
+                    WHEN 'voc' THEN 3
+                END
+                """,
+                [start_at, end_at],
+            ).fetchall()
+        finally:
+            connection.close()
+
+        return [
+            SourceCatalogEntry.model_validate(
+                {
+                    "source_id": row[0],
+                    "start_at": _from_epoch_microseconds(row[1]),
+                    "end_at": _from_epoch_microseconds(row[2]),
+                    "row_count": row[3],
+                },
+                strict=True,
+            )
+            for row in rows
+        ]
+
+    def list_events(
+        self,
+        start_at: datetime,
+        end_at: datetime,
+        enabled_sources: Sequence[str],
+        customer_id: str | None = None,
+        limit: int = 100,
+    ) -> list[CustomerEvent]:
+        """Return bounded canonical events in chronological order."""
+
+        _validate_time_range(start_at, end_at)
+        sources = _validate_sources(enabled_sources)
+        _validate_limit(limit)
+
+        connection = self._connect()
+        try:
+            if customer_id is not None:
+                exists = connection.execute(
+                    "SELECT 1 FROM customers WHERE customer_id = ?",
+                    [customer_id],
+                ).fetchone()
+                if exists is None:
+                    raise EntityNotFoundError(f"customer not found: {customer_id}")
+
+            placeholders = ", ".join("?" for _ in sources)
+            customer_filter = ""
+            parameters: list[Any] = [start_at, end_at, *sources]
+            if customer_id is not None:
+                customer_filter = " AND canonical_customer_id = ?"
+                parameters.append(customer_id)
+            parameters.append(limit)
+
+            rows = connection.execute(
+                f"""
+                SELECT
+                    event_id,
+                    evidence_id,
+                    source_id,
+                    epoch_us(occurred_at),
+                    event_type,
+                    action,
+                    topic,
+                    outcome,
+                    text,
+                    canonical_customer_id,
+                    attributes
+                FROM events
+                WHERE occurred_at >= ?
+                  AND occurred_at < ?
+                  AND source_id IN ({placeholders})
+                  {customer_filter}
+                ORDER BY occurred_at, event_id
+                LIMIT ?
+                """,
+                parameters,
+            ).fetchall()
+        finally:
+            connection.close()
+
+        return [
+            CustomerEvent.model_validate(
+                {
+                    "event_id": row[0],
+                    "evidence_id": row[1],
+                    "source_id": row[2],
+                    "occurred_at": _from_epoch_microseconds(row[3]),
+                    "event_type": row[4],
+                    "action": row[5],
+                    "topic": row[6],
+                    "outcome": row[7],
+                    "text": row[8],
+                    "canonical_customer_id": row[9],
+                    "attributes": _parse_json(row[10]),
+                },
+                strict=True,
+            )
+            for row in rows
+        ]
+
+    def get_evidence(self, evidence_ids: Sequence[str]) -> list[EvidenceRecord]:
+        """Return masked evidence records in the caller's requested identifier order."""
+
+        identifiers = _validate_evidence_ids(evidence_ids)
+        placeholders = ", ".join("?" for _ in identifiers)
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                f"""
+                SELECT
+                    evidence_id,
+                    source_id,
+                    epoch_us(occurred_at),
+                    masked_customer_id,
+                    summary,
+                    raw_fields
+                FROM evidence
+                WHERE evidence_id IN ({placeholders})
+                """,
+                identifiers,
+            ).fetchall()
+        finally:
+            connection.close()
+
+        records = {
+            row[0]: EvidenceRecord.model_validate(
+                {
+                    "evidence_id": row[0],
+                    "source_id": row[1],
+                    "occurred_at": _from_epoch_microseconds(row[2]),
+                    "masked_customer_id": row[3],
+                    "summary": row[4],
+                    "raw_fields": _parse_json(row[5]),
+                },
+                strict=True,
+            )
+            for row in rows
+        }
+        missing = [identifier for identifier in identifiers if identifier not in records]
+        if missing:
+            raise EntityNotFoundError(f"evidence not found: {', '.join(missing)}")
+        return [records[identifier] for identifier in identifiers]
+
+
+__all__ = [
+    "DatabaseNotFoundError",
+    "DuckDBRepository",
+    "EntityNotFoundError",
+    "SourceCatalogEntry",
+]
