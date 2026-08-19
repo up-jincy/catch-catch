@@ -5,6 +5,7 @@
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+.worktrees/
 *.py[cod]
 *.duckdb
 *.duckdb.wal
@@ -12,4 +13,3 @@ node_modules/
 .next/
 coverage/
 dist/
-
