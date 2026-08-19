@@ -64,8 +64,11 @@ class RunCoordinator:
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._journey_cache: dict[tuple[str, str], CustomerJourneyResult] = {}
         self._journey_evidence_ids: dict[str, set[str]] = {}
+        self._closing = False
 
     def create_run(self, request: RunRequest) -> RunSnapshot:
+        if self._closing:
+            raise RuntimeError("run coordinator is closing")
         snapshot = self._store.create_run(request)
         self._tasks[snapshot.run_id] = asyncio.create_task(
             self._execute(snapshot.run_id, request.model_copy(deep=True)),
@@ -81,11 +84,27 @@ class RunCoordinator:
         return self._store.get_snapshot(run_id)
 
     async def close(self) -> None:
+        self._closing = True
         pending = [task for task in self._tasks.values() if not task.done()]
         for task in pending:
             task.cancel()
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
+        for run_id in self._tasks:
+            snapshot = self._store.get_snapshot(run_id)
+            if snapshot.status not in {"queued", "running"}:
+                continue
+            public_error = RunError(
+                code="run_cancelled",
+                message="분석 실행이 취소됐습니다.",
+            )
+            await self._store.append_event(
+                run_id,
+                "error",
+                public_error.model_dump(mode="json"),
+            )
+            await self._store.mark_failed(run_id, public_error)
+            await self._store.append_event(run_id, "done", {"status": "failed"})
 
     def get_journey(self, run_id: str, customer_id: str) -> CustomerJourneyResult:
         snapshot, outcome = self._completed_outcome(run_id)
@@ -124,18 +143,22 @@ class RunCoordinator:
     async def _execute(self, run_id: str, request: RunRequest) -> None:
         await self._store.mark_running(run_id)
         reported_error: RunError | None = None
+        pending_result: RunnerEvent | None = None
 
         async def emit(event: RunnerEvent) -> None:
-            nonlocal reported_error
+            nonlocal pending_result, reported_error
+            if reported_error is not None:
+                return
             if event.type == "error":
-                if reported_error is not None:
-                    return
                 reported_error = _error_from_payload(cast(dict[str, object], event.payload))
                 await self._store.append_event(
                     run_id,
                     "error",
                     reported_error.model_dump(mode="json"),
                 )
+                return
+            if event.type == "result":
+                pending_result = event
                 return
             await self._store.append_event(run_id, event.type, event.payload)
 
@@ -162,6 +185,15 @@ class RunCoordinator:
             public_error = reported_error or _error_from_exception(error)
             await fail_run(public_error)
         else:
+            if reported_error is not None:
+                await fail_run(reported_error)
+                return
+            if pending_result is not None:
+                await self._store.append_event(
+                    run_id,
+                    pending_result.type,
+                    pending_result.payload,
+                )
             await self._store.mark_completed(run_id, outcome)
             await self._store.append_event(run_id, "done", {"status": "completed"})
 

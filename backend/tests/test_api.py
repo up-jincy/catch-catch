@@ -13,12 +13,14 @@ from fastapi.testclient import TestClient
 from mcp.types import LATEST_PROTOCOL_VERSION
 
 from customer_signal.agent.contracts import RunRequest
+from customer_signal.agent.fixture import FixtureRunner
 from customer_signal.analytics.service import AnalyticsService
 from customer_signal.config import Settings
 from customer_signal.data.database import seed_database
 from customer_signal.data.repository import DuckDBRepository
 from customer_signal.mcp_server import create_mcp_server
 from customer_signal.runtime.coordinator import RunCoordinator
+from customer_signal.runtime.events import RunnerEvent
 from customer_signal.runtime.run_store import RunStore
 from customer_signal.synthetic.generator import generate_dataset
 
@@ -412,4 +414,78 @@ async def test_coordinator_shutdown_marks_active_run_failed_and_closes_stream(
     assert terminal.error is not None
     assert terminal.error.code == "run_cancelled"
     events = [event async for event in store.stream_events(snapshot.run_id)]
+    assert [event.type for event in events] == ["error", "done"]
+
+
+async def test_runner_reported_error_wins_over_returned_outcome(database_path: Path) -> None:
+    analytics = AnalyticsService(DuckDBRepository(database_path))
+    mcp_server = create_mcp_server(analytics)
+    request = RunRequest.model_validate(_run_request())
+    outcome = await FixtureRunner(mcp_server).run(request, emit=lambda _event: None)
+
+    class ErrorThenOutcomeRunner:
+        async def run(self, request, *, emit):
+            await emit(
+                RunnerEvent(
+                    type="error",
+                    payload={
+                        "code": "tool_execution_failed",
+                        "message": "internal detail must stay private",
+                    },
+                )
+            )
+            await emit(
+                RunnerEvent(
+                    type="result",
+                    payload={
+                        "agent_mode": outcome.agent_mode,
+                        "report": outcome.report.model_dump(mode="json"),
+                    },
+                )
+            )
+            return outcome
+
+    store = RunStore()
+    coordinator = RunCoordinator(
+        runner=ErrorThenOutcomeRunner(),
+        analytics=analytics,
+        store=store,
+    )
+    created = coordinator.create_run(request)
+
+    terminal = await coordinator.wait_for_run(created.run_id)
+    events = [event async for event in store.stream_events(created.run_id)]
+
+    assert terminal.status == "failed"
+    assert terminal.report is None
+    assert terminal.error is not None
+    assert terminal.error.code == "tool_execution_failed"
+    assert [event.type for event in events] == ["error", "done"]
+    assert events[-1].payload == {"status": "failed"}
+
+
+async def test_immediate_shutdown_finalizes_queued_run(database_path: Path) -> None:
+    analytics = AnalyticsService(DuckDBRepository(database_path))
+
+    class ShouldNotStartRunner:
+        def __init__(self) -> None:
+            self.started = False
+
+        async def run(self, request, *, emit):
+            self.started = True
+            await asyncio.Event().wait()
+
+    runner = ShouldNotStartRunner()
+    store = RunStore()
+    coordinator = RunCoordinator(runner=runner, analytics=analytics, store=store)
+    created = coordinator.create_run(RunRequest.model_validate(_run_request()))
+
+    await coordinator.close()
+
+    terminal = store.get_snapshot(created.run_id)
+    assert runner.started is False
+    assert terminal.status == "failed"
+    assert terminal.error is not None
+    assert terminal.error.code == "run_cancelled"
+    events = [event async for event in store.stream_events(created.run_id)]
     assert [event.type for event in events] == ["error", "done"]
