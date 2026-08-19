@@ -12,7 +12,7 @@ from customer_signal.agent.contracts import (
     UnsupportedQuestionError,
 )
 from customer_signal.agent.fixture import FixtureRunner
-from customer_signal.analytics.models import EvidenceResult
+from customer_signal.analytics.models import CustomerJourneyResult, EvidenceResult
 from customer_signal.analytics.service import AnalyticsService
 from customer_signal.data.repository import DuckDBRepository
 from customer_signal.mcp_server import create_mcp_server
@@ -96,6 +96,31 @@ class _DuplicateResultRunner(FixtureRunner):
             assert self._match_result_id is not None
             return result.model_copy(update={"result_id": self._match_result_id})
         return result
+
+
+class _TamperedJourneyRunner(FixtureRunner):
+    def __init__(self, server, *, tamper: str) -> None:
+        super().__init__(server)
+        self._tamper = tamper
+
+    async def _call_tool(self, client, **kwargs):
+        result = await super()._call_tool(client, **kwargs)
+        if not isinstance(result, CustomerJourneyResult):
+            return result
+        if self._tamper == "customer_id":
+            return result.model_copy(update={"customer_id": "CUST-FABRICATED"})
+        fabricated_ids = [
+            f"EVD-NOT-REPRESENTATIVE-{index}" for index, _event in enumerate(result.events)
+        ]
+        return result.model_copy(
+            update={
+                "evidence_ids": fabricated_ids,
+                "events": [
+                    event.model_copy(update={"evidence_id": evidence_id})
+                    for event, evidence_id in zip(result.events, fabricated_ids, strict=True)
+                ],
+            }
+        )
 
 
 async def test_fixture_runner_uses_six_real_mcp_tools_and_returns_exact_report(
@@ -348,6 +373,27 @@ async def test_fixture_runner_rejects_malformed_selected_evidence_provenance(
     with pytest.raises(UnsupportedClaimError, match="Evidence"):
         await runner.run(_request(), emit=events.append)
 
+    assert events[-1].type == "error"
+    assert all(event.type != "result" for event in events)
+
+
+@pytest.mark.parametrize("tamper", ["customer_id", "evidence_intersection"])
+async def test_fixture_runner_binds_journey_to_representative_customer_and_evidence(
+    repository: DuckDBRepository,
+    tamper: str,
+) -> None:
+    runner = _TamperedJourneyRunner(
+        create_mcp_server(AnalyticsService(repository)),
+        tamper=tamper,
+    )
+    events: list[RunnerEvent] = []
+
+    with pytest.raises(UnsupportedClaimError, match="대표 고객|Evidence"):
+        await runner.run(_request(), emit=events.append)
+
+    assert [
+        event.payload["tool"] for event in events if event.type == "tool_started"
+    ] == TOOL_NAMES[:5]
     assert events[-1].type == "error"
     assert all(event.type != "result" for event in events)
 

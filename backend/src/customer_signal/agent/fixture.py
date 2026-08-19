@@ -38,6 +38,7 @@ from customer_signal.domain.reports import (
     InsightReport,
     JourneyEvent,
     Metric,
+    RankedCustomer,
     Recommendation,
     Signal,
     SignalContribution,
@@ -178,6 +179,36 @@ def _assert_selected_evidence(
         raise UnsupportedClaimError(
             "Evidence Source가 선택한 Journey Event Source와 일치하지 않습니다."
         )
+
+
+def _bind_representative_journey(
+    representative: RankedCustomer,
+    journey: CustomerJourneyResult,
+) -> tuple[str, JourneyEvent]:
+    if journey.customer_id != representative.customer_id:
+        raise UnsupportedClaimError("대표 고객과 Journey 고객 ID가 일치하지 않습니다.")
+
+    representative_evidence = set(representative.evidence_ids)
+    selected_evidence_id = next(
+        (
+            evidence_id
+            for evidence_id in reversed(journey.evidence_ids)
+            if evidence_id in representative_evidence
+        ),
+        None,
+    )
+    if selected_evidence_id is None:
+        raise UnsupportedClaimError(
+            "대표 고객과 Journey가 공유하는 Evidence ID가 없습니다."
+        )
+    selected_events = [
+        event for event in journey.events if event.evidence_id == selected_evidence_id
+    ]
+    if journey.evidence_ids.count(selected_evidence_id) != 1 or len(selected_events) != 1:
+        raise UnsupportedClaimError(
+            "선택한 Evidence ID에 대응하는 Journey Event가 정확히 하나여야 합니다."
+        )
+    return selected_evidence_id, selected_events[0]
 
 
 def _source_contributions(
@@ -330,9 +361,12 @@ def _build_facts(
     ranked: RankCustomersResult,
     journey: CustomerJourneyResult | None,
     evidence: EvidenceResult | None,
+    representative_customer_id: str | None,
 ) -> RunFacts:
     if (journey is None) != (evidence is None):
         raise UnsupportedClaimError("Journey와 Evidence Tool 결과는 함께 존재해야 합니다.")
+    if journey is not None and journey.customer_id != representative_customer_id:
+        raise UnsupportedClaimError("대표 고객과 Journey 고객 ID가 일치하지 않습니다.")
 
     allowed_evidence_ids = {
         evidence_id
@@ -343,8 +377,8 @@ def _build_facts(
         allowed_evidence_ids.update(journey.evidence_ids)
     allowed_customer_ids = {customer.customer_id for customer in ranked.customers}
     allowed_customer_ids.update(matched.customer_ids)
-    if journey is not None:
-        allowed_customer_ids.add(journey.customer_id)
+    if representative_customer_id is not None:
+        allowed_customer_ids.add(representative_customer_id)
 
     tool_result_ids: dict[ToolName, str] = {
         "catalog_sources": catalog.result_id,
@@ -363,8 +397,8 @@ def _build_facts(
         else {}
     )
     evidence_customer_facts = (
-        {record.evidence_id: journey.customer_id for record in evidence.records}
-        if evidence is not None and journey is not None
+        {record.evidence_id: representative_customer_id for record in evidence.records}
+        if evidence is not None and representative_customer_id is not None
         else {}
     )
 
@@ -525,9 +559,11 @@ class FixtureRunner:
                 journey: CustomerJourneyResult | None = None
                 evidence: EvidenceResult | None = None
                 selected_evidence_id: str | None = None
+                representative_customer_id: str | None = None
                 representatives = matched.customers or ranked.customers
                 if representatives:
                     representative = representatives[0]
+                    representative_customer_id = representative.customer_id
                     journey = await self._call_tool(
                         caller,
                         name="get_customer_journey",
@@ -536,21 +572,9 @@ class FixtureRunner:
                         result_type=CustomerJourneyResult,
                         emit=emit,
                     )
-                    if not journey.evidence_ids:
-                        raise UnsupportedClaimError("대표 Journey에 Evidence가 없습니다.")
-                    representative_evidence = set(representative.evidence_ids)
-                    selected_evidence_id = next(
-                        (
-                            evidence_id
-                            for evidence_id in reversed(journey.evidence_ids)
-                            if evidence_id in representative_evidence
-                        ),
-                        journey.evidence_ids[-1],
-                    )
-                    selected_event = next(
-                        event
-                        for event in journey.events
-                        if event.evidence_id == selected_evidence_id
+                    selected_evidence_id, selected_event = _bind_representative_journey(
+                        representative,
+                        journey,
                     )
                     evidence = await self._call_tool(
                         caller,
@@ -582,6 +606,7 @@ class FixtureRunner:
                 ranked=ranked,
                 journey=journey,
                 evidence=evidence,
+                representative_customer_id=representative_customer_id,
             )
             await _emit(
                 emit,
