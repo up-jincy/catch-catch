@@ -17,6 +17,7 @@ from customer_signal.agent.contracts import (
     RunFacts,
     RunRequest,
     RunnerOutcome,
+    ToolName,
     UnsupportedClaimError,
     UnsupportedQuestionError,
 )
@@ -35,6 +36,7 @@ from customer_signal.domain.reports import (
     AnalysisScope,
     Finding,
     InsightReport,
+    JourneyEvent,
     Metric,
     Recommendation,
     Signal,
@@ -104,54 +106,86 @@ def _metric_facts(
     aggregate: AggregateResult,
     matched: PatternMatchResult,
     ranked: RankCustomersResult,
-    journey: CustomerJourneyResult,
-    evidence: EvidenceResult,
+    journey: CustomerJourneyResult | None,
+    evidence: EvidenceResult | None,
 ) -> dict[str, tuple[MetricFactValue, ...]]:
-    return {
-        catalog.result_id: _distinct_metric_values(
-            [
-                catalog.stats.scanned_rows,
-                catalog.stats.returned_rows,
-                *(source.row_count for source in catalog.sources),
-            ]
-        ),
-        aggregate.result_id: _distinct_metric_values(
-            [
-                aggregate.stats.scanned_rows,
-                aggregate.stats.returned_rows,
-                *(bucket.event_count for bucket in aggregate.buckets),
-                *(bucket.customer_count for bucket in aggregate.buckets),
-            ]
-        ),
-        matched.result_id: _distinct_metric_values(
-            [
-                matched.candidate_count,
-                matched.customer_count,
-                matched.stats.scanned_rows,
-                matched.stats.returned_rows,
-            ]
-        ),
-        ranked.result_id: _distinct_metric_values(
-            [
-                ranked.candidate_count,
-                ranked.customer_count,
-                ranked.stats.scanned_rows,
-                ranked.stats.returned_rows,
-            ]
-        ),
-        journey.result_id: _distinct_metric_values(
-            [journey.stats.scanned_rows, journey.stats.returned_rows]
-        ),
-        evidence.result_id: _distinct_metric_values(
-            [evidence.stats.scanned_rows, evidence.stats.returned_rows]
-        ),
-    }
+    facts: dict[str, tuple[MetricFactValue, ...]] = {}
+
+    def add(result_id: str, values: Sequence[MetricFactValue]) -> None:
+        if result_id not in facts:
+            facts[result_id] = _distinct_metric_values(values)
+
+    add(
+        catalog.result_id,
+        [
+            catalog.stats.scanned_rows,
+            catalog.stats.returned_rows,
+            *(source.row_count for source in catalog.sources),
+        ],
+    )
+    add(
+        aggregate.result_id,
+        [
+            aggregate.stats.scanned_rows,
+            aggregate.stats.returned_rows,
+            *(bucket.event_count for bucket in aggregate.buckets),
+            *(bucket.customer_count for bucket in aggregate.buckets),
+        ],
+    )
+    add(
+        matched.result_id,
+        [
+            matched.candidate_count,
+            matched.customer_count,
+            matched.stats.scanned_rows,
+            matched.stats.returned_rows,
+        ],
+    )
+    add(
+        ranked.result_id,
+        [
+            ranked.candidate_count,
+            ranked.customer_count,
+            ranked.stats.scanned_rows,
+            ranked.stats.returned_rows,
+        ],
+    )
+    if journey is not None:
+        add(
+            journey.result_id,
+            [journey.stats.scanned_rows, journey.stats.returned_rows],
+        )
+    if evidence is not None:
+        add(
+            evidence.result_id,
+            [evidence.stats.scanned_rows, evidence.stats.returned_rows],
+        )
+    return facts
+
+
+def _assert_selected_evidence(
+    selected_evidence_id: str,
+    selected_event: JourneyEvent,
+    evidence: EvidenceResult,
+) -> None:
+    expected_ids = [selected_evidence_id]
+    record_ids = [record.evidence_id for record in evidence.records]
+    if evidence.evidence_ids != expected_ids or record_ids != expected_ids:
+        raise UnsupportedClaimError(
+            "Evidence 결과가 선택한 대표 Evidence ID와 정확히 일치하지 않습니다."
+        )
+    if evidence.records[0].source_id != selected_event.source_id:
+        raise UnsupportedClaimError(
+            "Evidence Source가 선택한 Journey Event Source와 일치하지 않습니다."
+        )
 
 
 def _source_contributions(
     matched: PatternMatchResult,
     enabled_sources: Sequence[SourceId],
 ) -> list[SignalContribution]:
+    """Summarize signals for the top matched representative customer only."""
+
     if not matched.customers:
         return []
 
@@ -179,18 +213,20 @@ def _build_report(
     catalog: CatalogSourcesResult,
     aggregate: AggregateResult,
     matched: PatternMatchResult,
-    journey: CustomerJourneyResult,
-    selected_evidence_id: str,
+    journey: CustomerJourneyResult | None,
+    selected_evidence_id: str | None,
 ) -> InsightReport:
+    if (journey is None) != (selected_evidence_id is None):
+        raise UnsupportedClaimError("대표 Journey와 Evidence 선택은 함께 존재해야 합니다.")
+    if matched.customer_count and selected_evidence_id is None:
+        raise UnsupportedClaimError("일치 고객 보고서에 대표 Evidence가 없습니다.")
+
     present_sources = {source.source_id for source in catalog.sources}
     sources_used = [
         source_id for source_id in request.enabled_sources if source_id in present_sources
     ]
     customer_count = matched.customer_count
-    selected_event = next(
-        event for event in journey.events if event.evidence_id == selected_evidence_id
-    )
-    top_topic = selected_event.topic
+    top_topic: str | None = None
     if aggregate.buckets:
         aggregate_top = min(
             aggregate.buckets,
@@ -200,10 +236,8 @@ def _build_report(
 
     if customer_count:
         headline = f"검색 실패 후 문의로 이어진 고객 {customer_count}명"
-        executive_summary = (
-            f"요청 기간에 완전한 Journey 패턴이 확인됐으며 주요 집계 Topic은 "
-            f"'{top_topic}'입니다."
-        )
+        topic_summary = f" 주요 집계 Topic은 '{top_topic}'입니다." if top_topic else ""
+        executive_summary = f"요청 기간에 완전한 Journey 패턴이 확인됐습니다.{topic_summary}"
         findings = [
             Finding(
                 title="완전한 Journey 패턴 확인",
@@ -211,7 +245,7 @@ def _build_report(
                     f"검색 실패와 후속 문의 조건을 모두 충족한 고객은 {customer_count}명입니다."
                 ),
                 confidence="high",
-                evidence_ids=[selected_evidence_id],
+                evidence_ids=[cast(str, selected_evidence_id)],
             )
         ]
         recommendations = [
@@ -219,7 +253,7 @@ def _build_report(
                 action_id="care_call",
                 title="대표 고위험 고객 후속 확인",
                 reason="반복 검색과 미해결 문의가 연결된 대표 Journey가 확인됐습니다.",
-                evidence_ids=[selected_evidence_id],
+                evidence_ids=[cast(str, selected_evidence_id)],
             )
         ]
     else:
@@ -228,20 +262,28 @@ def _build_report(
             "활성 Source 범위에서는 완전한 Journey 패턴이 확인되지 않았습니다."
         )
         findings = []
-        recommendations = [
-            Recommendation(
-                action_id="further_analysis",
-                title="부분 Journey 후보 추가 분석",
-                reason="검색 신호가 있는 대표 후보를 확인하고 누락 Source를 보완해야 합니다.",
-                evidence_ids=[selected_evidence_id],
-            )
-        ]
+        if selected_evidence_id is None:
+            recommendations = []
+        else:
+            recommendations = [
+                Recommendation(
+                    action_id="further_analysis",
+                    title="부분 Journey 후보 추가 분석",
+                    reason="검색 신호가 있는 대표 후보를 확인하고 누락 Source를 보완해야 합니다.",
+                    evidence_ids=[selected_evidence_id],
+                )
+            ]
 
     missing_sources = list(dict.fromkeys(matched.missing_sources))
-    limitations = [
+    limitations = []
+    if aggregate.stats.scanned_rows == 0:
+        limitations.append("요청 기간에 분석 가능한 데이터가 없습니다.")
+    elif journey is None:
+        limitations.append("대표 Journey로 확인할 고객 후보가 없습니다.")
+    limitations.extend(
         f"{source_id} Source가 없어 완전한 패턴 판단이 제한됩니다."
         for source_id in missing_sources
-    ]
+    )
     for source_id in request.enabled_sources:
         if source_id not in present_sources and source_id not in missing_sources:
             limitations.append(f"{source_id} Source에 요청 기간 데이터가 없습니다.")
@@ -267,8 +309,12 @@ def _build_report(
         findings=findings,
         signal_contributions=_source_contributions(matched, request.enabled_sources),
         ranked_customers=[customer.model_copy(deep=True) for customer in matched.customers],
-        representative_journeys=[event.model_copy(deep=True) for event in journey.events],
-        representative_journey_ids=[journey.result_id],
+        representative_journeys=(
+            [event.model_copy(deep=True) for event in journey.events]
+            if journey is not None
+            else []
+        ),
+        representative_journey_ids=[journey.result_id] if journey is not None else [],
         recommendations=recommendations,
         sources_used=sources_used,
         limitations=limitations,
@@ -282,36 +328,52 @@ def _build_facts(
     aggregate: AggregateResult,
     matched: PatternMatchResult,
     ranked: RankCustomersResult,
-    journey: CustomerJourneyResult,
-    evidence: EvidenceResult,
+    journey: CustomerJourneyResult | None,
+    evidence: EvidenceResult | None,
 ) -> RunFacts:
-    present_sources = {source.source_id for source in catalog.sources}
+    if (journey is None) != (evidence is None):
+        raise UnsupportedClaimError("Journey와 Evidence Tool 결과는 함께 존재해야 합니다.")
+
     allowed_evidence_ids = {
         evidence_id
         for customer in matched.customers
         for evidence_id in customer.evidence_ids
     }
-    allowed_evidence_ids.update(journey.evidence_ids)
+    if journey is not None:
+        allowed_evidence_ids.update(journey.evidence_ids)
     allowed_customer_ids = {customer.customer_id for customer in ranked.customers}
     allowed_customer_ids.update(matched.customer_ids)
-    allowed_customer_ids.add(journey.customer_id)
+    if journey is not None:
+        allowed_customer_ids.add(journey.customer_id)
+
+    tool_result_ids: dict[ToolName, str] = {
+        "catalog_sources": catalog.result_id,
+        "aggregate_events": aggregate.result_id,
+        "match_journey_pattern": matched.result_id,
+        "rank_customers": ranked.result_id,
+    }
+    if journey is not None and evidence is not None:
+        tool_result_ids["get_customer_journey"] = journey.result_id
+        tool_result_ids["get_evidence"] = evidence.result_id
+
+    fetched_evidence_ids = frozenset(evidence.evidence_ids if evidence is not None else [])
+    evidence_source_facts = (
+        {record.evidence_id: record.source_id for record in evidence.records}
+        if evidence is not None
+        else {}
+    )
+    evidence_customer_facts = (
+        {record.evidence_id: journey.customer_id for record in evidence.records}
+        if evidence is not None and journey is not None
+        else {}
+    )
 
     return RunFacts(
-        tool_result_ids={
-            "catalog_sources": catalog.result_id,
-            "aggregate_events": aggregate.result_id,
-            "match_journey_pattern": matched.result_id,
-            "rank_customers": ranked.result_id,
-            "get_customer_journey": journey.result_id,
-            "get_evidence": evidence.result_id,
-        },
+        tool_result_ids=tool_result_ids,
         allowed_customer_ids=frozenset(allowed_customer_ids),
         allowed_evidence_ids=frozenset(allowed_evidence_ids),
-        allowed_sources=frozenset(
-            source_id
-            for source_id in request.enabled_sources
-            if source_id in present_sources
-        ),
+        fetched_evidence_ids=fetched_evidence_ids,
+        allowed_sources=frozenset(request.enabled_sources),
         allowed_metric_values_by_result=_metric_facts(
             catalog,
             aggregate,
@@ -324,21 +386,27 @@ def _build_facts(
             customer.customer_id: customer.model_copy(deep=True)
             for customer in matched.customers
         },
-        representative_journey_result_ids=frozenset([journey.result_id]),
-        journey_event_facts={
-            event.event_id: event.model_copy(deep=True) for event in journey.events
-        },
+        representative_journey_result_ids=(
+            frozenset([journey.result_id]) if journey is not None else frozenset()
+        ),
+        journey_event_facts=(
+            {event.event_id: event.model_copy(deep=True) for event in journey.events}
+            if journey is not None
+            else {}
+        ),
         signal_source_facts={
             signal.code: source_id
             for customer in matched.customers
             for signal in customer.signals
             if (source_id := _SIGNAL_SOURCES.get(signal.code)) is not None
         },
+        evidence_source_facts=evidence_source_facts,
+        evidence_customer_facts=evidence_customer_facts,
     )
 
 
 class FixtureRunner:
-    """Execute the fixed six-tool path through one in-process FastMCP session."""
+    """Execute the bounded four-to-six-tool path through one FastMCP session."""
 
     def __init__(
         self,
@@ -425,7 +493,7 @@ class FixtureRunner:
                         "start_at": scope["start_at"],
                         "end_at": scope["end_at"],
                     },
-                    source=request.enabled_sources,
+                    source=[],
                     result_type=CatalogSourcesResult,
                     emit=emit,
                 )
@@ -454,44 +522,49 @@ class FixtureRunner:
                     emit=emit,
                 )
 
+                journey: CustomerJourneyResult | None = None
+                evidence: EvidenceResult | None = None
+                selected_evidence_id: str | None = None
                 representatives = matched.customers or ranked.customers
-                if not representatives:
-                    raise UnsupportedClaimError(
-                        "대표 Journey를 선택할 고객 후보가 없습니다."
+                if representatives:
+                    representative = representatives[0]
+                    journey = await self._call_tool(
+                        caller,
+                        name="get_customer_journey",
+                        arguments={**scope, "customer_id": representative.customer_id},
+                        source=request.enabled_sources,
+                        result_type=CustomerJourneyResult,
+                        emit=emit,
                     )
-                representative = representatives[0]
-                journey = await self._call_tool(
-                    caller,
-                    name="get_customer_journey",
-                    arguments={**scope, "customer_id": representative.customer_id},
-                    source=request.enabled_sources,
-                    result_type=CustomerJourneyResult,
-                    emit=emit,
-                )
-                if not journey.evidence_ids:
-                    raise UnsupportedClaimError("대표 Journey에 Evidence가 없습니다.")
-                representative_evidence = set(representative.evidence_ids)
-                selected_evidence_id = next(
-                    (
-                        evidence_id
-                        for evidence_id in reversed(journey.evidence_ids)
-                        if evidence_id in representative_evidence
-                    ),
-                    journey.evidence_ids[-1],
-                )
-                selected_event = next(
-                    event
-                    for event in journey.events
-                    if event.evidence_id == selected_evidence_id
-                )
-                evidence = await self._call_tool(
-                    caller,
-                    name="get_evidence",
-                    arguments={"evidence_ids": [selected_evidence_id]},
-                    source=[selected_event.source_id],
-                    result_type=EvidenceResult,
-                    emit=emit,
-                )
+                    if not journey.evidence_ids:
+                        raise UnsupportedClaimError("대표 Journey에 Evidence가 없습니다.")
+                    representative_evidence = set(representative.evidence_ids)
+                    selected_evidence_id = next(
+                        (
+                            evidence_id
+                            for evidence_id in reversed(journey.evidence_ids)
+                            if evidence_id in representative_evidence
+                        ),
+                        journey.evidence_ids[-1],
+                    )
+                    selected_event = next(
+                        event
+                        for event in journey.events
+                        if event.evidence_id == selected_evidence_id
+                    )
+                    evidence = await self._call_tool(
+                        caller,
+                        name="get_evidence",
+                        arguments={"evidence_ids": [selected_evidence_id]},
+                        source=[selected_event.source_id],
+                        result_type=EvidenceResult,
+                        emit=emit,
+                    )
+                    _assert_selected_evidence(
+                        selected_evidence_id,
+                        selected_event,
+                        evidence,
+                    )
 
             report = _build_report(
                 request,
@@ -548,4 +621,3 @@ class FixtureRunner:
 
 
 __all__ = ["FixtureRunner", "ToolCaller"]
-

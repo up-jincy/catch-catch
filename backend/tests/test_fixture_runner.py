@@ -12,6 +12,7 @@ from customer_signal.agent.contracts import (
     UnsupportedQuestionError,
 )
 from customer_signal.agent.fixture import FixtureRunner
+from customer_signal.analytics.models import EvidenceResult
 from customer_signal.analytics.service import AnalyticsService
 from customer_signal.data.repository import DuckDBRepository
 from customer_signal.mcp_server import create_mcp_server
@@ -20,6 +21,8 @@ from customer_signal.runtime.events import RunnerEvent
 
 START_AT = "2026-07-20T00:00:00+09:00"
 END_AT = "2026-08-19T00:00:00+09:00"
+EMPTY_START_AT = "2027-01-01T00:00:00+09:00"
+EMPTY_END_AT = "2027-01-02T00:00:00+09:00"
 ALL_SOURCES = ["search_history", "search_feedback", "voc"]
 WITHOUT_VOC = ["search_history", "search_feedback"]
 EXPECTED_MATCHES = [
@@ -54,6 +57,45 @@ def _request(*, enabled_sources: list[str] | None = None, question: str | None =
         end_at=END_AT,
         enabled_sources=enabled_sources or ALL_SOURCES,
     )
+
+
+class _TamperedEvidenceRunner(FixtureRunner):
+    def __init__(self, server, *, tamper: str) -> None:
+        super().__init__(server)
+        self._tamper = tamper
+
+    async def _call_tool(self, client, **kwargs):
+        result = await super()._call_tool(client, **kwargs)
+        if not isinstance(result, EvidenceResult):
+            return result
+        record = result.records[0]
+        if self._tamper == "id":
+            fabricated_id = "EVD-FABRICATED"
+            return result.model_copy(
+                update={
+                    "evidence_ids": [fabricated_id],
+                    "records": [record.model_copy(update={"evidence_id": fabricated_id})],
+                }
+            )
+        mismatched_source = "voc" if record.source_id != "voc" else "search_history"
+        return result.model_copy(
+            update={"records": [record.model_copy(update={"source_id": mismatched_source})]}
+        )
+
+
+class _DuplicateResultRunner(FixtureRunner):
+    def __init__(self, server) -> None:
+        super().__init__(server)
+        self._match_result_id: str | None = None
+
+    async def _call_tool(self, client, **kwargs):
+        result = await super()._call_tool(client, **kwargs)
+        if kwargs["name"] == "match_journey_pattern":
+            self._match_result_id = result.result_id
+        if kwargs["name"] == "rank_customers":
+            assert self._match_result_id is not None
+            return result.model_copy(update={"result_id": self._match_result_id})
+        return result
 
 
 async def test_fixture_runner_uses_six_real_mcp_tools_and_returns_exact_report(
@@ -133,6 +175,27 @@ async def test_fixture_trace_contains_only_public_summaries(
         assert forbidden not in serialized
 
 
+async def test_catalog_trace_does_not_claim_requested_sources(
+    fixture_runner: FixtureRunner,
+) -> None:
+    events: list[RunnerEvent] = []
+
+    await fixture_runner.run(_request(), emit=events.append)
+
+    catalog_started = next(
+        event
+        for event in events
+        if event.type == "tool_started" and event.payload["tool"] == "catalog_sources"
+    )
+    catalog_completed = next(
+        event
+        for event in events
+        if event.type == "tool_completed" and event.payload["tool"] == "catalog_sources"
+    )
+    assert catalog_started.payload["source"] == []
+    assert catalog_completed.payload["source"] == []
+
+
 async def test_fixture_runner_reports_zero_matches_when_voc_is_disabled(
     fixture_runner: FixtureRunner,
 ) -> None:
@@ -150,6 +213,59 @@ async def test_fixture_runner_reports_zero_matches_when_voc_is_disabled(
     assert [
         event.payload["tool"] for event in events if event.type == "tool_started"
     ] == TOOL_NAMES
+
+
+async def test_fixture_runner_completes_empty_range_without_inventing_representative_data(
+    fixture_runner: FixtureRunner,
+) -> None:
+    events: list[RunnerEvent] = []
+    request = RunRequest(
+        question="검색 실패 후 문의 고객을 확인해 줘",
+        start_at=EMPTY_START_AT,
+        end_at=EMPTY_END_AT,
+        enabled_sources=ALL_SOURCES,
+    )
+
+    outcome = await fixture_runner.run(request, emit=events.append)
+
+    assert outcome.report.metrics[0].value == 0
+    assert outcome.report.ranked_customers == []
+    assert outcome.report.representative_journeys == []
+    assert outcome.report.representative_journey_ids == []
+    assert outcome.report.findings == []
+    assert outcome.report.recommendations == []
+    assert outcome.report.sources_used == []
+    assert any("데이터" in limitation for limitation in outcome.report.limitations)
+    assert set(outcome.facts.allowed_sources) == set(ALL_SOURCES)
+    assert outcome.facts.allowed_customer_ids == frozenset()
+    assert outcome.facts.allowed_evidence_ids == frozenset()
+    assert outcome.facts.fetched_evidence_ids == frozenset()
+    assert list(outcome.facts.tool_result_ids) == TOOL_NAMES[:4]
+
+    expected_event_types = ["plan"]
+    for _ in TOOL_NAMES[:4]:
+        expected_event_types.extend(("tool_started", "tool_completed"))
+    expected_event_types.extend(("validating", "result"))
+    assert [event.type for event in events] == expected_event_types
+
+
+async def test_fixture_runner_completes_when_present_data_has_no_customer_candidate(
+    fixture_runner: FixtureRunner,
+) -> None:
+    events: list[RunnerEvent] = []
+
+    outcome = await fixture_runner.run(
+        _request(enabled_sources=["voc"]),
+        emit=events.append,
+    )
+
+    assert outcome.report.metrics[0].value == 0
+    assert outcome.report.representative_journeys == []
+    assert outcome.report.recommendations == []
+    assert any("후보" in limitation for limitation in outcome.report.limitations)
+    assert [
+        event.payload["tool"] for event in events if event.type == "tool_started"
+    ] == TOOL_NAMES[:4]
 
 
 async def test_fixture_runner_is_deterministic_for_the_same_request(
@@ -214,6 +330,37 @@ async def test_fixture_runner_does_not_publish_result_when_validation_fails(
         await runner.run(_request(), emit=events.append)
 
     assert events[-2].type == "validating"
+    assert events[-1].type == "error"
+    assert all(event.type != "result" for event in events)
+
+
+@pytest.mark.parametrize("tamper", ["id", "source"])
+async def test_fixture_runner_rejects_malformed_selected_evidence_provenance(
+    repository: DuckDBRepository,
+    tamper: str,
+) -> None:
+    runner = _TamperedEvidenceRunner(
+        create_mcp_server(AnalyticsService(repository)),
+        tamper=tamper,
+    )
+    events: list[RunnerEvent] = []
+
+    with pytest.raises(UnsupportedClaimError, match="Evidence"):
+        await runner.run(_request(), emit=events.append)
+
+    assert events[-1].type == "error"
+    assert all(event.type != "result" for event in events)
+
+
+async def test_fixture_runner_rejects_duplicate_tool_result_ids(
+    repository: DuckDBRepository,
+) -> None:
+    runner = _DuplicateResultRunner(create_mcp_server(AnalyticsService(repository)))
+    events: list[RunnerEvent] = []
+
+    with pytest.raises(ValidationError, match="result_id"):
+        await runner.run(_request(), emit=events.append)
+
     assert events[-1].type == "error"
     assert all(event.type != "result" for event in events)
 

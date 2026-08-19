@@ -52,8 +52,8 @@ def validate_report(report: InsightReport, facts: RunFacts) -> InsightReport:
             _raise("finding must include evidence")
         _validate_evidence_ids(
             finding.evidence_ids,
-            allowed=facts.allowed_evidence_ids,
-            context="finding",
+            allowed=facts.fetched_evidence_ids,
+            context="finding fetched evidence",
         )
 
     for recommendation in report.recommendations:
@@ -61,8 +61,8 @@ def validate_report(report: InsightReport, facts: RunFacts) -> InsightReport:
             _raise("recommendation must include evidence")
         _validate_evidence_ids(
             recommendation.evidence_ids,
-            allowed=facts.allowed_evidence_ids,
-            context="recommendation",
+            allowed=facts.fetched_evidence_ids,
+            context="recommendation fetched evidence",
         )
 
     for customer in report.ranked_customers:
@@ -119,4 +119,3 @@ def validate_report(report: InsightReport, facts: RunFacts) -> InsightReport:
 
 
 __all__ = ["validate_report"]
-
