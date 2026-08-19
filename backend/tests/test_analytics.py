@@ -219,9 +219,7 @@ def test_seeded_pattern_match_returns_exact_ordered_customers_and_stats(
     assert result.missing_sources == []
     assert result.stats == ToolStats(scanned_rows=108, returned_rows=6)
     assert result.evidence_ids == [
-        evidence_id
-        for customer in result.customers
-        for evidence_id in customer.evidence_ids
+        evidence_id for customer in result.customers for evidence_id in customer.evidence_ids
     ]
     json.dumps(result.model_dump(mode="json"), ensure_ascii=False)
 
@@ -402,9 +400,7 @@ def test_negative_feedback_same_topic_adds_twenty_points_but_is_not_required():
     assert by_customer["CUST-WITH"].risk_score == 100
     assert by_customer["CUST-WITHOUT"].risk_score == 80
     feedback_signal = next(
-        signal
-        for signal in by_customer["CUST-WITH"].signals
-        if signal.code == "negative_feedback"
+        signal for signal in by_customer["CUST-WITH"].signals if signal.code == "negative_feedback"
     )
     assert feedback_signal.score == 20
 
@@ -443,9 +439,7 @@ def test_negative_feedback_only_counts_after_failure_and_no_later_than_valid_voc
     )
 
     assert result.customers[0].risk_score == 80
-    assert "negative_feedback" not in {
-        signal.code for signal in result.customers[0].signals
-    }
+    assert "negative_feedback" not in {signal.code for signal in result.customers[0].signals}
 
 
 def test_policy_scores_and_risk_thresholds_are_exact():
@@ -544,9 +538,7 @@ def test_ranking_is_score_descending_then_customer_id_and_is_limited(
 def test_result_ids_change_when_normalized_operation_inputs_or_results_change(
     analytics_service: AnalyticsService,
 ):
-    source = analytics_service.aggregate_events(
-        START_AT, END_AT, ALL_SOURCES, group_by="source"
-    )
+    source = analytics_service.aggregate_events(START_AT, END_AT, ALL_SOURCES, group_by="source")
     topic = analytics_service.aggregate_events(START_AT, END_AT, ALL_SOURCES, group_by="topic")
     ranked = analytics_service.rank_customers(START_AT, END_AT, ALL_SOURCES, limit=3)
 
@@ -707,9 +699,7 @@ def test_scoped_methods_reject_invalid_time_ranges_with_typed_error(
         lambda: analytics_service.aggregate_events(start_at, end_at, ALL_SOURCES),
         lambda: analytics_service.match_journey_pattern(start_at, end_at, ALL_SOURCES),
         lambda: analytics_service.rank_customers(start_at, end_at, ALL_SOURCES),
-        lambda: analytics_service.get_customer_journey(
-            "CUST-003", start_at, end_at, ALL_SOURCES
-        ),
+        lambda: analytics_service.get_customer_journey("CUST-003", start_at, end_at, ALL_SOURCES),
     ]
 
     for call in calls:
@@ -745,12 +735,8 @@ def test_bounded_methods_reject_invalid_limits(
     limit,
 ):
     calls = [
-        lambda: analytics_service.aggregate_events(
-            START_AT, END_AT, ALL_SOURCES, limit=limit
-        ),
-        lambda: analytics_service.match_journey_pattern(
-            START_AT, END_AT, ALL_SOURCES, limit=limit
-        ),
+        lambda: analytics_service.aggregate_events(START_AT, END_AT, ALL_SOURCES, limit=limit),
+        lambda: analytics_service.match_journey_pattern(START_AT, END_AT, ALL_SOURCES, limit=limit),
         lambda: analytics_service.rank_customers(START_AT, END_AT, ALL_SOURCES, limit=limit),
         lambda: analytics_service.get_customer_journey(
             "CUST-003", START_AT, END_AT, ALL_SOURCES, limit=limit
@@ -768,9 +754,7 @@ def test_customer_journey_rejects_blank_or_non_string_customer_id(
     customer_id,
 ):
     with pytest.raises(AnalyticsInputError, match="customer_id"):
-        analytics_service.get_customer_journey(
-            customer_id, START_AT, END_AT, ALL_SOURCES
-        )
+        analytics_service.get_customer_journey(customer_id, START_AT, END_AT, ALL_SOURCES)
 
 
 @pytest.mark.parametrize(

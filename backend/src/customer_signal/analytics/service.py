@@ -99,12 +99,8 @@ def _validate_time_range(
 
 
 def _validate_sources(enabled_sources: Sequence[str]) -> list[SourceId]:
-    if isinstance(enabled_sources, (str, bytes)) or not isinstance(
-        enabled_sources, Sequence
-    ):
-        raise AnalyticsInputError(
-            "enabled_sources must contain 1 to 3 unique allowlisted sources"
-        )
+    if isinstance(enabled_sources, (str, bytes)) or not isinstance(enabled_sources, Sequence):
+        raise AnalyticsInputError("enabled_sources must contain 1 to 3 unique allowlisted sources")
     sources = list(enabled_sources)
     if (
         not 1 <= len(sources) <= len(SOURCE_IDS)
@@ -112,9 +108,7 @@ def _validate_sources(enabled_sources: Sequence[str]) -> list[SourceId]:
         or len(sources) != len(set(sources))
         or any(source not in _SOURCE_SET for source in sources)
     ):
-        raise AnalyticsInputError(
-            "enabled_sources must contain 1 to 3 unique allowlisted sources"
-        )
+        raise AnalyticsInputError("enabled_sources must contain 1 to 3 unique allowlisted sources")
     return [cast(SourceId, source) for source in SOURCE_IDS if source in sources]
 
 
@@ -134,9 +128,8 @@ def _validate_evidence_ids(evidence_ids: Sequence[str]) -> list[str]:
     if isinstance(evidence_ids, (str, bytes)) or not isinstance(evidence_ids, Sequence):
         raise AnalyticsInputError("evidence_ids must contain 1 to 100 nonblank strings")
     identifiers = list(evidence_ids)
-    if (
-        not 1 <= len(identifiers) <= 100
-        or any(not isinstance(identifier, str) or not identifier.strip() for identifier in identifiers)
+    if not 1 <= len(identifiers) <= 100 or any(
+        not isinstance(identifier, str) or not identifier.strip() for identifier in identifiers
     ):
         raise AnalyticsInputError("evidence_ids must contain 1 to 100 nonblank strings")
     return identifiers
@@ -173,11 +166,7 @@ def _stable_result_id(operation: str, *, inputs: dict[str, Any], result: dict[st
 
 
 def _flatten_evidence(customers: Sequence[RankedCustomer]) -> list[str]:
-    return [
-        evidence_id
-        for customer in customers
-        for evidence_id in customer.evidence_ids
-    ]
+    return [evidence_id for customer in customers for evidence_id in customer.evidence_ids]
 
 
 class _ScoredSequence:
@@ -221,9 +210,7 @@ def _score_sequence(
     selected_repeat = repeats[0] if repeats else None
     selected_voc = None
     for repeat in repeats:
-        following_vocs = [
-            voc for voc in unresolved_vocs if voc.occurred_at > repeat.occurred_at
-        ]
+        following_vocs = [voc for voc in unresolved_vocs if voc.occurred_at > repeat.occurred_at]
         if following_vocs:
             selected_repeat = repeat
             selected_voc = following_vocs[0]
@@ -275,9 +262,7 @@ def _score_sequence(
         )
 
     score = sum(signal.score for signal in signals)
-    evidence_ids = [
-        evidence_id for signal in signals for evidence_id in signal.evidence_ids
-    ]
+    evidence_ids = [evidence_id for signal in signals for evidence_id in signal.evidence_ids]
     customer = RankedCustomer(
         customer_id=failed.canonical_customer_id,
         risk_score=score,
@@ -424,16 +409,12 @@ class AnalyticsService:
             AggregateBucket(
                 value=key,
                 event_count=len(grouped[key]),
-                customer_count=len(
-                    {event.canonical_customer_id for event in grouped[key]}
-                ),
+                customer_count=len({event.canonical_customer_id for event in grouped[key]}),
                 evidence_ids=[event.evidence_id for event in grouped[key]],
             )
             for key in keys[:bounded_limit]
         ]
-        evidence_ids = [
-            evidence_id for bucket in buckets for evidence_id in bucket.evidence_ids
-        ]
+        evidence_ids = [evidence_id for bucket in buckets for evidence_id in bucket.evidence_ids]
         stats = ToolStats(scanned_rows=len(events), returned_rows=len(buckets))
         result_payload = {
             "group_by": dimension,
