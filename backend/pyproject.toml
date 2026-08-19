@@ -1,0 +1,40 @@
+[project]
+name = "customer-signal-demo"
+version = "0.1.0"
+requires-python = "==3.12.*"
+dependencies = [
+  "deepagents==0.7.7",
+  "duckdb==1.5.5",
+  "fastapi==0.140.8",
+  "fastmcp==3.4.7",
+  "langchain==1.3.15",
+  "langchain-google-genai==4.3.4",
+  "langchain-mcp-adapters==0.3.2",
+  "mcp==1.29.0",
+  "pydantic-settings==2.13.1",
+  "uvicorn==0.52.4",
+]
+
+[dependency-groups]
+dev = [
+  "httpx==0.28.1",
+  "pytest==9.0.2",
+  "pytest-asyncio==1.3.0",
+  "ruff==0.15.5",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/customer_signal"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
