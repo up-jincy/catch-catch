@@ -29,6 +29,7 @@ class RunNotCompletedError(RuntimeError):
 
 
 _GEMINI_ERROR_MESSAGES = {
+    "unsupported_question": "검색 실패와 고객 문의 Journey 질문만 지원합니다.",
     "gemini_not_configured": "Gemini API Key가 설정되지 않았습니다.",
     "gemini_model_not_found": "사용 가능한 Gemini 분석 모델을 찾지 못했습니다.",
     "gemini_provider_failed": "Gemini 분석 서비스 호출에 실패했습니다.",
@@ -260,6 +261,8 @@ class RunCoordinator:
                 raise
             except Exception as error:
                 if isinstance(error, GeminiRunnerError):
+                    if error.code == "unsupported_question":
+                        raise
                     fallback_code = _safe_gemini_error(error).code
                 else:
                     fallback_code = "gemini_provider_failed"

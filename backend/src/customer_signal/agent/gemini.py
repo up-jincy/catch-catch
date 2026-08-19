@@ -35,6 +35,7 @@ from customer_signal.agent.contracts import (
     UnsupportedClaimError,
 )
 from customer_signal.agent.facts import build_run_facts
+from customer_signal.agent.intent import is_supported_target_journey_question
 from customer_signal.agent.report_composer import (
     apply_verified_model_narrative,
     compose_verified_report,
@@ -95,7 +96,42 @@ _DEEP_AGENT_EXCLUDED_TOOLS = frozenset(
 )
 _PROFILE_LOCK = Lock()
 _PROFILE_REGISTERED = False
-_SYSTEM_PROMPT = """You are a bounded customer-signal analytics agent.
+_NARRATIVE_TEMPLATES = {
+    "positive": {
+        "headline": "검색 실패 후 문의로 이어진 고객 {customer_count}명",
+        "executive_summary": (
+            "요청 기간에 완전한 Journey 패턴이 확인됐습니다. 주요 집계 Topic은 '{top_topic}'입니다."
+        ),
+        "findings": [
+            {
+                "title": "완전한 Journey 패턴 확인",
+                "description": (
+                    "검색 실패와 후속 문의 조건을 모두 충족한 고객은 {customer_count}명입니다."
+                ),
+                "confidence": "high",
+                "evidence_ids": ["{selected_evidence_id}"],
+            }
+        ],
+        "recommendations": [
+            {
+                "action_id": "care_call",
+                "title": "대표 고위험 고객 후속 확인",
+                "reason": "반복 검색과 미해결 문의가 연결된 대표 Journey가 확인됐습니다.",
+                "evidence_ids": ["{selected_evidence_id}"],
+            }
+        ],
+    },
+    "positive_without_topic": {
+        "executive_summary": "요청 기간에 완전한 Journey 패턴이 확인됐습니다.",
+    },
+    "zero": {
+        "headline": "검색 실패 후 문의로 이어진 고객 0명",
+        "executive_summary": ("활성 Source 범위에서는 완전한 Journey 패턴이 확인되지 않았습니다."),
+        "findings": [],
+        "recommendations": [],
+    },
+}
+_SYSTEM_PROMPT = f"""You are a bounded customer-signal analytics agent.
 Use only the supplied read-only customer_signal MCP tools for data claims.
 Before any MCP call, use write_todos once with three to six concise analysis steps.
 Keep the todo list current and return it in the final agent state.
@@ -109,8 +145,13 @@ shared by that Journey and the representative evidence allowlist. When
 customer_count is zero, omit both detail calls.
 Omit bounded-tool limits or set them to exactly the integer 100.
 Never invent customer IDs, evidence IDs, result IDs, counts, scores, or sources.
-For positive results, include evidence-backed findings and a care_call recommendation.
-Narrative text may cite only the exact matched-customer metric returned by the tools.
+The server verifies every narrative field against its own canonical report. Copy the
+following JSON narrative templates exactly, replacing only brace placeholders with
+values returned by the tools:
+{json.dumps(_NARRATIVE_TEMPLATES, ensure_ascii=False)}
+For positive results emit exactly one finding and one recommendation. If aggregate
+returns no topic, use positive_without_topic for the summary. For zero results use the
+zero template and emit no findings or recommendations.
 Return only the InsightReport structured response. Do not expose reasoning or tool raw data.
 """
 
@@ -575,6 +616,11 @@ class GeminiRunner:
         *,
         emit: EventEmitter,
     ) -> RunnerOutcome:
+        if not is_supported_target_journey_question(request.question):
+            raise GeminiRunnerError(
+                "unsupported_question",
+                "검색 실패와 고객 문의 Journey 질문만 지원합니다.",
+            )
         if self._api_key is None:
             raise GeminiRunnerError(
                 "gemini_not_configured",

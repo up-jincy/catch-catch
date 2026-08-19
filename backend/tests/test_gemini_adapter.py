@@ -291,6 +291,34 @@ def _runner(
     return runner, mcp_factory, model_factory, agent_factory
 
 
+@pytest.mark.parametrize(
+    "question",
+    [
+        "검색 성공 고객은 몇 명이야?",
+        "검색 실패 후 문의한 고객의 평균 나이는?",
+        "검색 실패 후 문의한 고객의 주소를 알려 줘",
+        "검색 실패 후 상담한 고객의 전화번호를 알려 줘",
+        "검색 실패 후 고객센터에 문의한 고객의 수익은 얼마야?",
+    ],
+)
+async def test_gemini_runner_rejects_unsupported_intent_before_provider_or_mcp_init(
+    prepared_analysis: _PreparedAnalysis,
+    question: str,
+) -> None:
+    runner, mcp_factory, model_factory, agent_factory = _runner(prepared_analysis)
+    request = _request().model_copy(update={"question": question})
+    events: list[RunnerEvent] = []
+
+    with pytest.raises(GeminiRunnerError) as caught:
+        await runner.run(request, emit=events.append)
+
+    assert caught.value.code == "unsupported_question"
+    assert mcp_factory.calls == []
+    assert model_factory.calls == []
+    assert agent_factory.calls == []
+    assert events == []
+
+
 async def test_gemini_runner_lazily_builds_one_structured_agent_and_captures_facts(
     prepared_analysis: _PreparedAnalysis,
 ) -> None:
@@ -677,7 +705,7 @@ async def test_positive_run_rejects_an_empty_fabricated_structured_draft(
     assert "result" not in [event.type for event in events]
 
 
-async def test_positive_run_publishes_only_provenance_validated_model_narrative(
+async def test_positive_run_rejects_noncanonical_narrative_even_with_valid_evidence(
     prepared_analysis: _PreparedAnalysis,
 ) -> None:
     draft = prepared_analysis.report.model_copy(deep=True)
@@ -693,15 +721,28 @@ async def test_positive_run_publishes_only_provenance_validated_model_narrative(
     )
     runner, _mcp_factory, _model_factory, _agent_factory = _runner(authored)
 
-    outcome = await runner.run(_request(), emit=lambda _event: None)
+    with pytest.raises(GeminiRunnerError) as caught:
+        await runner.run(_request(), emit=lambda _event: None)
 
-    assert outcome.report.executive_summary == draft.executive_summary
-    assert outcome.report.findings == draft.findings
-    assert outcome.report.recommendations == draft.recommendations
-    assert outcome.report.metrics == prepared_analysis.fixture_outcome.report.metrics
-    assert (
-        outcome.report.ranked_customers == prepared_analysis.fixture_outcome.report.ranked_customers
+    assert caught.value.code == "gemini_validation_failed"
+
+
+async def test_model_narrative_rejects_same_number_with_unsupported_semantics(
+    prepared_analysis: _PreparedAnalysis,
+) -> None:
+    draft = prepared_analysis.report.model_copy(deep=True)
+    draft.executive_summary = "검증되지 않은 매출은 6원이고 모든 고객이 사망했습니다."
+    spoofed = _PreparedAnalysis(
+        fixture_outcome=prepared_analysis.fixture_outcome,
+        report=draft,
+        calls=prepared_analysis.calls,
     )
+    runner, _mcp_factory, _model_factory, _agent_factory = _runner(spoofed)
+
+    with pytest.raises(GeminiRunnerError) as caught:
+        await runner.run(_request(), emit=lambda _event: None)
+
+    assert caught.value.code == "gemini_validation_failed"
 
 
 async def test_model_narrative_rejects_duplicate_fetched_evidence(
@@ -722,7 +763,7 @@ async def test_model_narrative_rejects_duplicate_fetched_evidence(
     assert caught.value.code == "gemini_validation_failed"
 
 
-async def test_model_narrative_may_reference_only_returned_customer_and_evidence_ids(
+async def test_model_narrative_rejects_noncanonical_identifier_prose(
     prepared_analysis: _PreparedAnalysis,
 ) -> None:
     draft = prepared_analysis.report.model_copy(deep=True)
@@ -738,9 +779,10 @@ async def test_model_narrative_may_reference_only_returned_customer_and_evidence
     )
     runner, _mcp_factory, _model_factory, _agent_factory = _runner(referenced)
 
-    outcome = await runner.run(_request(), emit=lambda _event: None)
+    with pytest.raises(GeminiRunnerError) as caught:
+        await runner.run(_request(), emit=lambda _event: None)
 
-    assert outcome.report.findings[0].description == draft.findings[0].description
+    assert caught.value.code == "gemini_validation_failed"
 
 
 async def test_positive_run_requires_journey_and_evidence_tool_provenance(
@@ -959,6 +1001,34 @@ class _BlockingGeminiRunner:
         self.started.set()
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
+
+
+async def test_auto_mode_does_not_fallback_for_an_unsupported_question(
+    prepared_analysis: _PreparedAnalysis,
+    repository: DuckDBRepository,
+) -> None:
+    gemini_runner, mcp_factory, _model_factory, _agent_factory = _runner(prepared_analysis)
+    fixture_runner = _StaticOutcomeRunner(prepared_analysis.fixture_outcome)
+    store = RunStore()
+    coordinator = RunCoordinator(
+        agent_mode="auto",
+        fixture_runner=fixture_runner,
+        gemini_runner=gemini_runner,
+        analytics=AnalyticsService(repository),
+        store=store,
+    )
+
+    request = _request().model_copy(update={"question": "검색 성공 고객은 몇 명이야?"})
+    created = coordinator.create_run(request)
+    terminal = await coordinator.wait_for_run(created.run_id)
+    events = [event async for event in store.stream_events(created.run_id)]
+
+    assert terminal.status == "failed"
+    assert terminal.error is not None
+    assert terminal.error.code == "unsupported_question"
+    assert fixture_runner.calls == 0
+    assert mcp_factory.calls == []
+    assert [event.type for event in events] == ["error", "done"]
 
 
 async def test_auto_mode_falls_back_to_fixture_without_publishing_a_gemini_error(
