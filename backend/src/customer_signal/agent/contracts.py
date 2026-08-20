@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Literal, Protocol, Self
+from typing import Annotated, Literal, Protocol, Self
 
 from pydantic import (
     AwareDatetime,
@@ -12,12 +12,29 @@ from pydantic import (
     ConfigDict,
     Field,
     FiniteFloat,
+    JsonValue,
     field_validator,
     model_validator,
 )
 
+from customer_signal.domain.analysis import (
+    AnalysisGoal,
+    AnalysisNote,
+    AnalysisPlan,
+    AnalysisStep,
+    ClarificationRequired,
+    PublicRunError,
+    RunStatus,
+    UnsupportedAnalysis,
+)
+from customer_signal.domain.facts import AnalysisFact
+from customer_signal.domain.reports import (
+    CustomerSignalReport,
+    InsightReport,
+    JourneyEvent,
+    RankedCustomer,
+)
 from customer_signal.domain.types import PrimitiveName, SourceId
-from customer_signal.domain.reports import InsightReport, JourneyEvent, RankedCustomer
 from customer_signal.runtime.events import RunnerEvent
 
 
@@ -25,6 +42,20 @@ type MetricFactValue = FiniteFloat | int | str
 type ToolName = PrimitiveName
 type EventEmitter = Callable[[RunnerEvent], Awaitable[None] | None]
 type ReportValidator = Callable[[InsightReport, "RunFacts"], InsightReport | None]
+type AnalysisEventType = Literal[
+    "goal_created",
+    "clarification_required",
+    "unsupported_analysis",
+    "plan_created",
+    "plan_revised",
+    "step_started",
+    "fact_created",
+    "analysis_note_created",
+    "step_completed",
+    "report_validating",
+    "result",
+    "error",
+]
 
 
 class RunnerContract(BaseModel):
@@ -71,6 +102,21 @@ class RunRequest(RunnerContract):
         if self.start_at >= self.end_at:
             raise ValueError("start_at must be before end_at")
         return self
+
+
+class AnalysisEvent(RunnerContract):
+    """Public generic-analysis event containing no model transcript or hidden reasoning."""
+
+    type: AnalysisEventType
+    payload: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def reject_private_payload_keys(self) -> Self:
+        _assert_public_analysis_payload(self.payload)
+        return self
+
+
+type AnalysisEventEmitter = Callable[[AnalysisEvent], Awaitable[None] | None]
 
 
 class MetricFact(RunnerContract):
@@ -146,12 +192,123 @@ class RunFacts(RunnerContract):
         return self
 
 
-class RunnerOutcome(RunnerContract):
-    """Validated report and the facts needed by downstream run-scoped APIs."""
+class LegacyRunnerOutcome(RunnerContract):
+    """Compatibility outcome for the existing fixed Journey runners."""
 
+    outcome_kind: Literal["legacy"] = "legacy"
+    status: Literal["completed"] = "completed"
     report: InsightReport
     facts: RunFacts
     agent_mode: Literal["fixture", "gemini"] = "fixture"
+
+
+class GenericRunnerOutcome(RunnerContract):
+    """Validated generic outcome, including safe partial and non-result states."""
+
+    outcome_kind: Literal["generic"] = "generic"
+    status: RunStatus
+    goal: AnalysisGoal | None = None
+    clarification: ClarificationRequired | None = None
+    unsupported: UnsupportedAnalysis | None = None
+    plan: AnalysisPlan | None = None
+    facts: list[AnalysisFact] = Field(default_factory=list, max_length=128)
+    notes: list[AnalysisNote] = Field(default_factory=list, max_length=128)
+    report: CustomerSignalReport | None = None
+    limitations: list[str] = Field(default_factory=list, max_length=32)
+    error: PublicRunError | None = None
+    failed_step_id: str | None = Field(default=None, max_length=128)
+    agent_mode: Literal["fixture", "gemini"]
+    model: str | None = Field(default=None, max_length=128)
+
+    @field_validator("limitations")
+    @classmethod
+    def require_public_limitations(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("generic outcome limitations must be unique")
+        if any(not item.strip() or len(item) > 500 for item in value):
+            raise ValueError("generic outcome limitations must be bounded and nonblank")
+        return value
+
+    @model_validator(mode="after")
+    def bind_outcome_state(self) -> Self:
+        if self.status == "awaiting_clarification":
+            if self.clarification is None:
+                raise ValueError("awaiting_clarification requires clarification")
+            if any(
+                (
+                    self.goal,
+                    self.unsupported,
+                    self.plan,
+                    self.facts,
+                    self.notes,
+                    self.report,
+                    self.error,
+                )
+            ):
+                raise ValueError("clarification outcome cannot contain analysis results")
+        elif self.status == "degraded":
+            if self.report is not None or self.facts or self.notes or not self.limitations:
+                raise ValueError("degraded no-data outcome requires only a server limitation")
+        elif self.status == "completed":
+            if (
+                self.goal is None
+                or self.plan is None
+                or not self.facts
+                or not self.notes
+                or self.report is None
+                or self.error is not None
+                or self.clarification is not None
+                or self.unsupported is not None
+            ):
+                raise ValueError("completed generic outcome requires verified analysis results")
+        elif self.status == "failed":
+            if self.error is None or self.report is not None:
+                raise ValueError("failed generic outcome requires a safe error and no report")
+            if self.unsupported is not None and (
+                self.error.code != "unsupported_analysis" or self.facts or self.notes
+            ):
+                raise ValueError("unsupported outcome cannot contain executed analysis results")
+        else:
+            raise ValueError("generic runner outcome must be terminal or awaiting clarification")
+        if self.failed_step_id is not None:
+            if self.plan is None or self.failed_step_id not in {
+                step.step_id for step in self.plan.steps
+            }:
+                raise ValueError("failed_step_id must belong to the generic outcome Plan")
+            if self.error is not None and self.error.step_id not in {
+                None,
+                self.failed_step_id,
+            }:
+                raise ValueError("failed_step_id must match the public error step_id")
+        return self
+
+
+type RunnerOutcome = Annotated[
+    LegacyRunnerOutcome | GenericRunnerOutcome,
+    Field(discriminator="outcome_kind"),
+]
+
+
+class StepModelContext(RunnerContract):
+    goal: AnalysisGoal
+    plan: AnalysisPlan
+    step: AnalysisStep
+    facts: list[AnalysisFact]
+    current_fact: AnalysisFact
+
+
+class SelectionContext(RunnerContract):
+    goal: AnalysisGoal
+    plan: AnalysisPlan
+    completed_step_ids: frozenset[str]
+    facts: list[AnalysisFact]
+
+
+class ReportModelContext(RunnerContract):
+    goal: AnalysisGoal
+    plan: AnalysisPlan
+    facts: list[AnalysisFact]
+    notes: list[AnalysisNote]
 
 
 class AnalysisRunner(Protocol):
@@ -177,15 +334,49 @@ class UnsupportedClaimError(ValueError):
     code = "unsupported_claim"
 
 
+_PRIVATE_ANALYSIS_EVENT_KEYS = frozenset(
+    {
+        "chain_of_thought",
+        "internal_reasoning",
+        "messages",
+        "prompt",
+        "provider_response",
+        "raw_fields",
+        "reasoning",
+        "thoughts",
+    }
+)
+
+
+def _assert_public_analysis_payload(value: JsonValue) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized = key.casefold().replace("-", "_").replace(" ", "_")
+            if normalized in _PRIVATE_ANALYSIS_EVENT_KEYS:
+                raise ValueError(f"generic event payload key is not public: {key}")
+            _assert_public_analysis_payload(item)
+    elif isinstance(value, list):
+        for item in value:
+            _assert_public_analysis_payload(item)
+
+
 __all__ = [
+    "AnalysisEvent",
+    "AnalysisEventEmitter",
+    "AnalysisEventType",
     "AnalysisRunner",
     "EventEmitter",
+    "GenericRunnerOutcome",
+    "LegacyRunnerOutcome",
     "MetricFact",
     "MetricFactValue",
+    "ReportModelContext",
     "ReportValidator",
     "RunFacts",
     "RunRequest",
     "RunnerOutcome",
+    "SelectionContext",
+    "StepModelContext",
     "ToolName",
     "UnsupportedClaimError",
     "UnsupportedQuestionError",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 
 from customer_signal.agent.contracts import RunFacts, RunRequest, UnsupportedClaimError
@@ -15,8 +16,19 @@ from customer_signal.analytics.models import (
     RankCustomersResult,
 )
 from customer_signal.domain.models import SourceId
+from customer_signal.domain.analysis import AnalysisNote, CustomerSignalReportDraft
+from customer_signal.domain.facts import (
+    AnalysisFact,
+    AnalysisMetricFact,
+    CustomerJourneyPayload,
+    CustomerRankingPayload,
+)
 from customer_signal.domain.reports import (
+    AnalysisFinding,
+    AnalysisRecommendation,
+    AnalysisReportProvenance,
     AnalysisScope,
+    CustomerSignalReport,
     Finding,
     InsightReport,
     Metric,
@@ -310,4 +322,193 @@ def apply_verified_model_narrative(
     return published
 
 
-__all__ = ["apply_verified_model_narrative", "compose_verified_report"]
+def compose_customer_signal_report(
+    *,
+    goal,
+    facts: Sequence[AnalysisFact],
+    notes: Sequence[AnalysisNote],
+    draft: CustomerSignalReportDraft,
+) -> CustomerSignalReport:
+    """Compose generic publication only from verified Claims and server-owned Facts."""
+
+    if draft.goal_id != goal.goal_id:
+        raise UnsupportedClaimError("보고서 Goal이 현재 분석 Goal과 일치하지 않습니다.")
+    fact_by_id = {fact.fact_id: fact for fact in facts}
+    if len(fact_by_id) != len(facts) or not facts:
+        raise UnsupportedClaimError("보고서에는 고유한 검증 Fact가 필요합니다.")
+    claim_by_id = {claim.claim_id: claim for note in notes for claim in note.claims}
+    if len(claim_by_id) != sum(len(note.claims) for note in notes):
+        raise UnsupportedClaimError("보고서 Claim ID는 Run 안에서 고유해야 합니다.")
+    unknown_claims = set(draft.claim_refs) - set(claim_by_id)
+    if unknown_claims:
+        raise UnsupportedClaimError("보고서가 현재 Run에 없는 Claim을 참조합니다.")
+
+    selected_claims = [claim_by_id[claim_id] for claim_id in draft.claim_refs]
+    findings: list[AnalysisFinding] = []
+    for claim in selected_claims:
+        claim_fact_ids = _stable_unique(reference.fact_id for reference in claim.fact_refs)
+        if not set(claim_fact_ids) <= set(fact_by_id):
+            raise UnsupportedClaimError("보고서 Claim이 현재 Run 밖의 Fact를 참조합니다.")
+        evidence_ids = _stable_unique(
+            [
+                *(
+                    reference.evidence_id
+                    for reference in claim.fact_refs
+                    if reference.evidence_id is not None
+                ),
+                *(
+                    evidence_id
+                    for fact_id in claim_fact_ids
+                    for evidence_id in fact_by_id[fact_id].evidence_ids
+                ),
+            ]
+        )
+        findings.append(
+            AnalysisFinding(
+                claim=claim,
+                statement=claim.rendered_text,
+                fact_ids=claim_fact_ids,
+                evidence_ids=evidence_ids,
+            )
+        )
+
+    recommendations: list[AnalysisRecommendation] = []
+    for action in draft.recommended_actions:
+        if not set(action.fact_refs) <= set(fact_by_id):
+            raise UnsupportedClaimError("권장 조치가 현재 Run 밖의 Fact를 참조합니다.")
+        if not set(action.claim_refs) <= set(draft.claim_refs):
+            raise UnsupportedClaimError("권장 조치가 선택되지 않은 Claim을 참조합니다.")
+        evidence_ids = _stable_unique(
+            evidence_id
+            for fact_id in action.fact_refs
+            for evidence_id in fact_by_id[fact_id].evidence_ids
+        )
+        recommendations.append(
+            AnalysisRecommendation(
+                action_id=action.action_id,
+                title=_action_title(action.action_id),
+                reason=(
+                    "검증된 분석 Claim을 근거로 후속 조치를 검토합니다: "
+                    + "; ".join(
+                        claim_by_id[claim_id].rendered_text for claim_id in action.claim_refs
+                    )
+                ),
+                claim_ids=list(action.claim_refs),
+                fact_ids=list(action.fact_refs),
+                evidence_ids=evidence_ids,
+            )
+        )
+
+    metrics = _collect_metrics(facts)
+    limitations = _stable_unique(limitation for note in notes for limitation in note.limitations)
+    provenance = _build_generic_provenance(facts)
+    return CustomerSignalReport(
+        goal=goal,
+        headline=_generic_headline(goal.objective, selected_claims, facts),
+        executive_summary=(
+            f"{len(facts)}개 검증 Fact와 {len(selected_claims)}개 검증 Claim으로 "
+            "분석 결과를 구성했습니다."
+        ),
+        metrics=metrics,
+        signals=[
+            signal
+            for fact in facts
+            if isinstance(fact.payload, CustomerRankingPayload)
+            for customer in fact.payload.customers
+            for signal in customer.signals
+        ],
+        ranked_customers=[
+            customer
+            for fact in facts
+            if isinstance(fact.payload, CustomerRankingPayload)
+            for customer in fact.payload.customers
+        ],
+        representative_journeys=[
+            event
+            for fact in facts
+            if isinstance(fact.payload, CustomerJourneyPayload)
+            for event in fact.payload.events
+        ],
+        findings=findings,
+        recommendations=recommendations,
+        limitations=limitations,
+        provenance=provenance,
+    )
+
+
+def _collect_metrics(facts: Sequence[AnalysisFact]) -> list[AnalysisMetricFact]:
+    metrics: list[AnalysisMetricFact] = []
+    seen: set[str] = set()
+    for fact in facts:
+        for metric in fact.metrics:
+            key = json.dumps(
+                metric.model_dump(mode="json"),
+                sort_keys=True,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            if key not in seen:
+                metrics.append(metric.model_copy(deep=True))
+                seen.add(key)
+    return metrics
+
+
+def _build_generic_provenance(facts: Sequence[AnalysisFact]) -> AnalysisReportProvenance:
+    adapter_versions: dict[str, str] = {}
+    manifest_versions: dict[str, str] = {}
+    for fact in facts:
+        for source_id, version in fact.payload.provenance.adapter_versions.items():
+            if source_id in adapter_versions and adapter_versions[source_id] != version:
+                raise UnsupportedClaimError("Run 안의 Adapter version이 일치하지 않습니다.")
+            adapter_versions[source_id] = version
+        for source_id, version in fact.payload.provenance.manifest_versions.items():
+            if source_id in manifest_versions and manifest_versions[source_id] != version:
+                raise UnsupportedClaimError("Run 안의 Manifest version이 일치하지 않습니다.")
+            manifest_versions[source_id] = version
+    source_ids = _stable_unique(source for fact in facts for source in fact.source_ids)
+    return AnalysisReportProvenance(
+        fact_ids=_stable_unique(fact.fact_id for fact in facts),
+        result_ids=_stable_unique(fact.result_id for fact in facts),
+        source_ids=source_ids,
+        dataset_versions=_stable_unique(fact.payload.provenance.dataset_version for fact in facts),
+        adapter_versions=adapter_versions,
+        manifest_versions=manifest_versions,
+    )
+
+
+def _generic_headline(objective: str, claims, facts: Sequence[AnalysisFact]) -> str:
+    if claims:
+        claim = claims[-1]
+        if claim.claim_type == "metric" and claim.fact_refs:
+            reference = claim.fact_refs[0]
+            fact = next((fact for fact in facts if fact.fact_id == reference.fact_id), None)
+            if fact is not None and reference.metric_key is not None:
+                metric = fact.metric(reference.metric_key)
+                return f"{metric.label}: {metric.value} {metric.unit}"
+    return objective
+
+
+def _action_title(action_id: str) -> str:
+    labels = {
+        "further_analysis": "후속 분석 범위 검토",
+        "customer_followup": "대상 고객 후속 확인",
+        "journey_improvement": "고객 Journey 개선 검토",
+    }
+    return labels.get(action_id, f"{action_id.replace('_', ' ')} 검토")
+
+
+def _stable_unique(values) -> list:
+    result = []
+    seen = set()
+    for value in values:
+        if value not in seen:
+            result.append(value)
+            seen.add(value)
+    return result
+
+
+__all__ = [
+    "apply_verified_model_narrative",
+    "compose_customer_signal_report",
+    "compose_verified_report",
+]

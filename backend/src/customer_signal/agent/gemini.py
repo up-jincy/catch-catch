@@ -28,9 +28,9 @@ from pydantic import ValidationError
 
 from customer_signal.agent.contracts import (
     EventEmitter,
+    LegacyRunnerOutcome,
     ReportValidator,
     RunRequest,
-    RunnerOutcome,
     ToolName,
     UnsupportedClaimError,
 )
@@ -537,7 +537,7 @@ class GeminiRunner:
             )
         return result
 
-    def _build_outcome(self, capture: _RunCapture, state: dict[str, Any]) -> RunnerOutcome:
+    def _build_outcome(self, capture: _RunCapture, state: dict[str, Any]) -> LegacyRunnerOutcome:
         if not _REQUIRED_TOOLS <= set(capture.results):
             raise GeminiRunnerError(
                 "gemini_tool_policy_failed",
@@ -609,14 +609,14 @@ class GeminiRunner:
                 "gemini_validation_failed",
                 "Gemini 분석 결과 검증에 실패했습니다.",
             ) from error
-        return RunnerOutcome(report=report, facts=facts, agent_mode="gemini")
+        return LegacyRunnerOutcome(report=report, facts=facts, agent_mode="gemini")
 
     async def run(
         self,
         request: RunRequest,
         *,
         emit: EventEmitter,
-    ) -> RunnerOutcome:
+    ) -> LegacyRunnerOutcome:
         if not is_supported_target_journey_question(request.question):
             raise GeminiRunnerError(
                 "unsupported_question",

@@ -12,9 +12,9 @@ from fastmcp import Client, FastMCP
 
 from customer_signal.agent.contracts import (
     EventEmitter,
+    LegacyRunnerOutcome,
     ReportValidator,
     RunRequest,
-    RunnerOutcome,
     UnsupportedClaimError,
     UnsupportedQuestionError,
 )
@@ -309,7 +309,7 @@ class FixtureRunner:
         request: RunRequest,
         *,
         emit: EventEmitter,
-    ) -> RunnerOutcome:
+    ) -> LegacyRunnerOutcome:
         if not is_supported_target_journey_question(request.question):
             error = UnsupportedQuestionError("검색 실패와 고객 문의 Journey 질문만 지원합니다.")
             await _emit(
@@ -427,7 +427,7 @@ class FixtureRunner:
                 ),
             )
             self._validator(report, facts)
-            outcome = RunnerOutcome(report=report, facts=facts)
+            outcome = LegacyRunnerOutcome(report=report, facts=facts)
             await _emit(
                 emit,
                 RunnerEvent(
