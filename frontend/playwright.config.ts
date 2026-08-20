@@ -5,10 +5,31 @@ import { fileURLToPath } from "node:url";
 const frontendDirectory = fileURLToPath(new URL(".", import.meta.url));
 const repositoryDirectory = path.resolve(frontendDirectory, "..");
 const reuseExistingServer = process.env.PLAYWRIGHT_REUSE_SERVER === "1";
-const backendPort = process.env.E2E_BACKEND_PORT ?? "38100";
-const frontendPort = process.env.E2E_FRONTEND_PORT ?? "33100";
+
+function port(name: string, fallback: string) {
+  const value = process.env[name]?.trim() || fallback;
+  if (!/^\d{2,5}$/.test(value) || Number(value) > 65_535) {
+    throw new Error(`${name} must be a valid TCP port`);
+  }
+  return value;
+}
+
+function shellQuote(value: string) {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+const backendPort = port("E2E_BACKEND_PORT", "38100");
+const frontendPort = port("E2E_FRONTEND_PORT", "33100");
 const backendUrl = `http://127.0.0.1:${backendPort}`;
 const frontendUrl = `http://127.0.0.1:${frontendPort}`;
+const artifactDirectory =
+  process.env.E2E_ARTIFACT_DIRECTORY?.trim() ||
+  path.join(
+    frontendDirectory,
+    "node_modules",
+    ".cache",
+    `run-artifacts-${backendPort}`,
+  );
 
 export default defineConfig({
   testDir: "./e2e",
@@ -44,7 +65,12 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `make serve-backend-fixture BACKEND_PORT=${backendPort} FRONTEND_PORT=${frontendPort}`,
+      command: [
+        "make serve-backend-fixture",
+        `BACKEND_PORT=${shellQuote(backendPort)}`,
+        `FRONTEND_PORT=${shellQuote(frontendPort)}`,
+        `ARTIFACT_DIRECTORY=${shellQuote(artifactDirectory)}`,
+      ].join(" "),
       cwd: repositoryDirectory,
       url: `${backendUrl}/health`,
       reuseExistingServer,
@@ -53,7 +79,11 @@ export default defineConfig({
       stderr: "pipe",
     },
     {
-      command: `make serve-frontend BACKEND_PORT=${backendPort} FRONTEND_PORT=${frontendPort}`,
+      command: [
+        "make serve-frontend",
+        `BACKEND_PORT=${shellQuote(backendPort)}`,
+        `FRONTEND_PORT=${shellQuote(frontendPort)}`,
+      ].join(" "),
       cwd: repositoryDirectory,
       url: frontendUrl,
       reuseExistingServer,

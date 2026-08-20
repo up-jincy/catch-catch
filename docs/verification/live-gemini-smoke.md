@@ -1,87 +1,108 @@
-# Gemini 실호출 검증 기록
+# Gemini 실호출 검증 기록 템플릿
 
-- 검증일: 2026-08-20
-- 실행 기준: `30deb7b`
-- 실행 모드: `gemini`
-- 기본 모델: `gemini-3.7-flash`
-- 결과: 완료
+- 문서 상태: 미실행 템플릿
+- 템플릿 갱신일: 2026-08-20
+- 실행 승인: 미기록
+- 실행 commit: 미기록
+- 실행자: 미기록
 
-## 검증 범위
+이 문서는 실제 Gemini 호출이 승인되고 완료된 뒤 관측값을 기록하는 템플릿입니다.
+현재 내용은 실호출 성공이나 모델 품질을 주장하지 않습니다. Fixture 실행 결과를
+Gemini 결과로 옮겨 적으면 안 됩니다.
 
-로컬 FastAPI와 FastMCP를 실제로 기동하고 `GEMINI_API_KEY`를 프로세스 환경에만
-주입했습니다. 아래 질문을 HTTP Run API로 제출한 뒤 SSE 종료 이벤트와 공개
-`InsightReport`를 확인했습니다.
+## 실행 전 확인
+
+- [ ] 실호출과 외부 비용에 대한 승인
+- [ ] 합성 데이터만 사용하는지 확인
+- [ ] `ENV_FILE`, 현재 checkout `.env`, main checkout `.env` 중 사용할 파일 확인
+- [ ] Backend가 새 Uvicorn 프로세스인지 확인
+- [ ] Uvicorn 명령에 `--env-file <resolved-path>`가 있는지 확인
+- [ ] Frontend 프로세스에 Gemini 또는 LangSmith 값이 전달되지 않는지 확인
+- [ ] API Key, Provider 원문, 내부 추론을 터미널 캡처와 문서에 남기지 않도록 확인
+
+환경 파일은 복사하거나 shell에 `source`하지 않습니다. `scripts/dev.sh`가 선택한
+경로를 새 Uvicorn 프로세스의 `--env-file` 인자로만 전달해야 합니다.
+
+## 실행 입력
+
+실행 전에 아래 값을 확정합니다.
+
+| 항목 | 기록값 |
+| --- | --- |
+| 질문 | 미기록 |
+| 시작 시각 | 미기록 |
+| 종료 시각 | 미기록 |
+| Source | 미기록 |
+| Agent 모드 | `gemini` |
+| 기본 모델 | 미기록 |
+| 대체 모델 | 미기록 |
+
+권장 smoke 질문은 아래 계약 질문 중 하나입니다.
 
 ```text
-AI 검색에서 해결하지 못하고 고객센터에 문의한 고객이 몇 명이야?
+최근 부정 피드백이 많은 Topic과 관련 고객 Segment를 알려줘.
 ```
 
-- 기간: `2026-07-20T00:00:00+09:00` 이상,
-  `2026-08-19T00:00:00+09:00` 미만
-- Source: `search_history`, `search_feedback`, `digital_behavior`, `subscription`,
-  `voc`
-- Run ID: `884e2de6-1291-4be9-b73a-6473f2012261`
-- 완료 시간: 45.4초
+실제 호출은 승인된 작업에서만 수행합니다.
 
-## 결과
+```bash
+ENV_FILE=/absolute/path/to/approved.env make dev-gemini
+```
+
+## 실행 결과
+
+실행하지 않은 항목은 `미기록`으로 유지합니다. 예상값이나 Fixture 값을 관측값으로
+작성하면 안 됩니다.
 
 | 항목 | 관측값 |
 | --- | --- |
-| Run 상태 | `completed` |
-| Agent 모드 | `gemini` |
-| Headline | `검색 실패 후 문의로 이어진 고객 6명` |
-| Metric | `완전한 Journey 패턴 고객 수 = 6명` |
-| 공개 Ranking | 6명 |
-| Finding에 연결된 Evidence | 4건 |
-| 공개 오류 | 없음 |
+| Run ID | 미기록 |
+| Run 상태 | 미기록 |
+| Agent 모드 | 미기록 |
+| 실제 모델 | 미기록 |
+| 완료 시간 | 미기록 |
+| Headline | 미기록 |
+| 대표 Metric | 미기록 |
+| 공개 Fact 수 | 미기록 |
+| 공개 Analysis Note 수 | 미기록 |
+| 공개 오류 | 미기록 |
 
-모델은 Journey Evidence 6건을 조회했습니다. 서버는 그중 Pattern의 대표 신호에도
-속하는 4건만 Finding과 Recommendation에 연결했습니다.
+## 공개 이벤트 확인
 
-## MCP Tool Trace
+- [ ] `run_started`
+- [ ] `goal_created` 또는 `clarification_required`
+- [ ] `plan_created`
+- [ ] 각 Step의 `step_started`, `fact_created`, `analysis_note_created`,
+  `step_completed`
+- [ ] `report_validating`
+- [ ] `result`
+- [ ] `done`
+- [ ] 연속 증가하는 SSE `id`
+- [ ] `Last-Event-ID` 이후 재연결
 
-| 순서 | Tool | 반환 건수 |
-| --- | --- | ---: |
-| 1 | `catalog_sources` | 5 |
-| 2 | `aggregate_events` | 4 |
-| 3 | `match_journey_pattern` | 6 |
-| 4 | `rank_customers` | 24 |
-| 5 | `get_customer_journey` | 6 |
-| 6 | `get_evidence` | 6 |
+이벤트에는 chain-of-thought, prompt, message 원문, API Key, Raw PII가 없어야 합니다.
+확인 결과와 예외가 있으면 아래에 공개 가능한 내용만 기록합니다.
 
-각 Tool은 한 번씩만 호출됐습니다. Tool 실행 뒤 `validating`, `result`, `done`
-이벤트가 순서대로 도착했습니다.
-
-## 실제 Agent 계획
-
-Gemini가 Tool 실행 결과와 함께 반환한 Todo는 다음과 같습니다.
-
-1. `Catalog sources in range`
-2. `Aggregate events by topic`
-3. `Match journey pattern`
-4. `Rank customers`
-5. `Fetch journey for customer CUST-003`
-6. `Fetch evidence and generate final InsightReport JSON`
-
-## 재현 방법
-
-저장소 루트의 `.env`에 `GEMINI_API_KEY`를 설정한 뒤 다음 명령을 실행합니다.
-
-```bash
-make seed
-make dev-gemini
+```text
+미기록
 ```
 
-브라우저에서 기본 질문과 5개 Source를 선택해 실행하면 같은 `6명` 계약을 확인할
-수 있습니다. 합성 데이터는 고정 Seed를 사용하지만 Provider 응답 시간과 Todo 문구는
-실행마다 달라질 수 있습니다.
+## Artifact와 다운로드 확인
 
-## 보안 경계
+- [ ] `GET /api/run-artifacts/{run_id}`
+- [ ] `GET /api/run-artifacts/{run_id}/document`
+- [ ] `GET /api/run-artifacts/{run_id}/download.json`
+- [ ] `GET /api/run-artifacts/{run_id}/download.md`
+- [ ] 재시작 뒤 History 복원
+- [ ] JSON과 Markdown의 Run ID, 질문, Fact, Note 일치
 
-- API Key, Provider 원문, 내부 추론은 이 문서와 공개 SSE에 기록하지 않았습니다.
-- 모델 서술은 서버가 MCP 결과로 만든 정답 문구와 정확히 일치할 때만 공개합니다.
-- 모델이 선택한 Evidence ID는 같은 Run에서 조회한 값인지 확인합니다.
-- 공개 보고서는 서버가 Pattern 근거와 교차 검증한 Evidence ID만 사용합니다.
+## 최종 판정
 
-SDK는 실행 중 일부 JSON Schema 키를 무시한다는 경고를 출력했지만, 구조화 응답과
-최종 검증은 정상 완료됐습니다.
+| 판정 | 기록값 |
+| --- | --- |
+| 결과 | 미실행 |
+| Blocker | 미기록 |
+| 후속 작업 | 미기록 |
+
+실제 호출이 끝난 뒤 근거가 있는 항목만 채웁니다. 실패도 그대로 기록하며 Fixture
+성공으로 대체하지 않습니다.

@@ -17,10 +17,12 @@ async function expectNoHorizontalPageScroll(page: Page) {
 test("question to masked evidence working demo", async ({ page }) => {
   await page.goto("/");
 
-  await page
-    .getByRole("button", { name: /검색 실패 후 상담 전환 고객 찾기/ })
-    .click();
-  await expect(page.getByLabel("분석 질문")).toHaveValue(
+  const question = page.getByRole("textbox", {
+    name: "분석 질문",
+    exact: true,
+  });
+  await question.fill("AI 검색 실패 후 고객센터까지 문의한 고객이 얼마나 돼?");
+  await expect(question).toHaveValue(
     "AI 검색 실패 후 고객센터까지 문의한 고객이 얼마나 돼?",
   );
   await page.getByRole("button", { name: "분석 시작" }).click();
@@ -54,12 +56,18 @@ test("question to masked evidence working demo", async ({ page }) => {
 });
 
 test("disabling VOC returns the truthful zero result", async ({ page }) => {
+  const sourceCatalogLoaded = page.waitForResponse(
+    (response) => response.url().endsWith("/api/sources") && response.ok(),
+  );
   await page.goto("/");
+  await sourceCatalogLoaded;
 
   await page
-    .getByRole("button", { name: /검색 실패 후 상담 전환 고객 찾기/ })
-    .click();
-  const vocCheckbox = page.getByRole("checkbox", { name: /VOC/ });
+    .getByRole("textbox", { name: "분석 질문", exact: true })
+    .fill("AI 검색 실패 후 고객센터까지 문의한 고객이 얼마나 돼?");
+  const vocCheckbox = page.getByRole("checkbox", {
+    name: /VOC|Voice of customer/i,
+  });
   await vocCheckbox.press("Space");
   await expect(vocCheckbox).not.toBeChecked();
   await page.getByRole("button", { name: "분석 시작" }).click();
