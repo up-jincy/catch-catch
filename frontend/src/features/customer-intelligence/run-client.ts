@@ -494,6 +494,14 @@ function decodeRunSnapshot(value: unknown): RunSnapshot {
         ? null
         : decodeRunReport(report, "snapshot.report", decodeInsightReport),
     error: error === null ? null : decodeRunError(error, "snapshot.error"),
+    plan_history:
+      record.plan_history === undefined
+        ? []
+        : expectArray(
+            record.plan_history,
+            "snapshot.plan_history",
+            decodeAnalysisPlan,
+          ),
     ...(record.last_event_id === undefined
       ? {}
       : {
@@ -591,6 +599,10 @@ function decodeEvent(
           primitive: decodeGenericPrimitive(
             payload.primitive,
             "event.payload.primitive",
+          ),
+          selection_reason: expectId(
+            payload.selection_reason,
+            "event.payload.selection_reason",
           ),
         };
         if (payload.started_at !== undefined) {

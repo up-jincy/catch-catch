@@ -196,6 +196,7 @@ export interface AnalysisStep {
   expected_output: ExpectedOutputSpec;
   stop_condition: StopCondition;
   limits: StepLimits;
+  selection_reason: string;
 }
 
 export interface AnalysisPlan {
@@ -203,6 +204,7 @@ export interface AnalysisPlan {
   revision: number;
   goal_id: string;
   steps: AnalysisStep[];
+  rationale: string;
 }
 
 export interface ProcessingStats {
@@ -281,6 +283,7 @@ export interface AnalysisNote {
   fact_ids: string[];
   claims: VerifiedClaim[];
   next_step_id: string | null;
+  next_action: string;
   limitations: string[];
   source_ids: SourceId[];
   result_ids: string[];
@@ -469,6 +472,7 @@ export interface RunSnapshot {
   agent_mode: AgentMode | null;
   report: GenericOrLegacyReport | null;
   error: RunError | null;
+  plan_history: AnalysisPlan[];
   last_event_id?: number;
 }
 
@@ -589,6 +593,8 @@ export type GenericRunStreamEvent =
       data: {
         step_id: string;
         primitive: GenericPrimitiveName;
+        /** Always present on decoded current events; optional for legacy local ledgers. */
+        selection_reason?: string;
         started_at?: string;
         objective?: string;
       };
@@ -646,6 +652,7 @@ export interface RunArtifact {
   goal: AnalysisGoal | null;
   clarification: ClarificationRecord | null;
   plan: AnalysisPlan | null;
+  plan_history: AnalysisPlan[];
   facts: AnalysisFact[];
   notes: AnalysisNote[];
   report: GenericOrLegacyReport | null;
@@ -697,6 +704,8 @@ export interface ArtifactDocument {
   goal: AnalysisGoal | null;
   clarification: ClarificationRecord | null;
   plan: AnalysisPlan | null;
+  plan_history: AnalysisPlan[];
+  facts: AnalysisFact[];
   notes: AnalysisNote[];
   report: GenericOrLegacyReport | null;
   provenance: ArtifactDocumentProvenance;

@@ -46,11 +46,33 @@ const limits = {
   timeout_seconds: 10,
 };
 
-function planStep(stepId: string, primitive: string, inputStepIds: string[] = []) {
+function planStep(
+  stepId: string,
+  primitive: string,
+  selectionReason: string,
+  inputStepIds: string[] = [],
+) {
+  const parameters =
+    primitive === "aggregate_events"
+      ? {
+          primitive,
+          aggregation: "count",
+          measure: null,
+          group_by: ["topic"],
+          predicates: ["outcome=negative"],
+          time_grain: "day",
+        }
+      : primitive === "rank_customers"
+        ? {
+            primitive,
+            weights: { negative_feedback_count: 1 },
+            limit: 10,
+          }
+        : { primitive };
   return {
     step_id: stepId,
     primitive,
-    parameters: { primitive },
+    parameters,
     source_ids: [dynamicSourceId],
     input_step_ids: inputStepIds,
     expected_output: {
@@ -59,6 +81,7 @@ function planStep(stepId: string, primitive: string, inputStepIds: string[] = []
     },
     stop_condition: { kind: "continue" },
     limits,
+    selection_reason: selectionReason,
   };
 }
 
@@ -67,10 +90,30 @@ export const genericPlan = {
   revision: 0,
   goal_id: genericGoal.goal_id,
   steps: [
-    planStep("step-catalog", "catalog_sources"),
-    planStep("step-aggregate", "aggregate_events"),
-    planStep("step-ranking", "rank_customers", ["step-aggregate"]),
+    planStep(
+      "step-catalog",
+      "catalog_sources",
+      "사용 가능한 Source와 분석 범위를 먼저 확인합니다.",
+    ),
+    planStep(
+      "step-aggregate",
+      "aggregate_events",
+      "Topic별 부정 피드백 규모를 검증합니다.",
+    ),
+    planStep(
+      "step-ranking",
+      "rank_customers",
+      "집계 Fact를 기준으로 고객 신호를 정렬합니다.",
+      ["step-aggregate"],
+    ),
   ],
+  rationale: "요청한 Topic별 부정 피드백을 공개 Fact로 검증합니다.",
+};
+
+export const genericRevisedPlan = {
+  ...genericPlan,
+  revision: 1,
+  rationale: "집계 Fact를 반영해 고객 정렬 단계를 구체화했습니다.",
 };
 
 const metric = {
@@ -150,6 +193,7 @@ export const genericNote = {
   fact_ids: [genericFact.fact_id],
   claims: [verifiedClaim],
   next_step_id: "step-ranking",
+  next_action: "검증된 Topic 집계를 기준으로 고객 신호를 정렬합니다.",
   limitations: ["합성 데이터만 포함합니다."],
   source_ids: [dynamicSourceId],
   result_ids: [genericFact.result_id],
@@ -199,7 +243,8 @@ export const genericArtifact = {
   request: genericRequest,
   goal: genericGoal,
   clarification: null,
-  plan: genericPlan,
+  plan: genericRevisedPlan,
+  plan_history: [genericPlan, genericRevisedPlan],
   facts: [genericFact],
   notes: [genericNote],
   report: genericReport,
@@ -232,7 +277,9 @@ export const genericDocument = {
   },
   goal: genericGoal,
   clarification: null,
-  plan: genericPlan,
+  plan: genericRevisedPlan,
+  plan_history: [genericPlan, genericRevisedPlan],
+  facts: [genericFact],
   notes: [genericNote],
   report: genericReport,
   provenance: {

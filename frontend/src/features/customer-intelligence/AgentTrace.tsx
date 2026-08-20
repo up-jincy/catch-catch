@@ -64,7 +64,10 @@ function eventView(event: AnyRunStreamEvent) {
     case "step_started":
       return {
         title: event.data.primitive,
-        detail: event.data.objective ?? `${event.data.step_id} 실행 중`,
+        detail:
+          event.data.selection_reason ??
+          event.data.objective ??
+          `${event.data.step_id} 실행 중`,
         state: "active",
       };
     case "fact_created":

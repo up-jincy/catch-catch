@@ -12,6 +12,7 @@ function metricValue(value: number, unit: string): string {
 
 export function FactDetail({ fact, onOpenEvidence }: FactDetailProps) {
   const processing = fact.payload.processing;
+  const provenance = fact.payload.provenance;
   return (
     <details className="fact-detail" open>
       <summary>
@@ -34,6 +35,31 @@ export function FactDetail({ fact, onOpenEvidence }: FactDetailProps) {
           <div><dt>Source</dt><dd>{fact.source_ids.map(sourceLabel).join(" · ")}</dd></div>
           <div><dt>result_id</dt><dd><code>{fact.result_id}</code></dd></div>
         </dl>
+        <details className="fact-provenance">
+          <summary>Provenance 상세</summary>
+          <dl className="fact-refs">
+            <div>
+              <dt>Interval</dt>
+              <dd>{provenance.scope.start_at} → {provenance.scope.end_at}</dd>
+            </div>
+            <div>
+              <dt>Scope</dt>
+              <dd>{provenance.scope.source_ids.join(" · ")} · max {provenance.scope.max_events}</dd>
+            </div>
+            <div>
+              <dt>Dataset version</dt>
+              <dd><code>{provenance.dataset_version}</code></dd>
+            </div>
+            <div>
+              <dt>Manifest versions</dt>
+              <dd><code>{JSON.stringify(provenance.manifest_versions)}</code></dd>
+            </div>
+            <div>
+              <dt>Adapter versions</dt>
+              <dd><code>{JSON.stringify(provenance.adapter_versions)}</code></dd>
+            </div>
+          </dl>
+        </details>
         {fact.evidence_ids.length ? (
           <div className="fact-evidence" aria-label="Fact Evidence">
             {fact.evidence_ids.map((evidenceId) => (

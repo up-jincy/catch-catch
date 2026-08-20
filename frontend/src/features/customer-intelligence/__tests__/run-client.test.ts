@@ -10,6 +10,7 @@ import {
   genericGoal,
   genericNote,
   genericPlan,
+  genericRevisedPlan,
   genericReport,
 } from "./generic-fixtures";
 
@@ -206,6 +207,33 @@ describe("RunClient", () => {
     },
   );
 
+  it("decodes generic snapshot plan history and defaults an absent legacy history", async () => {
+    let call = 0;
+    const fetchImpl: typeof fetch = async () => {
+      call += 1;
+      return Response.json({
+        run_id: "run-1",
+        status: "running",
+        request: genericArtifact.request,
+        created_at: genericArtifact.created_at,
+        updated_at: genericArtifact.updated_at,
+        agent_mode: null,
+        report: null,
+        error: null,
+        ...(call === 1
+          ? { plan_history: [genericPlan, genericRevisedPlan] }
+          : {}),
+      });
+    };
+    const client = new RunClient({ apiBaseUrl: "http://api.test", fetchImpl });
+
+    const generic = await client.getRun("run-1");
+    const legacy = await client.getRun("run-legacy");
+
+    expect(generic.plan_history.map((plan) => plan.revision)).toEqual([0, 1]);
+    expect(legacy.plan_history).toEqual([]);
+  });
+
   it("reads split SSE chunks and unwraps the backend run envelope", async () => {
     const fetchImpl: typeof fetch = async () =>
       responseStream([
@@ -297,6 +325,40 @@ describe("RunClient", () => {
     ["error", { code: "run_failed" }],
     ["fallback", { reason: 42 }],
     ["done", { status: "bogus" }],
+    ["plan_created", { plan: { ...genericPlan, rationale: 42 } }],
+    [
+      "plan_created",
+      {
+        plan: {
+          ...genericPlan,
+          steps: [
+            { ...genericPlan.steps[0], selection_reason: 42 },
+            ...genericPlan.steps.slice(1),
+          ],
+        },
+      },
+    ],
+    ["analysis_note_created", { note: { ...genericNote, next_action: 42 } }],
+    [
+      "step_started",
+      {
+        step_id: "step-aggregate",
+        primitive: "aggregate_events",
+        selection_reason: 42,
+      },
+    ],
+    [
+      "step_started",
+      { step_id: "step-aggregate", primitive: "aggregate_events" },
+    ],
+    [
+      "step_started",
+      {
+        step_id: "step-aggregate",
+        primitive: "aggregate_events",
+        selection_reason: null,
+      },
+    ],
   ] as const)(
     "rejects malformed %s payloads at the stream boundary",
     async (type, payload) => {
@@ -472,6 +534,7 @@ describe("RunClient", () => {
         frame("run-1", 3, "step_started", {
           step_id: "step-aggregate",
           primitive: "aggregate_events",
+          selection_reason: "Topic별 부정 피드백 규모를 검증합니다.",
           started_at: "2026-08-20T01:00:00Z",
         }),
         frame("run-1", 4, "fact_created", {
@@ -509,6 +572,28 @@ describe("RunClient", () => {
     expect(events[0]).toMatchObject({
       type: "goal_created",
       data: { goal: { source_ids: [dynamicSourceId] } },
+    });
+    expect(events[1]).toMatchObject({
+      type: "plan_created",
+      data: {
+        plan: {
+          rationale: genericPlan.rationale,
+        },
+      },
+    });
+    if (events[1].type !== "plan_created") throw new Error("expected plan_created");
+    expect(events[1].data.plan.steps[0]).toMatchObject({
+      selection_reason: genericPlan.steps[0].selection_reason,
+    });
+    expect(events[2]).toMatchObject({
+      type: "step_started",
+      data: {
+        selection_reason: "Topic별 부정 피드백 규모를 검증합니다.",
+      },
+    });
+    expect(events[4]).toMatchObject({
+      type: "analysis_note_created",
+      data: { note: { next_action: genericNote.next_action } },
     });
     expect(events[7]).toMatchObject({
       type: "result",
@@ -588,6 +673,10 @@ describe("RunClient", () => {
     expect(artifact).toMatchObject({
       schema_version: 1,
       last_event_id: 9,
+      plan_history: [
+        { revision: 0, rationale: genericPlan.rationale },
+        { revision: 1, rationale: genericRevisedPlan.rationale },
+      ],
       report: { report_kind: "customer_signal" },
       facts: [
         {
@@ -597,6 +686,8 @@ describe("RunClient", () => {
     });
     expect(document).toMatchObject({
       document_kind: "run_artifact",
+      plan_history: [{ revision: 0 }, { revision: 1 }],
+      facts: [{ fact_id: genericFact.fact_id }],
       provenance: { last_event_id: 9 },
     });
     expect(urls).toEqual([
@@ -617,6 +708,43 @@ describe("RunClient", () => {
       "http://api.test/api/run-artifacts/run%2Fone/download.md",
     );
   });
+
+  it("falls back to the current plan for legacy artifact and document history", async () => {
+    const { plan_history: _artifactHistory, ...legacyArtifact } = genericArtifact;
+    const { plan_history: _documentHistory, ...legacyDocument } = genericDocument;
+    const fetchImpl: typeof fetch = async (input) =>
+      Response.json(String(input).endsWith("/document") ? legacyDocument : legacyArtifact);
+    const client = new RunClient({ apiBaseUrl: "http://api.test", fetchImpl });
+
+    const artifact = await client.getRunArtifact(genericArtifact.run_id);
+    const document = await client.getRunDocument(genericArtifact.run_id);
+
+    expect(artifact.plan_history).toEqual([genericRevisedPlan]);
+    expect(document.plan_history).toEqual([genericRevisedPlan]);
+  });
+
+  it.each([
+    ["artifact", {}],
+    ["artifact", null],
+    ["document", {}],
+    ["document", null],
+  ] as const)(
+    "rejects malformed present %s plan history",
+    async (kind, malformedHistory) => {
+      const body = {
+        ...(kind === "artifact" ? genericArtifact : genericDocument),
+        plan_history: malformedHistory,
+      };
+      const fetchImpl: typeof fetch = async () => Response.json(body);
+      const client = new RunClient({ apiBaseUrl: "http://api.test", fetchImpl });
+      const request =
+        kind === "artifact"
+          ? client.getRunArtifact(genericArtifact.run_id)
+          : client.getRunDocument(genericArtifact.run_id);
+
+      await expect(request).rejects.toMatchObject({ code: "invalid_response" });
+    },
+  );
 
   it("decodes a dynamic public source catalog", async () => {
     const fetchImpl: typeof fetch = async () =>

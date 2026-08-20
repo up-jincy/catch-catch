@@ -19,6 +19,7 @@ import {
   genericGoal,
   genericNote,
   genericPlan,
+  genericRevisedPlan,
   genericReport,
   genericRequest,
 } from "./generic-fixtures";
@@ -358,6 +359,7 @@ describe("runReducer", () => {
     expect(state.request).toEqual(genericRequest);
     expect(state.goal?.goal_id).toBe(genericGoal.goal_id);
     expect(state.plan?.plan_id).toBe(genericPlan.plan_id);
+    expect(state.planHistory).toEqual([genericPlan]);
     expect(state.stepStates["step-aggregate"]).toMatchObject({
       status: "completed",
       primitive: "aggregate_events",
@@ -369,6 +371,40 @@ describe("runReducer", () => {
     expect(state.report).toBeNull();
     expect(state.limitations).toEqual(genericNote.limitations);
     expect(state.lastEventId).toBe(9);
+  });
+
+  it("keeps unique created and revised plans in revision order", () => {
+    let state = runReducer(initialRunState, {
+      kind: "start",
+      runId: "run-plan-history",
+    });
+
+    for (const streamEvent of [
+      {
+        id: 1,
+        type: "plan_created" as const,
+        data: { plan: genericPlan as AnalysisPlan },
+      },
+      {
+        id: 2,
+        type: "plan_revised" as const,
+        data: { plan: genericRevisedPlan as AnalysisPlan },
+      },
+      {
+        id: 3,
+        type: "plan_revised" as const,
+        data: { plan: genericRevisedPlan as AnalysisPlan },
+      },
+    ]) {
+      state = runReducer(state, {
+        kind: "event",
+        runId: "run-plan-history",
+        event: streamEvent,
+      });
+    }
+
+    expect(state.plan).toEqual(genericRevisedPlan);
+    expect(state.planHistory.map((plan) => plan.revision)).toEqual([0, 1]);
   });
 
   it("pauses for clarification and resumes the same run with the public answer", () => {
@@ -504,9 +540,23 @@ describe("runReducer", () => {
     expect(state.runId).toBe(genericArtifact.run_id);
     expect(state.phase).toBe("completed");
     expect(state.goal).toEqual(genericGoal);
+    expect(state.planHistory).toEqual([genericPlan, genericRevisedPlan]);
     expect(state.facts).toEqual([genericFact]);
     expect(state.notes).toEqual([genericNote]);
     expect(state.runReport).toEqual(genericReport);
     expect(state.lastEventId).toBe(9);
+  });
+
+  it("hydrates a legacy artifact plan when persisted history is empty", () => {
+    const state = runReducer(initialRunState, {
+      kind: "hydrate_artifact",
+      artifact: {
+        ...genericArtifact,
+        plan: genericPlan,
+        plan_history: [],
+      } as RunArtifact,
+    });
+
+    expect(state.planHistory).toEqual([genericPlan]);
   });
 });

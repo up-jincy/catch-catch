@@ -4,6 +4,7 @@ import { FactDetail } from "./FactDetail";
 
 interface AnalysisPlanViewProps {
   plan: AnalysisPlan;
+  planHistory: AnalysisPlan[];
   stepStates: Record<string, StepExecutionState>;
   facts: AnalysisFact[];
   onOpenEvidence: (evidenceId: string, opener: HTMLElement) => void;
@@ -19,10 +20,14 @@ const statusLabels = {
 
 export function AnalysisPlanView({
   plan,
+  planHistory,
   stepStates,
   facts,
   onOpenEvidence,
 }: AnalysisPlanViewProps) {
+  const revisions = (planHistory.length ? planHistory : [plan])
+    .map((recorded) => recorded.revision)
+    .join(" → ");
   return (
     <section className="panel analysis-card plan-card" aria-labelledby="plan-title">
       <div className="workspace-heading">
@@ -30,8 +35,11 @@ export function AnalysisPlanView({
           <p className="section-kicker">02 · PLAN</p>
           <h2 id="plan-title">실행 계획</h2>
         </div>
-        <span className="revision-chip">revision {plan.revision}</span>
+        <span className="revision-chip">revision {revisions}</span>
       </div>
+      <p className="document-summary">
+        <strong>계획 근거</strong> <span>{plan.rationale}</span>
+      </p>
       <ol className="analysis-plan-list">
         {plan.steps.map((step, index) => {
           const execution = stepStates[step.step_id];
@@ -45,6 +53,21 @@ export function AnalysisPlanView({
                   <p>{step.source_ids.join(" · ")}</p>
                 </div>
                 <strong>{statusLabels[execution?.status ?? "pending"]}</strong>
+              </div>
+              <div className="fact-body">
+                <p className="processing-stats">
+                  <strong>선택 근거</strong> <span>{step.selection_reason}</span>
+                </p>
+                <dl className="fact-refs">
+                  <div>
+                    <dt>Source IDs</dt>
+                    <dd>{step.source_ids.join(" · ")}</dd>
+                  </div>
+                  <div>
+                    <dt>Parameters</dt>
+                    <dd><code>{JSON.stringify(step.parameters)}</code></dd>
+                  </div>
+                </dl>
               </div>
               {stepFacts.map((fact) => (
                 <FactDetail

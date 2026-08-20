@@ -510,6 +510,10 @@ function decodeAnalysisStep(value: unknown, path: string): AnalysisStep {
         `${path}.limits.timeout_seconds`,
       ),
     },
+    selection_reason: expectId(
+      record.selection_reason,
+      `${path}.selection_reason`,
+    ),
   };
 }
 
@@ -520,6 +524,7 @@ export function decodeAnalysisPlan(value: unknown, path = "plan"): AnalysisPlan 
     revision: expectNonnegativeInteger(record.revision, `${path}.revision`),
     goal_id: expectId(record.goal_id, `${path}.goal_id`),
     steps: expectArray(record.steps, `${path}.steps`, decodeAnalysisStep),
+    rationale: expectId(record.rationale, `${path}.rationale`),
   };
 }
 
@@ -679,6 +684,7 @@ export function decodeAnalysisNote(value: unknown, path = "note"): AnalysisNote 
       `${path}.next_step_id`,
       expectId,
     ),
+    next_action: expectId(record.next_action, `${path}.next_action`),
     limitations: expectStringArray(record.limitations, `${path}.limitations`),
     source_ids: expectArray(record.source_ids, `${path}.source_ids`, decodeSourceId),
     result_ids: expectIdArray(record.result_ids, `${path}.result_ids`),
@@ -926,6 +932,21 @@ export function decodeRunArtifact(
   const path = "artifact";
   const record = expectRecord(value, path);
   if (record.schema_version !== 1) invalid(`${path}.schema_version`);
+  const plan = decodeOptionalNullable(
+    record.plan,
+    `${path}.plan`,
+    decodeAnalysisPlan,
+  );
+  const planHistory =
+    record.plan_history === undefined
+      ? plan
+        ? [plan]
+        : []
+      : expectArray(
+          record.plan_history,
+          `${path}.plan_history`,
+          decodeAnalysisPlan,
+        );
   return {
     schema_version: 1,
     run_id: expectId(record.run_id, `${path}.run_id`),
@@ -944,7 +965,8 @@ export function decodeRunArtifact(
       `${path}.clarification`,
       decodeClarification,
     ),
-    plan: decodeOptionalNullable(record.plan, `${path}.plan`, decodeAnalysisPlan),
+    plan,
+    plan_history: planHistory,
     facts: expectArray(record.facts, `${path}.facts`, decodeAnalysisFact),
     notes: expectArray(record.notes, `${path}.notes`, decodeAnalysisNote),
     report:
@@ -1045,6 +1067,21 @@ export function decodeArtifactDocument(
   const path = "document";
   const record = expectRecord(value, path);
   const scope = expectRecord(record.scope, `${path}.scope`);
+  const plan = decodeOptionalNullable(
+    record.plan,
+    `${path}.plan`,
+    decodeAnalysisPlan,
+  );
+  const planHistory =
+    record.plan_history === undefined
+      ? plan
+        ? [plan]
+        : []
+      : expectArray(
+          record.plan_history,
+          `${path}.plan_history`,
+          decodeAnalysisPlan,
+        );
   return {
     document_kind: expectOneOf(
       record.document_kind,
@@ -1076,7 +1113,9 @@ export function decodeArtifactDocument(
       `${path}.clarification`,
       decodeClarification,
     ),
-    plan: decodeOptionalNullable(record.plan, `${path}.plan`, decodeAnalysisPlan),
+    plan,
+    plan_history: planHistory,
+    facts: expectArray(record.facts, `${path}.facts`, decodeAnalysisFact),
     notes: expectArray(record.notes, `${path}.notes`, decodeAnalysisNote),
     report:
       record.report === null

@@ -36,6 +36,7 @@ export function AnalysisWorkspace({
       {state.plan ? (
         <AnalysisPlanView
           plan={state.plan}
+          planHistory={state.planHistory}
           stepStates={state.stepStates}
           facts={state.facts}
           onOpenEvidence={onOpenEvidence}

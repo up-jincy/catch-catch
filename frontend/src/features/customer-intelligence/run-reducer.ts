@@ -47,6 +47,7 @@ export interface RunState {
   goal: AnalysisGoal | null;
   clarification: ClarificationRecord | null;
   plan: AnalysisPlan | null;
+  planHistory: AnalysisPlan[];
   stepStates: Record<string, StepExecutionState>;
   facts: AnalysisFact[];
   notes: AnalysisNote[];
@@ -72,6 +73,7 @@ export const initialRunState: RunState = {
   goal: null,
   clarification: null,
   plan: null,
+  planHistory: [],
   stepStates: {},
   facts: [],
   notes: [],
@@ -159,6 +161,18 @@ function stepStatesForPlan(
     };
   }
   return next;
+}
+
+function appendUniquePlan(
+  history: AnalysisPlan[],
+  plan: AnalysisPlan,
+): AnalysisPlan[] {
+  return history.some(
+    (recorded) =>
+      recorded.plan_id === plan.plan_id && recorded.revision === plan.revision,
+  )
+    ? history
+    : [...history, plan];
 }
 
 function firstCustomerId(report: GenericOrLegacyReport | null): string | null {
@@ -262,6 +276,7 @@ function reduceEvent(state: RunState, event: AnyRunStreamEvent): RunState {
       return {
         ...next,
         plan: event.data.plan,
+        planHistory: appendUniquePlan(next.planHistory, event.data.plan),
         stepStates: stepStatesForPlan(event.data.plan, state.stepStates),
       };
     case "step_started": {
@@ -384,6 +399,11 @@ function reduceEvent(state: RunState, event: AnyRunStreamEvent): RunState {
 
 function hydrateArtifact(artifact: RunArtifact): RunState {
   const runReport = artifact.report;
+  const planHistory = artifact.plan_history.length
+    ? [...artifact.plan_history]
+    : artifact.plan
+      ? [artifact.plan]
+      : [];
   let stepStates = artifact.plan ? stepStatesForPlan(artifact.plan) : {};
   for (const note of artifact.notes) {
     const current = stepStates[note.step_id];
@@ -421,6 +441,7 @@ function hydrateArtifact(artifact: RunArtifact): RunState {
     goal: artifact.goal,
     clarification: artifact.clarification,
     plan: artifact.plan,
+    planHistory,
     stepStates,
     facts: artifact.facts,
     notes: artifact.notes,

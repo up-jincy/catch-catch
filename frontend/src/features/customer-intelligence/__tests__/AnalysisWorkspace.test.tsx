@@ -35,15 +35,39 @@ describe("AnalysisWorkspace", () => {
     expect(
       within(workspace).getByRole("heading", { name: "aggregate_events" }),
     ).toBeInTheDocument();
+    expect(
+      within(workspace).getByText(
+        "집계 Fact를 반영해 고객 정렬 단계를 구체화했습니다.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(workspace).getByText("revision 0 → 1")).toBeInTheDocument();
+    expect(
+      within(workspace).getByText("Topic별 부정 피드백 규모를 검증합니다."),
+    ).toBeInTheDocument();
+    expect(
+      within(workspace).getByText(/"group_by":\["topic"\]/),
+    ).toBeInTheDocument();
+    expect(within(workspace).getAllByText("support_chat_v2").length).toBeGreaterThan(0);
     expect(within(workspace).getByText("부정 피드백 수")).toBeInTheDocument();
     expect(within(workspace).getByText("12건")).toBeInTheDocument();
     expect(within(workspace).getByText(/스캔 100/)).toBeInTheDocument();
+    expect(within(workspace).getByText("관찰 Fact")).toBeInTheDocument();
     expect(
       within(workspace).getByText("로밍 Topic의 부정 피드백은 12건입니다."),
+    ).toBeInTheDocument();
+    expect(within(workspace).getByText("다음 행동")).toBeInTheDocument();
+    expect(
+      within(workspace).getByText(
+        "검증된 Topic 집계를 기준으로 고객 신호를 정렬합니다.",
+      ),
     ).toBeInTheDocument();
     expect(
       within(workspace).getByText("aggregate_events:negative-feedback"),
     ).toBeInTheDocument();
+    expect(within(workspace).getByText("dataset-v2")).toBeInTheDocument();
+    expect(within(workspace).getByText(/adapter-v2/)).toBeInTheDocument();
+    expect(within(workspace).getByText(/manifest-v2/)).toBeInTheDocument();
+    expect(within(workspace).getByText(/2026-07-20T00:00:00\+09:00/)).toBeInTheDocument();
     expect(within(workspace).getByText("EVD-DYNAMIC-1")).toBeInTheDocument();
     expect(
       within(workspace).getByRole("heading", {

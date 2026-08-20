@@ -22,12 +22,24 @@ export function AnalysisNoteTimeline({ notes }: AnalysisNoteTimelineProps) {
                   <p>{note.source_ids.map(sourceLabel).join(" · ")} · {note.duration_ms}ms</p>
                 </div>
               </div>
-              {note.claims.map((claim) => (
-                <blockquote key={claim.claim_id}>{claim.rendered_text}</blockquote>
-              ))}
-              {note.limitations.map((limitation) => (
-                <p className="note-limitation" key={limitation}>{limitation}</p>
-              ))}
+              <section aria-label="관찰 Fact">
+                <strong>관찰 Fact</strong>
+                {note.claims.map((claim) => (
+                  <blockquote key={claim.claim_id}>{claim.rendered_text}</blockquote>
+                ))}
+              </section>
+              <section aria-label="다음 행동">
+                <strong>다음 행동</strong>
+                <p>{note.next_action}</p>
+              </section>
+              {note.limitations.length ? (
+                <section aria-label="제한 사항">
+                  <strong>제한 사항</strong>
+                  {note.limitations.map((limitation) => (
+                    <p className="note-limitation" key={limitation}>{limitation}</p>
+                  ))}
+                </section>
+              ) : null}
               <p className="note-ref-count">
                 Fact {note.fact_ids.length} · Result {note.result_ids.length} · Evidence {note.evidence_ids.length}
               </p>
