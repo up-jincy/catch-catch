@@ -39,9 +39,43 @@ else
 fi
 
 env_args=()
+env_isolation=()
 if [[ -n "$env_file" ]]; then
   env_args=(--env-file "$env_file")
+  env_isolation=(
+    env
+    -u LANGSMITH_PROJECT
+    -u LANGSMITH_TRACING
+    -u LANGSMITH_API_KEY
+    -u LANGSMITH_ENDPOINT
+    -u LANGSMITH_WORKSPACE_ID
+    -u LANGSMITH_TRACING_SAMPLING_RATE
+    -u LANGCHAIN_PROJECT
+    -u LANGCHAIN_TRACING_V2
+    -u LANGCHAIN_API_KEY
+    -u LANGCHAIN_ENDPOINT
+    -u LANGCHAIN_TRACING_SAMPLING_RATE
+  )
 fi
+
+frontend_env_isolation=(
+  env
+  -u GEMINI_API_KEY
+  -u GOOGLE_API_KEY
+  -u GEMINI_MODEL
+  -u GEMINI_FALLBACK_MODEL
+  -u LANGSMITH_PROJECT
+  -u LANGSMITH_TRACING
+  -u LANGSMITH_API_KEY
+  -u LANGSMITH_ENDPOINT
+  -u LANGSMITH_WORKSPACE_ID
+  -u LANGSMITH_TRACING_SAMPLING_RATE
+  -u LANGCHAIN_PROJECT
+  -u LANGCHAIN_TRACING_V2
+  -u LANGCHAIN_API_KEY
+  -u LANGCHAIN_ENDPOINT
+  -u LANGCHAIN_TRACING_SAMPLING_RATE
+)
 
 backend_pid=""
 frontend_pid=""
@@ -71,13 +105,15 @@ echo "Backend $mode mode · http://$backend_host:$backend_port"
 AGENT_MODE="$mode" \
   API_HOST="$backend_host" API_PORT="$backend_port" \
   FRONTEND_ORIGIN="http://$frontend_host:$frontend_port" \
-  uv run --project backend uvicorn customer_signal.api:create_app --factory \
-  "${env_args[@]}" --host "$backend_host" --port "$backend_port" &
+  "${env_isolation[@]}" uv run "${env_args[@]}" --project backend \
+  uvicorn customer_signal.api:create_app --factory \
+  --host "$backend_host" --port "$backend_port" &
 backend_pid=$!
 
 echo "Frontend · http://$frontend_host:$frontend_port"
 NEXT_PUBLIC_API_BASE_URL="${NEXT_PUBLIC_API_BASE_URL:-http://$backend_host:$backend_port}" \
-  npm --prefix frontend run dev -- --hostname "$frontend_host" --port "$frontend_port" &
+  "${frontend_env_isolation[@]}" npm --prefix frontend run dev \
+  -- --hostname "$frontend_host" --port "$frontend_port" &
 frontend_pid=$!
 
 status=0

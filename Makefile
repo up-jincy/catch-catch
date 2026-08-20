@@ -61,9 +61,24 @@ serve-backend-fixture: seed
 			[[ ! -f "$$main_checkout/.env" ]] || env_file="$$main_checkout/.env"; \
 		fi; \
 		env_args=(); \
+		env_isolation=(); \
 		if [[ -n "$$env_file" ]]; then \
 			env_args=(--env-file "$$env_file"); \
-			printf 'Starting fixture Uvicorn: uvicorn ... --env-file %s --host %s --port %s\n' \
+			env_isolation=( \
+				env \
+				-u LANGSMITH_PROJECT \
+				-u LANGSMITH_TRACING \
+				-u LANGSMITH_API_KEY \
+				-u LANGSMITH_ENDPOINT \
+				-u LANGSMITH_WORKSPACE_ID \
+				-u LANGSMITH_TRACING_SAMPLING_RATE \
+				-u LANGCHAIN_PROJECT \
+				-u LANGCHAIN_TRACING_V2 \
+				-u LANGCHAIN_API_KEY \
+				-u LANGCHAIN_ENDPOINT \
+				-u LANGCHAIN_TRACING_SAMPLING_RATE \
+			); \
+			printf 'Starting fixture Uvicorn: uv run --env-file %s ... --host %s --port %s\n' \
 				"$$env_file" "$(BACKEND_HOST)" "$(BACKEND_PORT)"; \
 		else \
 			printf 'Starting fixture Uvicorn without an env file on %s:%s\n' \
@@ -73,12 +88,29 @@ serve-backend-fixture: seed
 			ARTIFACT_DIRECTORY="$(ARTIFACT_DIRECTORY)" \
 			API_HOST="$(BACKEND_HOST)" API_PORT="$(BACKEND_PORT)" \
 			FRONTEND_ORIGIN="http://$(FRONTEND_HOST):$(FRONTEND_PORT)" \
-			uv run --project backend uvicorn customer_signal.api:create_app --factory \
-			"$${env_args[@]}" --host "$(BACKEND_HOST)" --port "$(BACKEND_PORT)"
+			"$${env_isolation[@]}" uv run "$${env_args[@]}" --project backend \
+			uvicorn customer_signal.api:create_app --factory \
+			--host "$(BACKEND_HOST)" --port "$(BACKEND_PORT)"
 
 serve-frontend:
 	NEXT_PUBLIC_API_BASE_URL="$(API_BASE_URL)" \
-		npm --prefix frontend run dev -- --port "$(FRONTEND_PORT)"
+		env \
+			-u GEMINI_API_KEY \
+			-u GOOGLE_API_KEY \
+			-u GEMINI_MODEL \
+			-u GEMINI_FALLBACK_MODEL \
+			-u LANGSMITH_PROJECT \
+			-u LANGSMITH_TRACING \
+			-u LANGSMITH_API_KEY \
+			-u LANGSMITH_ENDPOINT \
+			-u LANGSMITH_WORKSPACE_ID \
+			-u LANGSMITH_TRACING_SAMPLING_RATE \
+			-u LANGCHAIN_PROJECT \
+			-u LANGCHAIN_TRACING_V2 \
+			-u LANGCHAIN_API_KEY \
+			-u LANGCHAIN_ENDPOINT \
+			-u LANGCHAIN_TRACING_SAMPLING_RATE \
+			npm --prefix frontend run dev -- --port "$(FRONTEND_PORT)"
 
 test:
 	uv run --project backend pytest backend/tests -q

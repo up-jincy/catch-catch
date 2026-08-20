@@ -178,6 +178,7 @@ class GeminiAnalysisModel:
         envelope = await self._invoke(
             output_type=_JsonDocument,
             schema_title=f"{schema_title}Document",
+            stage=stage,
             prompt=_stage_prompt(
                 stage,
                 {
@@ -200,6 +201,7 @@ class GeminiAnalysisModel:
         *,
         output_type: Any,
         schema_title: str,
+        stage: str,
         prompt: str,
         allow_initial_fallback: bool = False,
     ) -> Any:
@@ -213,6 +215,7 @@ class GeminiAnalysisModel:
                 self._selected_model,
                 output_type=output_type,
                 schema_title=schema_title,
+                stage=stage,
                 prompt=prompt,
             )
         except asyncio.CancelledError:
@@ -232,6 +235,7 @@ class GeminiAnalysisModel:
                         self._selected_model,
                         output_type=output_type,
                         schema_title=schema_title,
+                        stage=stage,
                         prompt=prompt,
                     )
                 except asyncio.CancelledError:
@@ -248,6 +252,7 @@ class GeminiAnalysisModel:
         *,
         output_type: Any,
         schema_title: str,
+        stage: str,
         prompt: str,
     ) -> Any:
         model = self._get_model(model_name)
@@ -255,9 +260,18 @@ class GeminiAnalysisModel:
         schema = adapter.json_schema()
         schema["title"] = schema_title
         chain = model.with_structured_output(schema, method="json_schema")
+        config = {
+            "run_name": f"customer_signal.{stage}",
+            "tags": ["customer-signal", "gemini", stage],
+            "metadata": {
+                "provider": "gemini",
+                "stage": stage,
+                "schema_title": schema_title,
+            },
+        }
         try:
             async with asyncio.timeout(self._timeout_seconds):
-                raw = await chain.ainvoke(prompt)
+                raw = await chain.ainvoke(prompt, config=config)
         except asyncio.CancelledError:
             raise
         except TimeoutError as error:
@@ -281,7 +295,6 @@ class GeminiAnalysisModel:
                 api_key=self._api_key,
                 retries=0,
                 request_timeout=self._timeout_seconds,
-                include_thoughts=False,
             )
             self._models[model_name] = model
         return model
@@ -337,22 +350,31 @@ def _stage_prompt(stage: str, payload: dict[str, Any]) -> str:
     )
 
 
-def _is_typed_not_found(error: Exception) -> bool:
-    for attribute in ("code", "status", "status_code"):
-        value = getattr(error, attribute, None)
-        if callable(value):
-            try:
-                value = value()
-            except TypeError:
-                continue
-        candidates = [value, getattr(value, "name", None), getattr(value, "value", None)]
-        if any(candidate == 404 for candidate in candidates):
-            return True
-        if any(
-            isinstance(candidate, str) and candidate.strip().upper() in {"404", "NOT_FOUND"}
-            for candidate in candidates
-        ):
-            return True
+def _is_typed_not_found(error: BaseException) -> bool:
+    current: BaseException | None = error
+    visited: set[int] = set()
+    for _depth in range(8):
+        if current is None or id(current) in visited:
+            break
+        visited.add(id(current))
+        for attribute in ("code", "status", "status_code"):
+            value = getattr(current, attribute, None)
+            if callable(value):
+                try:
+                    value = value()
+                except TypeError:
+                    continue
+            candidates = [value, getattr(value, "name", None), getattr(value, "value", None)]
+            if any(candidate == 404 for candidate in candidates):
+                return True
+            if any(
+                isinstance(candidate, str)
+                and candidate.strip().upper() in {"404", "NOT_FOUND"}
+                for candidate in candidates
+            ):
+                return True
+        nested = current.__cause__ or current.__context__
+        current = nested if isinstance(nested, BaseException) else None
     return False
 
 

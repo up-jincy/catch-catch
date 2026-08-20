@@ -99,8 +99,11 @@ make dev-fixture
    `.env`
 
 세 위치에 파일이 없어도 Fixture 모드는 실행됩니다. 선택한 파일은 복사하거나
-shell에 `source`하지 않습니다. 새로 시작한 Uvicorn에만 `--env-file`로 전달하므로
-Frontend 프로세스에는 Gemini나 LangSmith 값이 전달되지 않습니다.
+shell에 `source`하지 않습니다. `uv run --env-file`로 Backend Python 프로세스가
+시작되기 전에 값을 전달하므로 LangSmith가 tracing 설정을 import 시점에 읽습니다.
+선택한 환경 파일의 LangSmith 설정은 기존 shell의 `LANGSMITH_*`, `LANGCHAIN_*`
+설정보다 우선합니다. Frontend 프로세스에는 Gemini나 LangSmith 값을 전달하지
+않습니다.
 
 명시적 파일을 사용하려면 절대 경로나 현재 checkout 기준 상대 경로를 지정합니다.
 
@@ -161,6 +164,21 @@ Fixture E2E는 `AGENT_MODE=fixture`를 Uvicorn 프로세스에 강제하므로 A
 ```bash
 PLAYWRIGHT_REUSE_SERVER=1 make e2e
 ```
+
+실제 Gemini 동적 Planner는 `.env`를 읽은 서버를 먼저 실행한 뒤 별도 터미널에서
+명시적으로 smoke를 실행합니다.
+
+```bash
+BACKEND_PORT=38100 FRONTEND_PORT=33100 make dev-gemini
+
+RUN_LIVE_GEMINI=1 PLAYWRIGHT_REUSE_SERVER=1 \
+  E2E_BACKEND_PORT=38100 E2E_FRONTEND_PORT=33100 \
+  npm --prefix frontend run e2e -- \
+  live-gemini-planner.spec.ts --project desktop-chromium
+```
+
+`RUN_LIVE_GEMINI`를 지정하지 않으면 이 smoke는 skip합니다. API Key와 LangSmith
+설정은 Backend 프로세스에만 전달합니다.
 
 ## 포트와 Endpoint
 

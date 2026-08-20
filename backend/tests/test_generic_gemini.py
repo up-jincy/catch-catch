@@ -190,8 +190,9 @@ class _ScriptedChain:
         self.model_name = model_name
         self.call = call
 
-    async def ainvoke(self, prompt: str):
+    async def ainvoke(self, prompt: str, config: dict[str, Any] | None = None):
         self.call["prompt"] = prompt
+        self.call["invoke_config"] = config
         response = self.provider.responses[self.model_name].pop(0)
         if isinstance(response, BaseException):
             raise response
@@ -331,7 +332,6 @@ async def test_free_question_uses_five_flat_provider_documents() -> None:
             "api_key": "provider-secret-key",
             "retries": 0,
             "request_timeout": 0.25,
-            "include_thoughts": False,
         }
     ]
     prompts = [json.loads(call["prompt"]) for call in provider.structured_calls]
@@ -341,6 +341,24 @@ async def test_free_question_uses_five_flat_provider_documents() -> None:
         "note",
         "selection",
         "report",
+    ]
+    assert [call["invoke_config"] for call in provider.structured_calls] == [
+        {
+            "run_name": f"customer_signal.{stage}",
+            "tags": ["customer-signal", "gemini", stage],
+            "metadata": {
+                "provider": "gemini",
+                "stage": stage,
+                "schema_title": schema_title,
+            },
+        }
+        for stage, schema_title in (
+            ("goal", "GoalDecisionDocument"),
+            ("plan", "AnalysisPlanDocument"),
+            ("note", "AnalysisNoteDraftDocument"),
+            ("selection", "StepSelectionDocument"),
+            ("report", "CustomerSignalReportDraftDocument"),
+        )
     ]
     goal_input = prompts[0]["input"]
     plan_input = prompts[1]["input"]
@@ -409,6 +427,27 @@ async def test_typed_not_found_on_first_stage_switches_once_to_36() -> None:
     assert [call["model"] for call in provider.structured_calls] == [
         "gemini-3.7-flash",
         "gemini-3.6-flash",
+        "gemini-3.6-flash",
+    ]
+    assert model.model_name == "gemini-3.6-flash"
+
+
+@pytest.mark.asyncio
+async def test_wrapped_typed_not_found_on_first_stage_switches_to_36() -> None:
+    request, manifests, goal, *_rest = await _staged_values()
+    wrapped_error = RuntimeError("public wrapper")
+    wrapped_error.__cause__ = _ModelNotFoundError("private primary response")
+    provider = _ScriptedProvider(
+        {
+            "gemini-3.7-flash": [wrapped_error],
+            "gemini-3.6-flash": [{"document": goal.model_dump_json()}],
+        }
+    )
+    model = GeminiAnalysisModel(api_key="key", model_factory=provider)
+
+    assert await model.create_goal(request, manifests) == goal
+    assert [call["model"] for call in provider.model_calls] == [
+        "gemini-3.7-flash",
         "gemini-3.6-flash",
     ]
     assert model.model_name == "gemini-3.6-flash"
