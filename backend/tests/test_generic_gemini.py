@@ -385,7 +385,34 @@ async def test_free_question_uses_five_flat_provider_documents() -> None:
         == PRIMITIVE_INPUT_ADAPTER.json_schema()
     )
     assert plan_input["constraints"] == {
+        "dependency_arity": {
+            "catalog_sources": {"maximum": 0, "minimum": 0},
+            "profile_events": {"maximum": 0, "minimum": 0},
+            "aggregate_events": {"maximum": 0, "minimum": 0},
+            "segment_customers": {"maximum": 0, "minimum": 0},
+            "detect_repetition": {"maximum": 0, "minimum": 0},
+            "match_sequence": {"maximum": 0, "minimum": 0},
+            "compare_segments": {"maximum": 2, "minimum": 2},
+            "rank_customers": {"maximum": 4, "minimum": 1},
+            "get_customer_journey": {"maximum": 1, "minimum": 1},
+            "get_evidence": {"maximum": 1, "minimum": 1},
+        },
         "first_step_should_discover_sources": True,
+        "input_step_ids": (
+            "must obey dependency_arity bounds and reference prior steps only"
+        ),
+        "required_metric_keys": {
+            "catalog_sources": ["source_count"],
+            "profile_events": ["customer_count", "event_count"],
+            "aggregate_events": ["exactly one requested metric key"],
+            "segment_customers": ["segment_customer_count"],
+            "detect_repetition": ["repeated_customer_count"],
+            "match_sequence": ["matched_customer_count"],
+            "compare_segments": ["<parameters.metric_key>_delta"],
+            "rank_customers": ["ranked_customer_count"],
+            "get_customer_journey": ["journey_event_count"],
+            "get_evidence": ["evidence_record_count"],
+        },
         "read_only": True,
         "step_count": "3..6",
     }
