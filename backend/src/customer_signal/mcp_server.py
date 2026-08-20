@@ -18,10 +18,10 @@ from customer_signal.analytics.models import (
     RankCustomersResult,
 )
 from customer_signal.analytics.service import AnalyticsService
-from customer_signal.domain.models import SourceId
+from customer_signal.domain.types import LegacySourceId
 
 
-type EnabledSources = Annotated[list[SourceId], Field(min_length=1, max_length=5)]
+type EnabledSources = Annotated[list[LegacySourceId], Field(min_length=1, max_length=5)]
 type ResultLimit = Annotated[int, Field(strict=True, ge=1, le=100)]
 type CustomerId = Annotated[str, Field(min_length=1)]
 type EvidenceId = Annotated[str, Field(min_length=1)]

@@ -11,7 +11,7 @@ from typing import Any
 import duckdb
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
-from customer_signal.domain.models import CustomerEvent, EvidenceRecord, SourceId
+from customer_signal.domain.models import CustomerEvent, EvidenceRecord, IdentityEdge, SourceId
 
 
 SOURCE_IDS = (
@@ -287,6 +287,85 @@ class DuckDBRepository:
         if missing:
             raise EntityNotFoundError(f"evidence not found: {', '.join(missing)}")
         return [records[identifier] for identifier in identifiers]
+
+    def list_identity_edges(
+        self,
+        start_at: datetime,
+        end_at: datetime,
+        enabled_sources: Sequence[str],
+    ) -> list[IdentityEdge]:
+        """Return graph components connected to identities of bounded requested events."""
+
+        _validate_time_range(start_at, end_at)
+        sources = _validate_sources(enabled_sources)
+        placeholders = ", ".join("?" for _ in sources)
+        connection = self._connect()
+        try:
+            event_rows = connection.execute(
+                f"""
+                SELECT identities
+                FROM events
+                WHERE occurred_at >= ?
+                  AND occurred_at < ?
+                  AND source_id IN ({placeholders})
+                ORDER BY occurred_at, event_id
+                """,
+                [start_at, end_at, *sources],
+            ).fetchall()
+            edge_rows = connection.execute(
+                """
+                SELECT
+                    left_namespace,
+                    left_value,
+                    right_namespace,
+                    right_value,
+                    link_type,
+                    confidence,
+                    provenance
+                FROM identity_edges
+                """
+            ).fetchall()
+        finally:
+            connection.close()
+
+        seeds: set[tuple[str, str]] = set()
+        for (identities,) in event_rows:
+            parsed = json.loads(identities) if isinstance(identities, str) else identities
+            seeds.update((identity["namespace"], identity["value"]) for identity in parsed)
+
+        raw_edges = [
+            IdentityEdge.model_validate(
+                {
+                    "left": {"namespace": row[0], "value": row[1]},
+                    "right": {"namespace": row[2], "value": row[3]},
+                    "link_type": row[4],
+                    "confidence": row[5],
+                    "provenance": row[6],
+                },
+                strict=True,
+            )
+            for row in edge_rows
+        ]
+        adjacency: dict[tuple[str, str], set[tuple[str, str]]] = {}
+        for edge in raw_edges:
+            left = (edge.left.namespace, edge.left.value)
+            right = (edge.right.namespace, edge.right.value)
+            adjacency.setdefault(left, set()).add(right)
+            adjacency.setdefault(right, set()).add(left)
+
+        connected = set(seeds)
+        pending = list(seeds)
+        while pending:
+            node = pending.pop()
+            for neighbor in adjacency.get(node, set()) - connected:
+                connected.add(neighbor)
+                pending.append(neighbor)
+        return [
+            edge
+            for edge in raw_edges
+            if (edge.left.namespace, edge.left.value) in connected
+            and (edge.right.namespace, edge.right.value) in connected
+        ]
 
 
 __all__ = [

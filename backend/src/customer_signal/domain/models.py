@@ -4,15 +4,10 @@ from typing import Annotated, Literal, Self
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
+from customer_signal.domain.types import SourceId
+
 
 type Scalar = str | int | float | bool | None
-type SourceId = Literal[
-    "search_history",
-    "search_feedback",
-    "digital_behavior",
-    "subscription",
-    "voc",
-]
 type EventType = Literal["search", "feedback", "digital_behavior", "subscription", "voc"]
 type IdentityLinkType = Literal["EXACT", "DECLARED", "SYNTHETIC"]
 type IdentityConfidence = Annotated[FiniteFloat, Field(ge=0, le=1)]
@@ -62,6 +57,8 @@ class CustomerEvent(DomainModel):
     identities: list[IdentityRef] = Field(default_factory=list)
     canonical_customer_id: str
     attributes: dict[str, Scalar] = Field(default_factory=dict)
+    dimensions: dict[str, Scalar] = Field(default_factory=dict)
+    measures: dict[str, FiniteFloat] = Field(default_factory=dict)
 
 
 class EvidenceRecord(DomainModel):
@@ -165,3 +162,6 @@ class SyntheticDataset(DomainModel):
                     "event identities must resolve to exactly one canonical customer"
                 )
         return self
+
+
+CanonicalCustomerEvent = CustomerEvent

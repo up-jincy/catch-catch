@@ -549,7 +549,6 @@ async def test_fixture_runner_rejects_duplicate_tool_result_ids(
         },
         {"enabled_sources": []},
         {"enabled_sources": ["search_history", "search_history"]},
-        {"enabled_sources": ["search_history", "billing"]},
         {"start_at": 1_780_000_000},
         {"enabled_sources": ("search_history",)},
     ],

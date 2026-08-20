@@ -554,7 +554,6 @@ def test_semantic_bypass_never_publishes_fixed_journey_report(
         {**_run_request(), "question": "   "},
         {**_run_request(), "start_at": END_AT},
         {**_run_request(), "enabled_sources": ["voc", "voc"]},
-        {**_run_request(), "enabled_sources": ["billing"]},
     ],
 )
 def test_run_request_validation_returns_422(tmp_path: Path, payload: dict[str, object]) -> None:

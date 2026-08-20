@@ -435,7 +435,12 @@ def test_repository_has_no_public_raw_sql_write_or_ground_truth_api(
         if not name.startswith("_")
     }
 
-    assert public_methods == {"catalog_sources", "list_events", "get_evidence"}
+    assert public_methods == {
+        "catalog_sources",
+        "get_evidence",
+        "list_events",
+        "list_identity_edges",
+    }
     assert set(vars(repository)) == {"_path"}
 
 

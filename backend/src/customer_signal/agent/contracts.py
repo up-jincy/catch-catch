@@ -16,20 +16,13 @@ from pydantic import (
     model_validator,
 )
 
-from customer_signal.domain.models import SourceId
+from customer_signal.domain.types import PrimitiveName, SourceId
 from customer_signal.domain.reports import InsightReport, JourneyEvent, RankedCustomer
 from customer_signal.runtime.events import RunnerEvent
 
 
 type MetricFactValue = FiniteFloat | int | str
-type ToolName = Literal[
-    "catalog_sources",
-    "aggregate_events",
-    "match_journey_pattern",
-    "rank_customers",
-    "get_customer_journey",
-    "get_evidence",
-]
+type ToolName = PrimitiveName
 type EventEmitter = Callable[[RunnerEvent], Awaitable[None] | None]
 type ReportValidator = Callable[[InsightReport, "RunFacts"], InsightReport | None]
 
@@ -46,7 +39,7 @@ class RunRequest(RunnerContract):
     question: str
     start_at: AwareDatetime
     end_at: AwareDatetime
-    enabled_sources: list[SourceId] = Field(min_length=1, max_length=5)
+    enabled_sources: list[SourceId] = Field(min_length=1, max_length=32)
 
     @field_validator("start_at", "end_at", mode="before")
     @classmethod
