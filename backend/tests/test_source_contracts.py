@@ -162,6 +162,42 @@ def test_manifest_rejects_undeclared_event_semantics_and_identity_namespace() ->
         )
 
 
+@pytest.mark.parametrize(
+    ("semantic_type", "value"),
+    [
+        ("number", True),
+        ("number", "12.5"),
+        ("number", float("nan")),
+        ("number", float("inf")),
+        ("number", float("-inf")),
+        ("integer", True),
+        ("integer", "12"),
+        ("integer", float("nan")),
+        ("integer", float("inf")),
+        ("integer", float("-inf")),
+        ("integer", 12.5),
+    ],
+)
+def test_manifest_rejects_mutated_nonfinite_or_nonsemantic_measure_values(
+    semantic_type: str, value: object
+) -> None:
+    manifest = _manifest().model_copy(
+        update={
+            "measures": {
+                "amount": MeasureDescriptor(
+                    semantic_type=semantic_type,
+                    description="Mutable test measure",
+                    unit="count",
+                )
+            }
+        }
+    )
+    mutated_event = _event().model_copy(update={"measures": {"amount": value}})
+
+    with pytest.raises(ValueError, match="measure"):
+        manifest.validate_event(mutated_event)
+
+
 def test_manifest_enforces_descriptor_refresh_masking_and_identity_contracts() -> None:
     values = _manifest().model_dump()
 

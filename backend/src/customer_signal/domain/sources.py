@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from math import isfinite
 from typing import Annotated, Literal, Self
 
 from pydantic import AwareDatetime, ConfigDict, Field, field_validator, model_validator
@@ -194,6 +195,10 @@ class SourceManifest(SourceContractModel):
 
         for name, value in event.measures.items():
             descriptor = self.measures[name]
+            if type(value) not in (int, float):
+                raise ValueError("measure must contain a finite integer or number value")
+            if type(value) is float and not isfinite(value):
+                raise ValueError("measure must contain a finite integer or number value")
             if descriptor.semantic_type == "integer" and type(value) is not int:
                 raise ValueError("integer measure must contain an integer value")
 

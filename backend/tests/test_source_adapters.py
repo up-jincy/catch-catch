@@ -6,7 +6,7 @@ import pytest
 
 from customer_signal.data.source_registry import SourceRegistry, validate_adapter_contract
 from customer_signal.domain.models import IdentityEdge, IdentityRef
-from customer_signal.domain.sources import EventScope
+from customer_signal.domain.sources import EventScope, MeasureDescriptor
 from customer_signal.synthetic.adapter import SyntheticDuckDBAdapter
 from customer_signal.synthetic.manifest import synthetic_source_manifest
 from support.in_memory_adapter import InMemorySourceAdapter
@@ -96,6 +96,51 @@ def test_registry_returns_only_requested_masked_evidence_in_requested_order(
     )
     with pytest.raises(ValueError, match="evidence does not belong"):
         registry.get_evidence([unapproved_id])
+
+
+@pytest.mark.parametrize(
+    ("semantic_type", "value"),
+    [
+        ("number", True),
+        ("number", "12.5"),
+        ("number", float("nan")),
+        ("number", float("inf")),
+        ("number", float("-inf")),
+        ("integer", True),
+        ("integer", "12"),
+        ("integer", float("nan")),
+        ("integer", float("inf")),
+        ("integer", float("-inf")),
+        ("integer", 12.5),
+    ],
+)
+def test_registry_rejects_mutated_invalid_measure_before_returning_events(
+    semantic_type: str, value: object, synthetic_dataset
+) -> None:
+    manifest = synthetic_source_manifest("search_history", synthetic_dataset.events).model_copy(
+        update={
+            "measures": {
+                "amount": MeasureDescriptor(
+                    semantic_type=semantic_type,
+                    description="Mutable test measure",
+                    unit="count",
+                )
+            }
+        }
+    )
+    event = next(
+        event for event in synthetic_dataset.events if event.source_id == "search_history"
+    ).model_copy(update={"measures": {"amount": value}})
+    adapter = InMemorySourceAdapter(
+        manifest,
+        [event],
+        synthetic_dataset.identity_edges,
+        [],
+    )
+    registry = SourceRegistry([adapter], evidence=adapter)
+
+    with pytest.raises(ValueError, match="measure"):
+        registry.load_events(_scope(synthetic_dataset))
 
 
 def test_adapter_contract_rejects_identity_with_no_canonical_resolution(synthetic_dataset) -> None:
