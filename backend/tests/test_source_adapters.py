@@ -37,6 +37,18 @@ def _duckdb_adapter(repository, dataset) -> SyntheticDuckDBAdapter:
     )
 
 
+def _source_adapter(adapter_kind: str, source_id: str, repository, dataset):
+    manifest = synthetic_source_manifest(source_id, dataset.events)
+    if adapter_kind == "memory":
+        return InMemorySourceAdapter(
+            manifest,
+            [event for event in dataset.events if event.source_id == source_id],
+            dataset.identity_edges,
+            [record for record in dataset.evidence if record.source_id == source_id],
+        )
+    return SyntheticDuckDBAdapter(repository, manifest)
+
+
 def _edge_key(edge: IdentityEdge) -> tuple[str, str, str, str, str]:
     return (
         edge.left.namespace,
@@ -148,6 +160,14 @@ def test_registry_requires_explicit_per_call_evidence_authorization(synthetic_da
 
     with pytest.raises(ValueError, match="authorized event"):
         registry.get_evidence([evidence_id])
+
+
+def test_registry_requires_explicit_per_call_identity_authorization(synthetic_dataset) -> None:
+    adapter = _memory_adapter(synthetic_dataset)
+    registry = SourceRegistry([adapter], evidence=adapter)
+
+    with pytest.raises(ValueError, match="authorized event"):
+        registry.load_identities(_scope(synthetic_dataset))
 
 
 def test_registry_projects_evidence_only_from_authorized_event_semantics(synthetic_dataset) -> None:
@@ -367,7 +387,12 @@ def test_registry_loads_each_adapter_once_and_returns_the_validated_response(
     registry = SourceRegistry([adapter], evidence=adapter)
     scope = _scope(synthetic_dataset)
 
-    assert registry.load_events(scope) == [adapter._event]
+    events = registry.load_events(scope)
+
+    assert events == [adapter._event]
+    assert registry.load_identities(scope, authorized_events=events) == _connected_edges(
+        events, synthetic_dataset.identity_edges
+    )
     assert adapter.load_calls == 1
 
 
@@ -456,6 +481,86 @@ def test_adapters_return_only_deterministic_identity_edges_for_selected_events(
     assert len(events) == 1
     assert edges == _connected_edges(events, synthetic_dataset.identity_edges)
     assert [_edge_key(edge) for edge in edges] == sorted(_edge_key(edge) for edge in edges)
+
+
+@pytest.mark.parametrize("adapter_kind", ["memory", "duckdb"])
+def test_registry_identities_follow_exact_globally_limited_authorized_events(
+    adapter_kind: str, repository, synthetic_dataset
+) -> None:
+    source_ids = ["search_history", "digital_behavior"]
+    adapters = [
+        _source_adapter(adapter_kind, source_id, repository, synthetic_dataset)
+        for source_id in source_ids
+    ]
+    registry = SourceRegistry(adapters, evidence=adapters[0])
+    scope = EventScope(
+        start_at=synthetic_dataset.events[0].occurred_at,
+        end_at=synthetic_dataset.events[-1].occurred_at + timedelta(seconds=1),
+        source_ids=source_ids,
+        max_events=1,
+    )
+
+    events = registry.load_events(scope)
+    edges = registry.load_identities(scope, authorized_events=events)
+    expected_edges = _connected_edges(events, synthetic_dataset.identity_edges)
+
+    assert [event.canonical_customer_id for event in events] == ["CUST-015"]
+    assert edges == expected_edges
+    assert {
+        value
+        for edge in edges
+        for namespace, value in (
+            (edge.left.namespace, edge.left.value),
+            (edge.right.namespace, edge.right.value),
+        )
+        if namespace == "canonical_customer"
+    } == {"CUST-015"}
+    assert all("CUST-003" not in (edge.left.value, edge.right.value) for edge in edges)
+
+
+def test_registry_rejects_identity_authorization_events_outside_scope(
+    repository, synthetic_dataset
+) -> None:
+    source_ids = ["search_history", "digital_behavior"]
+    adapters = [
+        _source_adapter("duckdb", source_id, repository, synthetic_dataset)
+        for source_id in source_ids
+    ]
+    registry = SourceRegistry(adapters, evidence=adapters[0])
+    scope = _scope(synthetic_dataset)
+    outside_source = next(
+        event for event in synthetic_dataset.events if event.source_id == "digital_behavior"
+    )
+    outside_time = next(
+        event for event in synthetic_dataset.events if event.source_id == "search_history"
+    ).model_copy(update={"occurred_at": scope.end_at})
+
+    for event in (outside_source, outside_time):
+        with pytest.raises(ValueError, match="does not match identity scope"):
+            registry.load_identities(scope, authorized_events=[event])
+
+
+@pytest.mark.parametrize(
+    ("field_name", "message"),
+    [("event_id", "duplicate event_id"), ("evidence_id", "duplicate evidence_id")],
+)
+def test_registry_rejects_duplicate_global_identifiers_in_identity_authorization(
+    field_name: str, message: str, synthetic_dataset
+) -> None:
+    adapter = _memory_adapter(synthetic_dataset)
+    registry = SourceRegistry([adapter], evidence=adapter)
+    event = adapter.load_events(_scope(synthetic_dataset))[0]
+    duplicate = event.model_copy(
+        update={
+            "event_id": event.event_id if field_name == "event_id" else f"{event.event_id}-other",
+            "evidence_id": event.evidence_id
+            if field_name == "evidence_id"
+            else f"{event.evidence_id}-other",
+        }
+    )
+
+    with pytest.raises(ValueError, match=message):
+        registry.load_identities(_scope(synthetic_dataset), authorized_events=[event, duplicate])
 
 
 @pytest.mark.parametrize(

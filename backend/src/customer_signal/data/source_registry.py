@@ -69,6 +69,40 @@ def _validate_identity_resolution(
                 )
 
 
+def _identity_closure(
+    events: Sequence[CustomerEvent], edges: Iterable[IdentityEdge]
+) -> list[IdentityEdge]:
+    """Return only the graph component needed by the supplied event identities."""
+
+    materialized_edges = list(edges)
+    graph: dict[tuple[str, str], set[tuple[str, str]]] = {}
+    for edge in materialized_edges:
+        left = (edge.left.namespace, edge.left.value)
+        right = (edge.right.namespace, edge.right.value)
+        graph.setdefault(left, set()).add(right)
+        graph.setdefault(right, set()).add(left)
+
+    connected = {
+        (identity.namespace, identity.value) for event in events for identity in event.identities
+    }
+    pending = list(connected)
+    while pending:
+        node = pending.pop()
+        for neighbor in graph.get(node, set()) - connected:
+            connected.add(neighbor)
+            pending.append(neighbor)
+
+    return sorted(
+        [
+            edge
+            for edge in materialized_edges
+            if (edge.left.namespace, edge.left.value) in connected
+            and (edge.right.namespace, edge.right.value) in connected
+        ],
+        key=_edge_key,
+    )
+
+
 def _validate_loaded_events(
     adapter: SourceAdapter,
     scope: EventScope,
@@ -142,13 +176,37 @@ class SourceRegistry:
         events.sort(key=lambda event: (event.occurred_at, event.event_id))
         return events[: scope.max_events]
 
-    def load_identities(self, scope: EventScope) -> list[IdentityEdge]:
+    def load_identities(
+        self,
+        scope: EventScope,
+        *,
+        authorized_events: Sequence[CustomerEvent] | None = None,
+    ) -> list[IdentityEdge]:
+        """Resolve only the caller-authorized, globally selected event identities.
+
+        ``authorized_events`` must be the exact list returned by ``load_events`` for
+        this run.  Keeping that context in the caller (rather than this registry)
+        avoids a cross-run cache and never replays a potentially one-shot event loader.
+        """
+
+        events = self._validated_identity_authorized_events(scope, authorized_events)
+        events_by_source = {source_id: [] for source_id in scope.source_ids}
+        for event in events:
+            events_by_source[event.source_id].append(event)
+
         edges: dict[tuple[str, str, str, str, str], IdentityEdge] = {}
         for source_id in scope.source_ids:
-            source_scope = scope.model_copy(update={"source_ids": [source_id]})
+            source_events = events_by_source[source_id]
+            if not source_events:
+                continue
+            source_scope = scope.model_copy(
+                update={"source_ids": [source_id], "max_events": len(source_events)}
+            )
             for edge in self.get(source_id).load_identities(source_scope):
                 edges[_edge_key(edge)] = edge
-        return [edges[key] for key in sorted(edges)]
+        closure = _identity_closure(events, edges.values())
+        _validate_identity_resolution(events, closure)
+        return closure
 
     def get_evidence(
         self,
@@ -207,6 +265,38 @@ class SourceRegistry:
                 raise ValueError("authorized event context must have unique evidence IDs")
             authorized_by_evidence[event.evidence_id] = event
         return authorized_by_evidence
+
+    def _validated_identity_authorized_events(
+        self,
+        scope: EventScope,
+        authorized_events: Sequence[CustomerEvent] | None,
+    ) -> list[CustomerEvent]:
+        if authorized_events is None:
+            raise ValueError("authorized event context is required for identity retrieval")
+        if isinstance(authorized_events, (str, bytes)):
+            raise ValueError("authorized event context must be a sequence of events")
+
+        events = list(authorized_events)
+        if any(not isinstance(event, CustomerEvent) for event in events):
+            raise ValueError("authorized event context must contain canonical events")
+        if len(events) > scope.max_events:
+            raise ValueError("authorized event context exceeds scope max_events")
+        if events != sorted(events, key=lambda event: (event.occurred_at, event.event_id)):
+            raise ValueError("authorized events must keep global occurred_at/event_id order")
+        _validate_global_event_identifiers(events)
+
+        for event in events:
+            if (
+                event.source_id not in scope.source_ids
+                or not scope.start_at <= event.occurred_at < scope.end_at
+            ):
+                raise ValueError("authorized event does not match identity scope")
+            try:
+                adapter = self.get(event.source_id)
+            except LookupError as error:
+                raise ValueError("authorized event source is not registered") from error
+            adapter.describe().validate_event(event)
+        return events
 
 
 def _validate_global_event_identifiers(events: Sequence[CustomerEvent]) -> None:
