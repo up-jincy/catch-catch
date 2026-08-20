@@ -11,6 +11,7 @@ import asyncio
 import inspect
 import time
 from collections.abc import Awaitable, Callable, Sequence
+from datetime import datetime, timezone
 from typing import Protocol, cast
 
 from customer_signal.agent.claim_validator import render_verified_note
@@ -177,7 +178,7 @@ class AnalysisLoop:
                 emit,
                 AnalysisEvent(
                     type="goal_created",
-                    payload=goal.model_dump(mode="json"),
+                    payload={"goal": goal.model_dump(mode="json")},
                 ),
             )
 
@@ -190,7 +191,7 @@ class AnalysisLoop:
                 emit,
                 AnalysisEvent(
                     type="plan_created",
-                    payload=plan.model_dump(mode="json"),
+                    payload={"plan": plan.model_dump(mode="json")},
                 ),
             )
 
@@ -207,6 +208,7 @@ class AnalysisLoop:
                 step = _select_ready_step(plan, next_step_id, completed_step_ids)
                 current_step_id = step.step_id
                 started = time.monotonic()
+                started_at = datetime.now(timezone.utc)
                 await _emit(
                     emit,
                     AnalysisEvent(
@@ -214,8 +216,7 @@ class AnalysisLoop:
                         payload={
                             "step_id": step.step_id,
                             "primitive": step.primitive,
-                            "source_ids": list(step.source_ids),
-                            "plan_revision": plan.revision,
+                            "started_at": started_at.isoformat(),
                         },
                     ),
                 )
@@ -230,7 +231,13 @@ class AnalysisLoop:
                 facts.append(fact)
                 await _emit(
                     emit,
-                    AnalysisEvent(type="fact_created", payload=_public_fact(fact)),
+                    AnalysisEvent(
+                        type="fact_created",
+                        payload={
+                            "step_id": fact.step_id,
+                            "fact": fact.model_dump(mode="json"),
+                        },
+                    ),
                 )
 
                 draft = await self._model.create_note(
@@ -257,7 +264,10 @@ class AnalysisLoop:
                 completed_step_ids.add(step.step_id)
                 await _emit(
                     emit,
-                    AnalysisEvent(type="analysis_note_created", payload=_public_note(note)),
+                    AnalysisEvent(
+                        type="analysis_note_created",
+                        payload={"note": note.model_dump(mode="json")},
+                    ),
                 )
                 await _emit(
                     emit,
@@ -265,9 +275,9 @@ class AnalysisLoop:
                         type="step_completed",
                         payload={
                             "step_id": step.step_id,
-                            "fact_id": fact.fact_id,
-                            "note_id": note.note_id,
-                            "plan_revision": plan.revision,
+                            "status": "completed",
+                            "result_ids": [fact.result_id],
+                            "duration_ms": note.duration_ms,
                         },
                     ),
                 )
@@ -309,14 +319,23 @@ class AnalysisLoop:
                         emit,
                         AnalysisEvent(
                             type="plan_revised",
-                            payload=plan.model_dump(mode="json"),
+                            payload={"plan": plan.model_dump(mode="json")},
                         ),
                     )
                     next_step_id = selection.next_step_id
                 else:  # pragma: no cover - closed Pydantic union defensive branch
                     raise ValueError("unknown StepSelection kind")
 
-            await _emit(emit, AnalysisEvent(type="report_validating", payload={}))
+            await _emit(
+                emit,
+                AnalysisEvent(
+                    type="report_validating",
+                    payload={
+                        "fact_ids": [fact.fact_id for fact in facts],
+                        "result_ids": [fact.result_id for fact in facts],
+                    },
+                ),
+            )
             report_draft = await self._model.create_report(
                 ReportModelContext(
                     goal=goal,
@@ -333,7 +352,13 @@ class AnalysisLoop:
             )
             await _emit(
                 emit,
-                AnalysisEvent(type="result", payload=report.model_dump(mode="json")),
+                AnalysisEvent(
+                    type="result",
+                    payload={
+                        "agent_mode": self._model.agent_mode,
+                        "report": report.model_dump(mode="json"),
+                    },
+                ),
             )
             return self._outcome(
                 status="completed",

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "description": "Public generic Run SSE envelope and lifecycle ordering. Nested domain values use stable fixture references.",
+  "cases": [
+    {
+      "name": "completed",
+      "status": "completed",
+      "events": [
+        {"id": 1, "type": "run_started", "data": {"run_id": "11111111-1111-4111-8111-111111111111", "type": "run_started", "payload": {"status": "running"}}},
+        {"id": 2, "type": "goal_created", "data": {"run_id": "11111111-1111-4111-8111-111111111111", "type": "goal_created", "payload": {"goal": {"$fixture": "AnalysisGoal"}}}},
+        {"id": 3, "type": "plan_created", "data": {"run_id": "11111111-1111-4111-8111-111111111111", "type": "plan_created", "payload": {"plan": {"$fixture": "AnalysisPlan"}}}},
+        {"id": 4, "type": "step_started", "data": {"run_id": "11111111-1111-4111-8111-111111111111", "type": "step_started", "payload": {"step_id": "step-aggregate", "primitive": "aggregate_events", "started_at": "2026-08-20T01:00:00Z"}}},
+        {"id": 5, "type": "fact_created", "data": {"run_id": "11111111-1111-4111-8111-111111111111", "type": "fact_created", "payload": {"step_id": "step-aggregate", "fact": {"$fixture": "AnalysisFact"}}}},
+        {"id": 6, "type": "analysis_note_created", "data": {"run_id": "11111111-1111-4111-8111-111111111111", "type": "analysis_note_created", "payload": {"note": {"$fixture": "AnalysisNote"}}}},
+        {"id": 7, "type": "step_completed", "data": {"run_id": "11111111-1111-4111-8111-111111111111", "type": "step_completed", "payload": {"step_id": "step-aggregate", "status": "completed", "result_ids": ["aggregate_events:golden"], "duration_ms": 1000}}},
+        {"id": 8, "type": "report_validating", "data": {"run_id": "11111111-1111-4111-8111-111111111111", "type": "report_validating", "payload": {"fact_ids": ["fact-golden"], "result_ids": ["aggregate_events:golden"]}}},
+        {"id": 9, "type": "result", "data": {"run_id": "11111111-1111-4111-8111-111111111111", "type": "result", "payload": {"agent_mode": "fixture", "report": {"$fixture": "CustomerSignalReport"}}}},
+        {"id": 10, "type": "done", "data": {"run_id": "11111111-1111-4111-8111-111111111111", "type": "done", "payload": {"status": "completed", "limitations": []}}}
+      ]
+    },
+    {
+      "name": "degraded_no_data",
+      "status": "degraded",
+      "events": [
+        {"id": 1, "type": "run_started", "data": {"run_id": "22222222-2222-4222-8222-222222222222", "type": "run_started", "payload": {"status": "running"}}},
+        {"id": 2, "type": "goal_created", "data": {"run_id": "22222222-2222-4222-8222-222222222222", "type": "goal_created", "payload": {"goal": {"$fixture": "AnalysisGoal"}}}},
+        {"id": 3, "type": "plan_created", "data": {"run_id": "22222222-2222-4222-8222-222222222222", "type": "plan_created", "payload": {"plan": {"$fixture": "AnalysisPlan"}}}},
+        {"id": 4, "type": "step_started", "data": {"run_id": "22222222-2222-4222-8222-222222222222", "type": "step_started", "payload": {"step_id": "step-catalog", "primitive": "catalog_sources", "started_at": "2026-08-20T01:00:00Z"}}},
+        {"id": 5, "type": "done", "data": {"run_id": "22222222-2222-4222-8222-222222222222", "type": "done", "payload": {"status": "degraded", "limitations": ["요청한 Source와 기간에 분석 가능한 이벤트가 없습니다."]}}}
+      ]
+    }
+  ]
+}

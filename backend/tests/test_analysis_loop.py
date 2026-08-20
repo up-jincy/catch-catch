@@ -280,6 +280,49 @@ async def test_loop_executes_three_distinct_fact_backed_demo_questions(
 
 
 @pytest.mark.asyncio
+async def test_loop_emits_task9_full_public_payload_envelopes() -> None:
+    loop = AnalysisLoop(
+        model=GenericFixtureModel(),
+        executor=ScriptedExecutor(),
+        manifests=[_manifest()],
+    )
+    events = []
+
+    outcome = await loop.run(_request(NEGATIVE_TOPIC_QUESTION), emit=events.append)
+
+    assert outcome.report is not None
+    goal_event = next(event for event in events if event.type == "goal_created")
+    plan_event = next(event for event in events if event.type == "plan_created")
+    fact_event = next(event for event in events if event.type == "fact_created")
+    note_event = next(event for event in events if event.type == "analysis_note_created")
+    completed_event = next(event for event in events if event.type == "step_completed")
+    validating_event = next(event for event in events if event.type == "report_validating")
+    result_event = next(event for event in events if event.type == "result")
+
+    assert goal_event.payload == {"goal": outcome.goal.model_dump(mode="json")}
+    assert plan_event.payload == {"plan": outcome.plan.model_dump(mode="json")}
+    assert fact_event.payload == {
+        "step_id": outcome.facts[0].step_id,
+        "fact": outcome.facts[0].model_dump(mode="json"),
+    }
+    assert note_event.payload == {"note": outcome.notes[0].model_dump(mode="json")}
+    assert completed_event.payload == {
+        "step_id": outcome.facts[0].step_id,
+        "status": "completed",
+        "result_ids": [outcome.facts[0].result_id],
+        "duration_ms": outcome.notes[0].duration_ms,
+    }
+    assert validating_event.payload == {
+        "fact_ids": [fact.fact_id for fact in outcome.facts],
+        "result_ids": [fact.result_id for fact in outcome.facts],
+    }
+    assert result_event.payload == {
+        "agent_mode": "fixture",
+        "report": outcome.report.model_dump(mode="json"),
+    }
+
+
+@pytest.mark.asyncio
 async def test_clarification_and_unsupported_questions_never_execute_primitives() -> None:
     executor = ScriptedExecutor()
     loop = AnalysisLoop(model=GenericFixtureModel(), executor=executor, manifests=[_manifest()])

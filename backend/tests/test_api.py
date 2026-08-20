@@ -94,6 +94,7 @@ def _create_app(database_path: Path):
         Settings(
             agent_mode="fixture",
             database_path=database_path,
+            artifact_directory=database_path.parent / "run-artifacts",
             frontend_origin="http://frontend.test",
         )
     )
@@ -200,6 +201,7 @@ def _create_blocked_app(database_path: Path):
         Settings(
             agent_mode="fixture",
             database_path=database_path,
+            artifact_directory=database_path.parent / "run-artifacts",
             frontend_origin="http://frontend.test",
         ),
         dependencies=dependencies,
@@ -250,8 +252,7 @@ def test_startup_atomically_reseeds_a_legacy_three_source_database(
         tables = {row[0] for row in connection.execute("SHOW TABLES").fetchall()}
         event_columns = {row[0] for row in connection.execute("DESCRIBE events").fetchall()}
         sources = {
-            row[0]
-            for row in connection.execute("SELECT DISTINCT source_id FROM events").fetchall()
+            row[0] for row in connection.execute("SELECT DISTINCT source_id FROM events").fetchall()
         }
     finally:
         connection.close()
@@ -312,9 +313,7 @@ def test_startup_atomically_reseeds_current_version_database_with_wrong_column_t
     seed_database(database_path, generate_dataset())
     connection = duckdb.connect(str(database_path))
     try:
-        connection.execute(
-            "ALTER TABLE events ALTER COLUMN occurred_at SET DATA TYPE VARCHAR"
-        )
+        connection.execute("ALTER TABLE events ALTER COLUMN occurred_at SET DATA TYPE VARCHAR")
     finally:
         connection.close()
     replacements: list[tuple[Path, Path]] = []
@@ -336,9 +335,9 @@ def test_startup_atomically_reseeds_current_version_database_with_wrong_column_t
         snapshot = _wait_for_terminal(client, accepted["status_url"])
 
     assert health.status_code == 200
-    assert len(replacements) == 1
-    assert replacements[0][0].parent == database_path.parent
-    assert replacements[0][1] == database_path
+    database_replacements = [item for item in replacements if item[1] == database_path]
+    assert len(database_replacements) == 1
+    assert database_replacements[0][0].parent == database_path.parent
     connection = duckdb.connect(str(database_path), read_only=True)
     try:
         occurred_at_type = next(
@@ -365,7 +364,7 @@ def test_startup_safely_replaces_a_malformed_database_file(tmp_path: Path) -> No
     assert database_path.read_bytes() != malformed_bytes
     connection = duckdb.connect(str(database_path), read_only=True)
     try:
-        assert connection.execute("SELECT count(*) FROM events").fetchone()[0] == 174
+        assert connection.execute("SELECT count(*) FROM events").fetchone()[0] == 199
     finally:
         connection.close()
 
