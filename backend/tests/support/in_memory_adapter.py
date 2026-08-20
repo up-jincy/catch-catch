@@ -23,16 +23,50 @@ class InMemorySourceAdapter:
         return self._manifest
 
     def load_events(self, scope: EventScope) -> list[CustomerEvent]:
+        return self._selected_events(scope)
+
+    def load_identities(self, scope: EventScope) -> list[IdentityEdge]:
+        graph: dict[tuple[str, str], set[tuple[str, str]]] = {}
+        for edge in self._identity_edges:
+            left = (edge.left.namespace, edge.left.value)
+            right = (edge.right.namespace, edge.right.value)
+            graph.setdefault(left, set()).add(right)
+            graph.setdefault(right, set()).add(left)
+
+        connected = {
+            (identity.namespace, identity.value)
+            for event in self._selected_events(scope)
+            for identity in event.identities
+        }
+        pending = list(connected)
+        while pending:
+            node = pending.pop()
+            for neighbor in graph.get(node, set()) - connected:
+                connected.add(neighbor)
+                pending.append(neighbor)
+        return sorted(
+            [
+                edge
+                for edge in self._identity_edges
+                if (edge.left.namespace, edge.left.value) in connected
+                and (edge.right.namespace, edge.right.value) in connected
+            ],
+            key=lambda edge: (
+                edge.left.namespace,
+                edge.left.value,
+                edge.right.namespace,
+                edge.right.value,
+                edge.link_type,
+            ),
+        )
+
+    def _selected_events(self, scope: EventScope) -> list[CustomerEvent]:
         return [
             event
             for event in sorted(self._events, key=lambda item: (item.occurred_at, item.event_id))
             if event.source_id in scope.source_ids
             and scope.start_at <= event.occurred_at < scope.end_at
         ][: scope.max_events]
-
-    def load_identities(self, scope: EventScope) -> list[IdentityEdge]:
-        del scope
-        return list(self._identity_edges)
 
     def get_evidence(self, allowed_evidence_ids: Sequence[str]) -> list[EvidenceRecord]:
         records: list[EvidenceRecord] = []

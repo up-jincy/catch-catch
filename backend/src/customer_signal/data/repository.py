@@ -234,9 +234,7 @@ class DuckDBRepository:
                     "topic": row[6],
                     "outcome": row[7],
                     "text": row[8],
-                    "identities": (
-                        json.loads(row[9]) if isinstance(row[9], str) else row[9]
-                    ),
+                    "identities": (json.loads(row[9]) if isinstance(row[9], str) else row[9]),
                     "canonical_customer_id": row[10],
                     "attributes": _parse_json(row[11]),
                 },
@@ -293,11 +291,13 @@ class DuckDBRepository:
         start_at: datetime,
         end_at: datetime,
         enabled_sources: Sequence[str],
+        limit: int = 100,
     ) -> list[IdentityEdge]:
-        """Return graph components connected to identities of bounded requested events."""
+        """Return ordered graph components for the same bounded Event selection."""
 
         _validate_time_range(start_at, end_at)
         sources = _validate_sources(enabled_sources)
+        _validate_limit(limit)
         placeholders = ", ".join("?" for _ in sources)
         connection = self._connect()
         try:
@@ -309,31 +309,78 @@ class DuckDBRepository:
                   AND occurred_at < ?
                   AND source_id IN ({placeholders})
                 ORDER BY occurred_at, event_id
+                LIMIT ?
                 """,
-                [start_at, end_at, *sources],
+                [start_at, end_at, *sources, limit],
             ).fetchall()
+
+            seeds: set[tuple[str, str]] = set()
+            for (identities,) in event_rows:
+                parsed = json.loads(identities) if isinstance(identities, str) else identities
+                seeds.update((identity["namespace"], identity["value"]) for identity in parsed)
+            if not seeds:
+                return []
+
+            seed_values = ", ".join("(?, ?)" for _ in seeds)
+            seed_parameters = [value for seed in sorted(seeds) for value in seed]
             edge_rows = connection.execute(
-                """
+                f"""
+                WITH RECURSIVE
+                seed(namespace, value) AS (
+                    VALUES {seed_values}
+                ),
+                oriented_edges(namespace, value, next_namespace, next_value) AS (
+                    SELECT
+                        left_namespace,
+                        left_value,
+                        right_namespace,
+                        right_value
+                    FROM identity_edges
+                    UNION ALL
+                    SELECT
+                        right_namespace,
+                        right_value,
+                        left_namespace,
+                        left_value
+                    FROM identity_edges
+                ),
+                reachable(namespace, value) AS (
+                    SELECT namespace, value FROM seed
+                    UNION
+                    SELECT next_namespace, next_value
+                    FROM reachable
+                    JOIN oriented_edges
+                      ON reachable.namespace = oriented_edges.namespace
+                     AND reachable.value = oriented_edges.value
+                )
                 SELECT
-                    left_namespace,
-                    left_value,
-                    right_namespace,
-                    right_value,
-                    link_type,
-                    confidence,
-                    provenance
+                    identity_edges.left_namespace,
+                    identity_edges.left_value,
+                    identity_edges.right_namespace,
+                    identity_edges.right_value,
+                    identity_edges.link_type,
+                    identity_edges.confidence,
+                    identity_edges.provenance
                 FROM identity_edges
-                """
+                JOIN reachable AS left_node
+                  ON identity_edges.left_namespace = left_node.namespace
+                 AND identity_edges.left_value = left_node.value
+                JOIN reachable AS right_node
+                  ON identity_edges.right_namespace = right_node.namespace
+                 AND identity_edges.right_value = right_node.value
+                ORDER BY
+                    identity_edges.left_namespace,
+                    identity_edges.left_value,
+                    identity_edges.right_namespace,
+                    identity_edges.right_value,
+                    identity_edges.link_type
+                """,
+                seed_parameters,
             ).fetchall()
         finally:
             connection.close()
 
-        seeds: set[tuple[str, str]] = set()
-        for (identities,) in event_rows:
-            parsed = json.loads(identities) if isinstance(identities, str) else identities
-            seeds.update((identity["namespace"], identity["value"]) for identity in parsed)
-
-        raw_edges = [
+        return [
             IdentityEdge.model_validate(
                 {
                     "left": {"namespace": row[0], "value": row[1]},
@@ -345,26 +392,6 @@ class DuckDBRepository:
                 strict=True,
             )
             for row in edge_rows
-        ]
-        adjacency: dict[tuple[str, str], set[tuple[str, str]]] = {}
-        for edge in raw_edges:
-            left = (edge.left.namespace, edge.left.value)
-            right = (edge.right.namespace, edge.right.value)
-            adjacency.setdefault(left, set()).add(right)
-            adjacency.setdefault(right, set()).add(left)
-
-        connected = set(seeds)
-        pending = list(seeds)
-        while pending:
-            node = pending.pop()
-            for neighbor in adjacency.get(node, set()) - connected:
-                connected.add(neighbor)
-                pending.append(neighbor)
-        return [
-            edge
-            for edge in raw_edges
-            if (edge.left.namespace, edge.left.value) in connected
-            and (edge.right.namespace, edge.right.value) in connected
         ]
 
 

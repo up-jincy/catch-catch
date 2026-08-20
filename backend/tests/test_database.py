@@ -20,7 +20,12 @@ from customer_signal.data.repository import (
     DuckDBRepository,
     EntityNotFoundError,
 )
-from customer_signal.domain.models import CustomerEvent, EvidenceRecord, SyntheticDataset
+from customer_signal.domain.models import (
+    CustomerEvent,
+    EvidenceRecord,
+    IdentityEdge,
+    SyntheticDataset,
+)
 from customer_signal.synthetic.generator import generate_dataset
 
 
@@ -34,6 +39,44 @@ ALL_SOURCES = [
     "subscription",
     "voc",
 ]
+
+
+def _edge_key(edge: IdentityEdge) -> tuple[str, str, str, str, str]:
+    return (
+        edge.left.namespace,
+        edge.left.value,
+        edge.right.namespace,
+        edge.right.value,
+        edge.link_type,
+    )
+
+
+def _connected_edges(events: list[CustomerEvent], edges: list[IdentityEdge]) -> list[IdentityEdge]:
+    graph: dict[tuple[str, str], set[tuple[str, str]]] = {}
+    for edge in edges:
+        left = (edge.left.namespace, edge.left.value)
+        right = (edge.right.namespace, edge.right.value)
+        graph.setdefault(left, set()).add(right)
+        graph.setdefault(right, set()).add(left)
+
+    connected = {
+        (identity.namespace, identity.value) for event in events for identity in event.identities
+    }
+    pending = list(connected)
+    while pending:
+        node = pending.pop()
+        for neighbor in graph.get(node, set()) - connected:
+            connected.add(neighbor)
+            pending.append(neighbor)
+    return sorted(
+        [
+            edge
+            for edge in edges
+            if (edge.left.namespace, edge.left.value) in connected
+            and (edge.right.namespace, edge.right.value) in connected
+        ],
+        key=_edge_key,
+    )
 
 
 def test_seed_database_atomically_creates_expected_schema_and_rows(
@@ -271,6 +314,28 @@ def test_list_events_applies_half_open_time_source_customer_filters_and_limit(
         )
         == synthetic_dataset.events[:7]
     )
+
+
+def test_list_identity_edges_uses_the_same_ordered_limited_event_selection(
+    repository: DuckDBRepository,
+    synthetic_dataset: SyntheticDataset,
+) -> None:
+    selected_events = repository.list_events(
+        start_at=START_AT,
+        end_at=END_AT,
+        enabled_sources=["search_history"],
+        limit=1,
+    )
+
+    edges = repository.list_identity_edges(
+        start_at=START_AT,
+        end_at=END_AT,
+        enabled_sources=["search_history"],
+        limit=1,
+    )
+
+    assert edges == _connected_edges(selected_events, synthetic_dataset.identity_edges)
+    assert [_edge_key(edge) for edge in edges] == sorted(_edge_key(edge) for edge in edges)
 
 
 @pytest.mark.parametrize("limit", [0, 101, True, 1.5])

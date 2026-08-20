@@ -154,6 +154,14 @@ class SourceManifest(SourceContractModel):
         }
         if non_pii_masked_fields:
             raise ValueError("masking rules must reference PII-classified fields")
+        pii_fields_without_masking = {
+            name
+            for name in field_names
+            if self._field_pii_classification(name) != "none"
+            and name not in self.masking_policy.rules
+        }
+        if pii_fields_without_masking:
+            raise ValueError("every PII-classified field requires a masking rule")
         return self
 
     def _field_pii_classification(self, name: str) -> PiiClassification:
@@ -184,14 +192,19 @@ class SourceManifest(SourceContractModel):
 
         for name, value in event.dimensions.items():
             descriptor = self.dimensions[name]
+            if value is None:
+                continue
+            if (
+                descriptor.semantic_type in {"category", "text", "identifier"}
+                and type(value) is not str
+            ):
+                raise ValueError(
+                    f"{descriptor.semantic_type} dimension must contain a string value"
+                )
+            if descriptor.semantic_type == "boolean" and type(value) is not bool:
+                raise ValueError("boolean dimension must contain a boolean value")
             if descriptor.allowed_values is not None and value not in descriptor.allowed_values:
                 raise ValueError("dimension value is outside allowed values")
-            if (
-                descriptor.semantic_type == "boolean"
-                and value is not None
-                and type(value) is not bool
-            ):
-                raise ValueError("boolean dimension must contain a boolean value")
 
         for name, value in event.measures.items():
             descriptor = self.measures[name]

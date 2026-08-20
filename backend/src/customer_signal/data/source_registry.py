@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from hashlib import sha256
+from hmac import new as hmac_new
+from itertools import islice
+from secrets import token_bytes
 from typing import Protocol
 
 from customer_signal.domain.models import CustomerEvent, EvidenceRecord, IdentityEdge
@@ -89,7 +93,7 @@ def _validate_loaded_events(
 def validate_adapter_contract(adapter: SourceAdapter, scope: EventScope) -> list[CustomerEvent]:
     """Load once, then validate the exact event response returned by an adapter."""
 
-    events = list(adapter.load_events(scope))
+    events = list(islice(adapter.load_events(scope), scope.max_events + 1))
     _validate_loaded_events(adapter, scope, events)
     return events
 
@@ -104,6 +108,7 @@ class SourceRegistry:
     ) -> None:
         self._adapters: dict[str, SourceAdapter] = {}
         self._evidence = evidence
+        self._customer_masking_key = token_bytes(32)
         for adapter in adapters:
             self.register(adapter)
 
@@ -133,6 +138,7 @@ class SourceRegistry:
         for source_id in scope.source_ids:
             source_scope = scope.model_copy(update={"source_ids": [source_id]})
             events.extend(validate_adapter_contract(self.get(source_id), source_scope))
+        _validate_global_event_identifiers(events)
         events.sort(key=lambda event: (event.occurred_at, event.event_id))
         return events[: scope.max_events]
 
@@ -142,16 +148,93 @@ class SourceRegistry:
             source_scope = scope.model_copy(update={"source_ids": [source_id]})
             for edge in self.get(source_id).load_identities(source_scope):
                 edges[_edge_key(edge)] = edge
-        return list(edges.values())
+        return [edges[key] for key in sorted(edges)]
 
-    def get_evidence(self, allowed_evidence_ids: Sequence[str]) -> list[EvidenceRecord]:
+    def get_evidence(
+        self,
+        allowed_evidence_ids: Sequence[str],
+        *,
+        authorized_events: Sequence[CustomerEvent] | None = None,
+    ) -> list[EvidenceRecord]:
+        """Project evidence from one explicit, caller-owned run authorization context."""
+
         requested = _validate_evidence_ids(allowed_evidence_ids)
+        authorized_by_evidence = self._validated_authorized_events(authorized_events)
+        missing = [
+            evidence_id for evidence_id in requested if evidence_id not in authorized_by_evidence
+        ]
+        if missing:
+            raise ValueError("evidence is not authorized by the supplied event context")
         records = self._evidence.get_evidence(requested)
         if [record.evidence_id for record in records] != requested:
             raise ValueError("evidence provider must return exactly the requested IDs in order")
-        if any(record.raw_fields for record in records):
+        if any(record.raw_fields != {} for record in records):
             raise ValueError("evidence provider must return display-safe masked records")
-        return records
+        for record, evidence_id in zip(records, requested, strict=True):
+            event = authorized_by_evidence[evidence_id]
+            if (
+                record.source_id not in self._adapters
+                or record.source_id != event.source_id
+                or record.occurred_at != event.occurred_at
+            ):
+                raise ValueError(
+                    "evidence provider record does not match authorized source/customer context"
+                )
+        return [
+            _public_evidence_record(
+                authorized_by_evidence[evidence_id],
+                masking_key=self._customer_masking_key,
+            )
+            for evidence_id in requested
+        ]
+
+    def _validated_authorized_events(
+        self, authorized_events: Sequence[CustomerEvent] | None
+    ) -> dict[str, CustomerEvent]:
+        if authorized_events is None:
+            raise ValueError("authorized event context is required for evidence retrieval")
+        if isinstance(authorized_events, (str, bytes)):
+            raise ValueError("authorized event context must be a sequence of events")
+
+        authorized_by_evidence: dict[str, CustomerEvent] = {}
+        for event in authorized_events:
+            try:
+                adapter = self.get(event.source_id)
+            except LookupError as error:
+                raise ValueError("authorized event source is not registered") from error
+            adapter.describe().validate_event(event)
+            if event.evidence_id in authorized_by_evidence:
+                raise ValueError("authorized event context must have unique evidence IDs")
+            authorized_by_evidence[event.evidence_id] = event
+        return authorized_by_evidence
+
+
+def _validate_global_event_identifiers(events: Sequence[CustomerEvent]) -> None:
+    event_ids: set[str] = set()
+    evidence_ids: set[str] = set()
+    for event in events:
+        if event.event_id in event_ids:
+            raise ValueError("duplicate event_id across registered adapters")
+        if event.evidence_id in evidence_ids:
+            raise ValueError("duplicate evidence_id across registered adapters")
+        event_ids.add(event.event_id)
+        evidence_ids.add(event.evidence_id)
+
+
+def _public_evidence_record(event: CustomerEvent, *, masking_key: bytes) -> EvidenceRecord:
+    customer_token = hmac_new(
+        masking_key,
+        event.canonical_customer_id.encode("utf-8"),
+        sha256,
+    ).hexdigest()
+    return EvidenceRecord(
+        evidence_id=event.evidence_id,
+        source_id=event.source_id,
+        occurred_at=event.occurred_at,
+        masked_customer_id=f"customer_{customer_token[:24]}",
+        summary=(f"{event.event_type} event: topic={event.topic}; outcome={event.outcome}"),
+        raw_fields={},
+    )
 
 
 def _validate_requested_source_ids(source_ids: Sequence[SourceId]) -> list[SourceId]:

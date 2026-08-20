@@ -227,6 +227,57 @@ def test_manifest_enforces_descriptor_refresh_masking_and_identity_contracts() -
         IdentityQualityDescriptor(namespace="partner_user", link_method="heuristic", confidence=0.5)
 
 
+@pytest.mark.parametrize(
+    ("descriptor_kind", "pii_classification"),
+    [
+        ("dimension", "direct_identifier"),
+        ("measure", "quasi_identifier"),
+    ],
+)
+def test_manifest_requires_masking_rules_for_every_pii_descriptor(
+    descriptor_kind: str, pii_classification: str
+) -> None:
+    values = _manifest().model_dump()
+    values["masking_policy"] = {"rules": {"email": "hash"}}
+    if descriptor_kind == "dimension":
+        values["masking_policy"] = {"rules": {}}
+    else:
+        values["measures"]["amount"]["pii_classification"] = pii_classification
+
+    with pytest.raises(ValidationError, match="masking rule"):
+        SourceManifest.model_validate(values)
+
+
+@pytest.mark.parametrize(
+    ("semantic_type", "invalid_value"),
+    [
+        ("category", 42),
+        ("text", 42),
+        ("identifier", 42),
+        ("boolean", "true"),
+    ],
+)
+def test_manifest_rejects_mutated_dimensions_with_wrong_semantic_runtime_type(
+    semantic_type: str, invalid_value: object
+) -> None:
+    manifest = _manifest().model_copy(
+        update={
+            "dimensions": {
+                **_manifest().dimensions,
+                "adversarial": DimensionDescriptor(
+                    semantic_type=semantic_type,
+                    description="Runtime semantic type probe",
+                    pii_classification="none",
+                ),
+            }
+        }
+    )
+    event = _event().model_copy(update={"dimensions": {"adversarial": invalid_value}})
+
+    with pytest.raises(ValueError, match="dimension"):
+        manifest.validate_event(event)
+
+
 def test_public_manifest_has_locked_shape_and_excludes_private_source_details() -> None:
     public = PublicSourceManifest.from_internal(_manifest())
     assert set(public.model_dump()) == {

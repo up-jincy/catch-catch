@@ -25,7 +25,7 @@ class SyntheticDuckDBAdapter:
             scope.start_at,
             scope.end_at,
             [self._manifest.source_id],
-            limit=min(scope.max_events, 100),
+            limit=self._repository_limit(scope),
         )
         for event in events:
             self._manifest.validate_event(event)
@@ -34,7 +34,10 @@ class SyntheticDuckDBAdapter:
     def load_identities(self, scope: EventScope) -> list[IdentityEdge]:
         self._validate_scope(scope)
         return self._repository.list_identity_edges(
-            scope.start_at, scope.end_at, [self._manifest.source_id]
+            scope.start_at,
+            scope.end_at,
+            [self._manifest.source_id],
+            limit=self._repository_limit(scope),
         )
 
     def get_evidence(self, allowed_evidence_ids: Sequence[str]) -> list[EvidenceRecord]:
@@ -46,6 +49,12 @@ class SyntheticDuckDBAdapter:
     def _validate_scope(self, scope: EventScope) -> None:
         if scope.source_ids != [self._manifest.source_id]:
             raise ValueError("synthetic adapter scope must select its source only")
+
+    @staticmethod
+    def _repository_limit(scope: EventScope) -> int:
+        """Keep the legacy repository's 100-row hard bound in both adapter calls."""
+
+        return min(scope.max_events, 100)
 
 
 __all__ = ["SyntheticDuckDBAdapter"]
