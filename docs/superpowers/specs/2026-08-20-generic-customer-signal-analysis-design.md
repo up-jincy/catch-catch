@@ -255,6 +255,7 @@ Frontend는 새 Step 이벤트를 우선 사용합니다.
 
 Artifact API는 다음 경로를 제공합니다.
 
+- `GET /api/sources`: 선택 가능한 Source와 공개 Manifest 조회
 - `GET /api/run-artifacts`: 최근 Run 목록
 - `GET /api/run-artifacts/{run_id}`: JSON Artifact 조회
 - `GET /api/run-artifacts/{run_id}/document`: 문서 View 데이터 조회
