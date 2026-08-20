@@ -2,13 +2,19 @@
 
 from typing import Annotated, Literal
 
-from pydantic import StringConstraints
+from pydantic import Field, StrictBool, StrictInt, StrictStr, StringConstraints
 
 
 type SourceId = Annotated[
     str,
     StringConstraints(pattern=r"^[a-z][a-z0-9_]{1,63}$"),
 ]
+
+# Semantic event values are deliberately stricter than legacy ``attributes``.
+# They form the bounded generic-analysis surface exposed by source manifests.
+type DimensionValue = StrictStr | StrictInt | StrictBool | None
+type FiniteNumber = Annotated[float, Field(strict=True, allow_inf_nan=False)]
+type MeasureValue = StrictInt | FiniteNumber
 
 # Legacy tool surfaces remain intentionally restricted until they are migrated
 # to SourceRegistry-backed dynamic lookup.
@@ -36,4 +42,12 @@ type GenericPrimitiveName = Literal[
 type PrimitiveName = GenericPrimitiveName | Literal["match_journey_pattern"]
 
 
-__all__ = ["GenericPrimitiveName", "LegacySourceId", "PrimitiveName", "SourceId"]
+__all__ = [
+    "DimensionValue",
+    "FiniteNumber",
+    "GenericPrimitiveName",
+    "LegacySourceId",
+    "MeasureValue",
+    "PrimitiveName",
+    "SourceId",
+]

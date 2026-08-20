@@ -4,7 +4,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
-from customer_signal.domain.types import SourceId
+from customer_signal.domain.types import DimensionValue, MeasureValue, SourceId
 
 
 type Scalar = str | int | float | bool | None
@@ -57,8 +57,8 @@ class CustomerEvent(DomainModel):
     identities: list[IdentityRef] = Field(default_factory=list)
     canonical_customer_id: str
     attributes: dict[str, Scalar] = Field(default_factory=dict)
-    dimensions: dict[str, Scalar] = Field(default_factory=dict)
-    measures: dict[str, FiniteFloat] = Field(default_factory=dict)
+    dimensions: dict[str, DimensionValue] = Field(default_factory=dict)
+    measures: dict[str, MeasureValue] = Field(default_factory=dict)
 
 
 class EvidenceRecord(DomainModel):
@@ -139,15 +139,11 @@ class SyntheticDataset(DomainModel):
             graph.setdefault(left, set()).add(right)
             graph.setdefault(right, set()).add(left)
 
-        canonical_nodes = {
-            ("canonical_customer", customer_id) for customer_id in self.customers
-        }
+        canonical_nodes = {("canonical_customer", customer_id) for customer_id in self.customers}
         for event in self.events:
             if not event.identities:
                 raise ValueError("every event must include a source identity")
-            pending = [
-                (identity.namespace, identity.value) for identity in event.identities
-            ]
+            pending = [(identity.namespace, identity.value) for identity in event.identities]
             visited: set[tuple[str, str]] = set()
             while pending:
                 node = pending.pop()
@@ -158,9 +154,7 @@ class SyntheticDataset(DomainModel):
             resolved = visited & canonical_nodes
             expected = {("canonical_customer", event.canonical_customer_id)}
             if resolved != expected:
-                raise ValueError(
-                    "event identities must resolve to exactly one canonical customer"
-                )
+                raise ValueError("event identities must resolve to exactly one canonical customer")
         return self
 
 

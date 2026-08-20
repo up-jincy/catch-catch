@@ -1,29 +1,43 @@
-"""Source manifests, event scopes, and safe public source descriptions."""
+"""Strict source manifests, adapter scopes, and public source projections."""
 
 from __future__ import annotations
 
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
-from pydantic import AwareDatetime, Field, field_validator, model_validator
+from pydantic import AwareDatetime, ConfigDict, Field, field_validator, model_validator
 
-from customer_signal.domain.models import CustomerEvent, DomainModel
+from customer_signal.domain.models import CanonicalCustomerEvent, DomainModel
 from customer_signal.domain.types import GenericPrimitiveName, SourceId
 
 
-type PiiClassification = Literal["none", "direct", "quasi", "sensitive"]
-type IdentityQualityLevel = Literal["exact", "declared", "synthetic", "unknown"]
+type RefreshCadence = Literal["static_demo", "hourly", "daily", "weekly"]
+type PiiClassification = Literal["none", "quasi_identifier", "direct_identifier"]
+type DimensionSemanticType = Literal["category", "boolean", "identifier", "text"]
+type MeasureSemanticType = Literal["integer", "number"]
+type MaskingMode = Literal["hash", "partial", "redact"]
+type IdentityLinkMethod = Literal["exact", "declared", "synthetic"]
+type IdentityConfidence = Annotated[
+    float,
+    Field(strict=True, ge=0, le=1, allow_inf_nan=False),
+]
 
 
-class TimeRange(DomainModel):
-    """A timezone-aware half-open interval."""
+class SourceContractModel(DomainModel):
+    """Strict base for manifest values received at an adapter boundary."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class TimeRange(SourceContractModel):
+    """A timezone-aware half-open interval ``[start_at, end_at)``."""
 
     start_at: AwareDatetime
     end_at: AwareDatetime
 
     @model_validator(mode="after")
-    def validate_bounds(self) -> Self:
+    def require_half_open_interval(self) -> Self:
         if self.start_at >= self.end_at:
-            raise ValueError("start_at must be before end_at")
+            raise ValueError("start_at must be before exclusive end_at")
         return self
 
 
@@ -35,99 +49,124 @@ class EventScope(TimeRange):
 
     @field_validator("source_ids")
     @classmethod
-    def validate_unique_source_ids(cls, value: list[SourceId]) -> list[SourceId]:
+    def require_unique_sources(cls, value: list[SourceId]) -> list[SourceId]:
         if len(value) != len(set(value)):
             raise ValueError("source_ids must be unique")
         return value
 
 
-class FieldDescriptor(DomainModel):
-    """Internal semantic-to-source field declaration."""
+class DimensionDescriptor(SourceContractModel):
+    """Semantic contract for one categorical, textual, or identity dimension."""
 
-    name: str = Field(min_length=1, max_length=128)
-    semantic_type: str = Field(min_length=1, max_length=128)
-    description: str = Field(min_length=1, max_length=1_000)
-    unit: str | None = Field(default=None, max_length=64)
+    semantic_type: DimensionSemanticType
+    description: str = Field(min_length=1)
     pii_classification: PiiClassification
-    source_field: str | None = Field(default=None, min_length=1, max_length=256)
+    allowed_values: frozenset[str] | None = None
 
 
-class PublicFieldDescriptor(DomainModel):
-    """A semantic descriptor that cannot disclose source column or PII metadata."""
+class MeasureDescriptor(SourceContractModel):
+    """Semantic contract for one finite numeric measure."""
 
-    name: str
-    semantic_type: str
+    semantic_type: MeasureSemanticType
+    description: str = Field(min_length=1)
+    unit: str = Field(min_length=1)
+    pii_classification: PiiClassification = "none"
+
+
+class PublicDimensionDescriptor(SourceContractModel):
+    """Safe projection of a non-PII dimension descriptor."""
+
+    semantic_type: DimensionSemanticType
     description: str
-    unit: str | None = None
+    allowed_values: frozenset[str] | None = None
 
     @classmethod
-    def from_internal(cls, descriptor: FieldDescriptor) -> Self:
+    def from_internal(cls, descriptor: DimensionDescriptor) -> Self:
         return cls(
-            name=descriptor.name,
+            semantic_type=descriptor.semantic_type,
+            description=descriptor.description,
+            allowed_values=descriptor.allowed_values,
+        )
+
+
+class PublicMeasureDescriptor(SourceContractModel):
+    """Safe projection of a non-PII measure descriptor."""
+
+    semantic_type: MeasureSemanticType
+    description: str
+    unit: str
+
+    @classmethod
+    def from_internal(cls, descriptor: MeasureDescriptor) -> Self:
+        return cls(
             semantic_type=descriptor.semantic_type,
             description=descriptor.description,
             unit=descriptor.unit,
         )
 
 
-class RefreshDescriptor(DomainModel):
-    cadence: str = Field(min_length=1, max_length=128)
-    max_lag_minutes: int = Field(default=1_440, ge=0, le=525_600)
+class MaskingPolicy(SourceContractModel):
+    """Internal masking mode by declared semantic field name."""
+
+    rules: dict[str, MaskingMode] = Field(default_factory=dict)
 
 
-class MaskingPolicy(DomainModel):
-    field_masks: dict[str, str] = Field(default_factory=dict)
+class IdentityQualityDescriptor(SourceContractModel):
+    """Declared namespace and provenance quality of source-native identities."""
+
+    namespace: str = Field(min_length=1)
+    link_method: IdentityLinkMethod
+    confidence: IdentityConfidence
 
 
-class IdentityQuality(DomainModel):
-    level: IdentityQualityLevel
-    description: str = Field(min_length=1, max_length=1_000)
-    namespace: str = Field(min_length=1, max_length=128)
-
-
-class SourceManifest(DomainModel):
-    """Internal adapter contract for one source."""
+class SourceManifest(SourceContractModel):
+    """Internal adapter contract for exactly one dynamic source."""
 
     source_id: SourceId
-    label: str = Field(min_length=1, max_length=256)
-    description: str = Field(min_length=1, max_length=2_000)
-    adapter_version: str = Field(min_length=1, max_length=64)
-    manifest_version: str = Field(min_length=1, max_length=64)
+    label: str = Field(min_length=1)
+    description: str = Field(min_length=1)
+    adapter_version: str = Field(min_length=1)
+    manifest_version: str = Field(min_length=1)
     data_interval: TimeRange
-    refresh_cadence: RefreshDescriptor
-    supported_event_types: list[str] = Field(min_length=1, max_length=128)
-    supported_topics: list[str] = Field(min_length=1, max_length=512)
-    supported_outcomes: list[str] = Field(min_length=1, max_length=512)
-    dimensions: list[FieldDescriptor] = Field(default_factory=list, max_length=256)
-    measures: list[FieldDescriptor] = Field(default_factory=list, max_length=256)
-    generic_capabilities: list[GenericPrimitiveName] = Field(min_length=1, max_length=10)
+    refresh_cadence: RefreshCadence
+    supported_event_types: frozenset[str] = Field(min_length=1, max_length=128)
+    supported_topics: frozenset[str] = Field(min_length=1, max_length=512)
+    supported_outcomes: frozenset[str] = Field(min_length=1, max_length=512)
+    dimensions: dict[str, DimensionDescriptor] = Field(default_factory=dict, max_length=256)
+    measures: dict[str, MeasureDescriptor] = Field(default_factory=dict, max_length=256)
+    capabilities: frozenset[GenericPrimitiveName] = Field(min_length=1, max_length=10)
     masking_policy: MaskingPolicy
-    identity_quality: IdentityQuality
-
-    @field_validator(
-        "supported_event_types",
-        "supported_topics",
-        "supported_outcomes",
-        "generic_capabilities",
-    )
-    @classmethod
-    def validate_unique_values(cls, value: list[str]) -> list[str]:
-        if len(value) != len(set(value)):
-            raise ValueError("manifest semantic values must be unique")
-        return value
+    identity_quality: IdentityQualityDescriptor
 
     @model_validator(mode="after")
-    def validate_declared_field_names(self) -> Self:
-        names = [field.name for field in [*self.dimensions, *self.measures]]
-        if len(names) != len(set(names)):
+    def require_consistent_internal_field_policy(self) -> Self:
+        field_names = set(self.dimensions) | set(self.measures)
+        if set(self.dimensions) & set(self.measures):
             raise ValueError("dimension and measure names must be unique")
+        unknown_masked_fields = set(self.masking_policy.rules) - field_names
+        if unknown_masked_fields:
+            raise ValueError("masking rules must reference declared fields")
+        non_pii_masked_fields = {
+            name
+            for name in self.masking_policy.rules
+            if self._field_pii_classification(name) == "none"
+        }
+        if non_pii_masked_fields:
+            raise ValueError("masking rules must reference PII-classified fields")
         return self
 
-    def validate_event(self, event: CustomerEvent) -> None:
-        """Reject event data outside this source's declared semantic contract."""
+    def _field_pii_classification(self, name: str) -> PiiClassification:
+        descriptor = self.dimensions.get(name) or self.measures.get(name)
+        assert descriptor is not None
+        return descriptor.pii_classification
+
+    def validate_event(self, event: CanonicalCustomerEvent) -> None:
+        """Reject event values outside declared source semantics."""
 
         if event.source_id != self.source_id:
-            raise ValueError("event source_id does not match manifest")
+            raise ValueError("event source does not match manifest")
+        if not self.data_interval.start_at <= event.occurred_at < self.data_interval.end_at:
+            raise ValueError("event occurred_at is outside manifest data_interval")
         if event.event_type not in self.supported_event_types:
             raise ValueError("event_type is not supported by manifest")
         if event.topic not in self.supported_topics:
@@ -135,76 +174,96 @@ class SourceManifest(DomainModel):
         if event.outcome not in self.supported_outcomes:
             raise ValueError("outcome is not supported by manifest")
 
-        dimension_names = {descriptor.name for descriptor in self.dimensions}
-        measure_names = {descriptor.name for descriptor in self.measures}
-        undeclared_dimensions = set(event.dimensions) - dimension_names
-        undeclared_measures = set(event.measures) - measure_names
-        if undeclared_dimensions:
-            raise ValueError("event contains undeclared dimension")
-        if undeclared_measures:
-            raise ValueError("event contains undeclared measure")
-        if any(not isinstance(value, (int, float)) or isinstance(value, bool) for value in event.measures.values()):
-            raise ValueError("event measures must be finite numbers")
-        if any(value != value or value in (float("inf"), float("-inf")) for value in event.measures.values()):
-            raise ValueError("event measures must be finite")
+        unknown_dimensions = set(event.dimensions) - set(self.dimensions)
+        unknown_measures = set(event.measures) - set(self.measures)
+        if unknown_dimensions:
+            raise ValueError("undeclared dimension")
+        if unknown_measures:
+            raise ValueError("undeclared measure")
+
+        for name, value in event.dimensions.items():
+            descriptor = self.dimensions[name]
+            if descriptor.allowed_values is not None and value not in descriptor.allowed_values:
+                raise ValueError("dimension value is outside allowed values")
+            if (
+                descriptor.semantic_type == "boolean"
+                and value is not None
+                and type(value) is not bool
+            ):
+                raise ValueError("boolean dimension must contain a boolean value")
+
+        for name, value in event.measures.items():
+            descriptor = self.measures[name]
+            if descriptor.semantic_type == "integer" and type(value) is not int:
+                raise ValueError("integer measure must contain an integer value")
+
+        if not event.identities:
+            raise ValueError("event must include an identity in the manifest namespace")
+        if any(
+            identity.namespace != self.identity_quality.namespace for identity in event.identities
+        ):
+            raise ValueError("event identity namespace does not match manifest")
 
 
-class PublicSourceManifest(DomainModel):
-    """Safe source metadata intended for planners and public-facing APIs."""
+class PublicSourceManifest(SourceContractModel):
+    """Public-safe manifest with no PII names, raw mappings, or identity namespace."""
 
     source_id: SourceId
     label: str
     description: str
-    manifest_version: str
     data_interval: TimeRange
-    refresh_cadence: RefreshDescriptor
-    supported_event_types: list[str]
-    supported_topics: list[str]
-    supported_outcomes: list[str]
-    dimensions: list[PublicFieldDescriptor]
-    measures: list[PublicFieldDescriptor]
-    generic_capabilities: list[GenericPrimitiveName]
-    identity_quality: IdentityQualityLevel
+    refresh_cadence: RefreshCadence
+    supported_event_types: frozenset[str]
+    supported_topics: frozenset[str]
+    supported_outcomes: frozenset[str]
+    dimensions: dict[str, PublicDimensionDescriptor]
+    measures: dict[str, PublicMeasureDescriptor]
+    capabilities: frozenset[GenericPrimitiveName]
+    adapter_version: str
+    manifest_version: str
 
     @classmethod
-    def from_manifest(cls, manifest: SourceManifest) -> Self:
-        def safe_fields(descriptors: list[FieldDescriptor]) -> list[PublicFieldDescriptor]:
-            return [
-                PublicFieldDescriptor.from_internal(descriptor)
-                for descriptor in descriptors
-                if descriptor.pii_classification == "none"
-            ]
-
+    def from_internal(cls, manifest: SourceManifest) -> Self:
         return cls(
             source_id=manifest.source_id,
             label=manifest.label,
             description=manifest.description,
-            manifest_version=manifest.manifest_version,
             data_interval=manifest.data_interval,
             refresh_cadence=manifest.refresh_cadence,
             supported_event_types=manifest.supported_event_types,
             supported_topics=manifest.supported_topics,
             supported_outcomes=manifest.supported_outcomes,
-            dimensions=safe_fields(manifest.dimensions),
-            measures=safe_fields(manifest.measures),
-            generic_capabilities=manifest.generic_capabilities,
-            identity_quality=manifest.identity_quality.level,
+            dimensions={
+                name: PublicDimensionDescriptor.from_internal(descriptor)
+                for name, descriptor in manifest.dimensions.items()
+                if descriptor.pii_classification == "none"
+            },
+            measures={
+                name: PublicMeasureDescriptor.from_internal(descriptor)
+                for name, descriptor in manifest.measures.items()
+                if descriptor.pii_classification == "none"
+            },
+            capabilities=manifest.capabilities,
+            adapter_version=manifest.adapter_version,
+            manifest_version=manifest.manifest_version,
         )
 
 
-class PublicSourceList(DomainModel):
-    sources: list[PublicSourceManifest] = Field(default_factory=list, max_length=32)
+class PublicSourceList(SourceContractModel):
+    items: list[PublicSourceManifest] = Field(default_factory=list, max_length=32)
 
 
 __all__ = [
+    "DimensionDescriptor",
     "EventScope",
-    "FieldDescriptor",
-    "IdentityQuality",
+    "IdentityQualityDescriptor",
     "MaskingPolicy",
-    "PublicFieldDescriptor",
+    "MeasureDescriptor",
+    "PublicDimensionDescriptor",
+    "PublicMeasureDescriptor",
     "PublicSourceList",
     "PublicSourceManifest",
-    "RefreshDescriptor",
+    "RefreshCadence",
     "SourceManifest",
     "TimeRange",
 ]

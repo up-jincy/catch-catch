@@ -1,4 +1,4 @@
-"""Source manifests for the deterministic built-in synthetic dataset."""
+"""Locked manifests for each deterministic built-in synthetic source."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ from datetime import timedelta
 
 from customer_signal.domain.models import CustomerEvent
 from customer_signal.domain.sources import (
-    IdentityQuality,
+    DimensionDescriptor,
+    IdentityQualityDescriptor,
     MaskingPolicy,
-    RefreshDescriptor,
     SourceManifest,
     TimeRange,
 )
@@ -29,30 +29,38 @@ _DESCRIPTIONS = {
     "subscription": "Subscription review and product account activity.",
     "voc": "Voice-of-customer support cases.",
 }
-_ALL_CAPABILITIES: list[GenericPrimitiveName] = [
-    "catalog_sources",
-    "profile_events",
-    "aggregate_events",
-    "segment_customers",
-    "detect_repetition",
-    "match_sequence",
-    "compare_segments",
-    "rank_customers",
-    "get_customer_journey",
-    "get_evidence",
-]
+_IDENTITY_QUALITY = {
+    "search_history": ("search_run", "exact"),
+    "search_feedback": ("search_run", "exact"),
+    "digital_behavior": ("digital_session", "declared"),
+    "subscription": ("subscription_entry", "exact"),
+    "voc": ("voc_case", "declared"),
+}
+_ALL_CAPABILITIES: frozenset[GenericPrimitiveName] = frozenset(
+    {
+        "catalog_sources",
+        "profile_events",
+        "aggregate_events",
+        "segment_customers",
+        "detect_repetition",
+        "match_sequence",
+        "compare_segments",
+        "rank_customers",
+        "get_customer_journey",
+        "get_evidence",
+    }
+)
 
 
-def synthetic_source_manifest(
-    source_id: SourceId, events: list[CustomerEvent]
-) -> SourceManifest:
-    """Build one declared manifest from legacy synthetic events without new columns."""
+def synthetic_source_manifest(source_id: SourceId, events: list[CustomerEvent]) -> SourceManifest:
+    """Build one manifest compatible with the legacy synthetic Event columns."""
 
     source_events = [event for event in events if event.source_id == source_id]
     if not source_events:
         raise ValueError(f"synthetic source {source_id} has no events")
     if source_id not in _LABELS:
         raise ValueError(f"unknown synthetic source {source_id}")
+    namespace, link_method = _IDENTITY_QUALITY[source_id]
     return SourceManifest(
         source_id=source_id,
         label=_LABELS[source_id],
@@ -63,18 +71,24 @@ def synthetic_source_manifest(
             start_at=min(event.occurred_at for event in source_events),
             end_at=max(event.occurred_at for event in source_events) + timedelta(microseconds=1),
         ),
-        refresh_cadence=RefreshDescriptor(cadence="static", max_lag_minutes=0),
-        supported_event_types=sorted({event.event_type for event in source_events}),
-        supported_topics=sorted({event.topic for event in source_events}),
-        supported_outcomes=sorted({event.outcome for event in source_events}),
-        dimensions=[],
-        measures=[],
-        generic_capabilities=_ALL_CAPABILITIES,
-        masking_policy=MaskingPolicy(field_masks={"customer_ref": "masked"}),
-        identity_quality=IdentityQuality(
-            level="synthetic",
-            description="Deterministic identity graph for demonstration data.",
-            namespace="synthetic_customer",
+        refresh_cadence="static_demo",
+        supported_event_types=frozenset(event.event_type for event in source_events),
+        supported_topics=frozenset(event.topic for event in source_events),
+        supported_outcomes=frozenset(event.outcome for event in source_events),
+        dimensions={
+            "customer_ref": DimensionDescriptor(
+                semantic_type="identifier",
+                description="Masked source-native customer reference.",
+                pii_classification="direct_identifier",
+            )
+        },
+        measures={},
+        capabilities=_ALL_CAPABILITIES,
+        masking_policy=MaskingPolicy(rules={"customer_ref": "partial"}),
+        identity_quality=IdentityQualityDescriptor(
+            namespace=namespace,
+            link_method=link_method,
+            confidence=1.0,
         ),
     )
 

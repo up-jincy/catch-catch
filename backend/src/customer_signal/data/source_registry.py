@@ -1,8 +1,8 @@
-"""Dynamic source-adapter registration and shared adapter contract checks."""
+"""Dynamic source registration and one-pass adapter/evidence validation."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Protocol
 
 from customer_signal.domain.models import CustomerEvent, EvidenceRecord, IdentityEdge
@@ -11,17 +11,17 @@ from customer_signal.domain.types import SourceId
 
 
 class SourceAdapter(Protocol):
-    """A bounded, source-specific provider of canonical events and identities."""
+    """A bounded provider for one manifest-defined canonical event source."""
 
     def describe(self) -> SourceManifest: ...
 
-    def load_events(self, scope: EventScope) -> list[CustomerEvent]: ...
+    def load_events(self, scope: EventScope) -> Iterable[CustomerEvent]: ...
 
-    def load_identities(self, scope: EventScope) -> list[IdentityEdge]: ...
+    def load_identities(self, scope: EventScope) -> Iterable[IdentityEdge]: ...
 
 
 class EvidenceProvider(Protocol):
-    """Returns only caller-authorized, display-safe masked evidence records."""
+    """Returns authorized evidence records in requested order and masked form."""
 
     def get_evidence(self, allowed_evidence_ids: Sequence[str]) -> list[EvidenceRecord]: ...
 
@@ -58,22 +58,21 @@ def _validate_identity_resolution(
                     continue
                 visited.add(node)
                 pending.extend(graph.get(node, set()) - visited)
-            resolved = {
-                value for namespace, value in visited if namespace == "canonical_customer"
-            }
+            resolved = {value for namespace, value in visited if namespace == "canonical_customer"}
             if resolved != {event.canonical_customer_id}:
                 raise ValueError(
                     "event identities must resolve to exactly one canonical_customer_id"
                 )
 
 
-def validate_adapter_contract(adapter: SourceAdapter, scope: EventScope) -> None:
-    """Validate a single adapter's bounded event and identity guarantees."""
-
+def _validate_loaded_events(
+    adapter: SourceAdapter,
+    scope: EventScope,
+    events: list[CustomerEvent],
+) -> None:
     manifest = adapter.describe()
-    if set(scope.source_ids) != {manifest.source_id}:
+    if scope.source_ids != [manifest.source_id]:
         raise ValueError("adapter contract scope must select exactly its manifest source")
-    events = adapter.load_events(scope)
     if len(events) > scope.max_events:
         raise ValueError("adapter returned more events than max_events")
     if events != sorted(events, key=lambda event: (event.occurred_at, event.event_id)):
@@ -87,11 +86,26 @@ def validate_adapter_contract(adapter: SourceAdapter, scope: EventScope) -> None
     _validate_identity_resolution(events, adapter.load_identities(scope))
 
 
-class SourceRegistry:
-    """Dynamic adapter catalog with source/order/bounds validation at one boundary."""
+def validate_adapter_contract(adapter: SourceAdapter, scope: EventScope) -> list[CustomerEvent]:
+    """Load once, then validate the exact event response returned by an adapter."""
 
-    def __init__(self) -> None:
+    events = list(adapter.load_events(scope))
+    _validate_loaded_events(adapter, scope, events)
+    return events
+
+
+class SourceRegistry:
+    """Unique dynamic adapter catalog with an owned evidence-provider boundary."""
+
+    def __init__(
+        self,
+        adapters: Sequence[SourceAdapter],
+        evidence: EvidenceProvider,
+    ) -> None:
         self._adapters: dict[str, SourceAdapter] = {}
+        self._evidence = evidence
+        for adapter in adapters:
+            self.register(adapter)
 
     def register(self, adapter: SourceAdapter) -> None:
         manifest = adapter.describe()
@@ -105,17 +119,20 @@ class SourceRegistry:
         except KeyError as error:
             raise LookupError(f"source {source_id} is not registered") from error
 
+    def manifests(self, source_ids: Sequence[SourceId]) -> list[SourceManifest]:
+        requested = _validate_requested_source_ids(source_ids)
+        return [self.get(source_id).describe() for source_id in requested]
+
     def load_manifests(self, source_ids: Sequence[SourceId]) -> list[SourceManifest]:
-        scoped_source_ids = _validate_requested_source_ids(source_ids)
-        return [self.get(source_id).describe() for source_id in scoped_source_ids]
+        """Compatibility alias for the original Task 1 registry method name."""
+
+        return self.manifests(source_ids)
 
     def load_events(self, scope: EventScope) -> list[CustomerEvent]:
         events: list[CustomerEvent] = []
         for source_id in scope.source_ids:
             source_scope = scope.model_copy(update={"source_ids": [source_id]})
-            adapter = self.get(source_id)
-            validate_adapter_contract(adapter, source_scope)
-            events.extend(adapter.load_events(source_scope))
+            events.extend(validate_adapter_contract(self.get(source_id), source_scope))
         events.sort(key=lambda event: (event.occurred_at, event.event_id))
         return events[: scope.max_events]
 
@@ -127,6 +144,15 @@ class SourceRegistry:
                 edges[_edge_key(edge)] = edge
         return list(edges.values())
 
+    def get_evidence(self, allowed_evidence_ids: Sequence[str]) -> list[EvidenceRecord]:
+        requested = _validate_evidence_ids(allowed_evidence_ids)
+        records = self._evidence.get_evidence(requested)
+        if [record.evidence_id for record in records] != requested:
+            raise ValueError("evidence provider must return exactly the requested IDs in order")
+        if any(record.raw_fields for record in records):
+            raise ValueError("evidence provider must return display-safe masked records")
+        return records
+
 
 def _validate_requested_source_ids(source_ids: Sequence[SourceId]) -> list[SourceId]:
     if isinstance(source_ids, (str, bytes)):
@@ -135,6 +161,19 @@ def _validate_requested_source_ids(source_ids: Sequence[SourceId]) -> list[Sourc
     if not 1 <= len(values) <= 32 or len(values) != len(set(values)):
         raise ValueError("source_ids must be a non-empty unique sequence of at most 32 values")
     return values
+
+
+def _validate_evidence_ids(evidence_ids: Sequence[str]) -> list[str]:
+    if isinstance(evidence_ids, (str, bytes)):
+        raise ValueError("allowed_evidence_ids must be a non-empty sequence")
+    identifiers = list(evidence_ids)
+    if (
+        not identifiers
+        or len(identifiers) > 100
+        or any(not isinstance(identifier, str) or not identifier for identifier in identifiers)
+    ):
+        raise ValueError("allowed_evidence_ids must contain 1 to 100 non-empty strings")
+    return identifiers
 
 
 __all__ = [
