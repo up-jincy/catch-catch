@@ -16,7 +16,7 @@ from customer_signal.agent.generic_fixture import (
     REPEAT_JOURNEY_QUESTION,
     SIGNUP_ABANDONMENT_QUESTION,
 )
-from customer_signal.agent.contracts import RunRequest
+from customer_signal.agent.generic_gemini import GeminiAnalysisModel
 from customer_signal.api import _default_dependencies, create_app
 from customer_signal.config import Settings
 
@@ -57,8 +57,7 @@ def _request(
     }
 
 
-@pytest.mark.asyncio
-async def test_default_gemini_loop_uses_the_same_functional_plan_as_fixture(
+def test_default_gemini_loop_owns_all_stages_without_fixture_delegate(
     tmp_path: Path,
 ) -> None:
     settings = Settings(
@@ -72,16 +71,18 @@ async def test_default_gemini_loop_uses_the_same_functional_plan_as_fixture(
     loop = dependencies.coordinator._generic_gemini_loop
     assert loop is not None
     model = loop._model
-    verified_model = model._verified_model
-    request = RunRequest.model_validate(_request(NEGATIVE_TOPIC_QUESTION))
-    manifests = dependencies.registry.manifests(SOURCES)
+    fixture_loop = dependencies.coordinator._generic_fixture_loop
 
-    goal = await verified_model.create_goal(request, manifests)
-    plan = await verified_model.create_plan(goal, manifests)
-    aggregate = next(step for step in plan.steps if step.step_id == "step-negative-topic")
-
-    assert aggregate.source_ids == ["search_feedback"]
-    assert "topic == '요금제 변경'" in aggregate.parameters.predicates
+    assert isinstance(model, GeminiAnalysisModel)
+    assert model is not fixture_loop._model
+    assert not hasattr(model, "_verified_model")
+    assert {
+        "create_goal",
+        "create_plan",
+        "create_note",
+        "select_next",
+        "create_report",
+    } <= GeminiAnalysisModel.__dict__.keys()
 
 
 def _wait_for_status(

@@ -205,7 +205,6 @@ def _default_dependencies(settings: Settings) -> ApiDependencies:
                 api_key=api_key,
                 primary_model=settings.gemini_model,
                 fallback_model=settings.gemini_fallback_model,
-                verified_model=functional_model,
             ),
             executor=executor,
             registry=registry,

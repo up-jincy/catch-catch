@@ -6,10 +6,10 @@ import asyncio
 import json
 import math
 from collections.abc import Callable, Sequence
-from typing import Any, Literal, TypeVar
+from typing import Any, TypeVar
 
 from langchain_google_genai import ChatGoogleGenerativeAI
-from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from customer_signal.agent.contracts import (
     ReportModelContext,
@@ -17,13 +17,7 @@ from customer_signal.agent.contracts import (
     SelectionContext,
     StepModelContext,
 )
-from customer_signal.agent.generic_fixture import (
-    AMBIGUOUS_QUESTION,
-    NEGATIVE_TOPIC_QUESTION,
-    REPEAT_JOURNEY_QUESTION,
-    SIGNUP_ABANDONMENT_QUESTION,
-    GenericFixtureModel,
-)
+from customer_signal.agent.generic_fixture import GenericFixtureModel
 from customer_signal.domain.analysis import (
     AnalysisGoal,
     AnalysisNoteDraft,
@@ -31,19 +25,21 @@ from customer_signal.domain.analysis import (
     CustomerSignalReportDraft,
     GoalDecision,
     StepSelection,
+    UnsupportedAnalysis,
 )
+from customer_signal.domain.primitives import PRIMITIVE_INPUT_ADAPTER
 from customer_signal.domain.sources import PublicSourceManifest, SourceManifest
 
 
 T = TypeVar("T")
 
 
-class _AnalysisScenarioDecision(BaseModel):
-    """Provider-safe intent envelope; detailed contracts stay server-owned."""
+class _JsonDocument(BaseModel):
+    """Flat provider schema; detailed contracts stay server-owned."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    scenario: Literal["negative", "repeat", "signup", "clarification", "unsupported"]
+    document: str = Field(min_length=2, max_length=120_000)
 
 
 class GeminiAnalysisError(RuntimeError):
@@ -67,7 +63,6 @@ class GeminiAnalysisModel:
         fallback_model: str = "gemini-3.6-flash",
         timeout_seconds: float = 40.0,
         model_factory: Callable[..., Any] = ChatGoogleGenerativeAI,
-        verified_model: GenericFixtureModel | None = None,
     ) -> None:
         if not primary_model.strip() or not fallback_model.strip():
             raise ValueError("Gemini model names must be nonblank")
@@ -85,7 +80,6 @@ class GeminiAnalysisModel:
         self._timeout_seconds = float(timeout_seconds)
         self._model_factory = model_factory
         self._models: dict[str, Any] = {}
-        self._verified_model = verified_model or GenericFixtureModel()
 
     @property
     def is_configured(self) -> bool:
@@ -102,61 +96,104 @@ class GeminiAnalysisModel:
         request: RunRequest,
         manifests: list[SourceManifest],
     ) -> GoalDecision:
-        guard_decision = await self._verified_model.create_goal(request, manifests)
-        if getattr(guard_decision, "code", None) == "pii_request":
+        guard_decision = await GenericFixtureModel().create_goal(request, manifests)
+        if (
+            isinstance(guard_decision, UnsupportedAnalysis)
+            and guard_decision.code == "pii_request"
+        ):
             return guard_decision
-        prompt = _stage_prompt(
-            "scenario",
-            {
+        return await self._invoke_document(
+            output_type=GoalDecision,
+            schema_title="GoalDecision",
+            stage="goal",
+            public_input={
                 "request": request.model_dump(mode="json"),
-                "allowed_sources": _public_manifests(manifests),
-                "scenario_choices": {
-                    "negative": "부정 피드백 Topic과 관련 고객 Segment",
-                    "repeat": "반복 행동 뒤 상담 또는 고객센터 전환 Journey",
-                    "signup": "가입 시작 뒤 미완료 또는 이탈",
-                    "clarification": "분석 대상이나 결과가 모호한 요청",
-                    "unsupported": "그 밖의 분석 또는 지원하지 않는 요청",
-                },
-                "constraints": {
-                    "choose_exactly_one_scenario": True,
-                    "do_not_answer_with_results_or_counts": True,
-                },
+                "sources": _public_manifests(manifests),
+                "primitive_catalog": _primitive_catalog(),
             },
-        )
-        scenario = await self._invoke(
-            output_type=_AnalysisScenarioDecision,
-            schema_title="AnalysisScenarioDecision",
-            prompt=prompt,
             allow_initial_fallback=True,
         )
-        canonical_question = {
-            "negative": NEGATIVE_TOPIC_QUESTION,
-            "repeat": REPEAT_JOURNEY_QUESTION,
-            "signup": SIGNUP_ABANDONMENT_QUESTION,
-            "clarification": AMBIGUOUS_QUESTION,
-            "unsupported": "현재 데모 범위 밖의 분석 요청",
-        }[scenario.scenario]
-        canonical_request = request.model_copy(update={"question": canonical_question})
-        return await self._verified_model.create_goal(canonical_request, manifests)
 
     async def create_plan(
         self,
         goal: AnalysisGoal,
         manifests: list[SourceManifest],
+        *,
+        validation_feedback: str | None = None,
     ) -> AnalysisPlan:
-        return await self._verified_model.create_plan(goal, manifests)
+        return await self._invoke_document(
+            output_type=AnalysisPlan,
+            schema_title="AnalysisPlan",
+            stage="plan",
+            public_input={
+                "goal": goal.model_dump(mode="json"),
+                "sources": _public_manifests(manifests),
+                "primitive_catalog": _primitive_catalog(),
+                "validation_feedback": validation_feedback,
+                "constraints": {
+                    "step_count": "3..6",
+                    "first_step_should_discover_sources": True,
+                    "read_only": True,
+                },
+            },
+        )
 
     async def create_note(self, context: StepModelContext) -> AnalysisNoteDraft:
-        return await self._verified_model.create_note(context)
+        return await self._invoke_document(
+            output_type=AnalysisNoteDraft,
+            schema_title="AnalysisNoteDraft",
+            stage="note",
+            public_input={"context": context.model_dump(mode="json")},
+        )
 
     async def select_next(self, context: SelectionContext) -> StepSelection:
-        return await self._verified_model.select_next(context)
+        return await self._invoke_document(
+            output_type=StepSelection,
+            schema_title="StepSelection",
+            stage="selection",
+            public_input={"context": context.model_dump(mode="json")},
+        )
 
     async def create_report(
         self,
         context: ReportModelContext,
     ) -> CustomerSignalReportDraft:
-        return await self._verified_model.create_report(context)
+        return await self._invoke_document(
+            output_type=CustomerSignalReportDraft,
+            schema_title="CustomerSignalReportDraft",
+            stage="report",
+            public_input={"context": context.model_dump(mode="json")},
+        )
+
+    async def _invoke_document(
+        self,
+        *,
+        output_type: Any,
+        schema_title: str,
+        stage: str,
+        public_input: dict[str, Any],
+        allow_initial_fallback: bool = False,
+    ) -> Any:
+        target = TypeAdapter(output_type)
+        envelope = await self._invoke(
+            output_type=_JsonDocument,
+            schema_title=f"{schema_title}Document",
+            prompt=_stage_prompt(
+                stage,
+                {
+                    **public_input,
+                    "target_schema": target.json_schema(),
+                },
+            ),
+            allow_initial_fallback=allow_initial_fallback,
+        )
+        try:
+            return target.validate_json(envelope.document)
+        except (ValidationError, TypeError, ValueError, json.JSONDecodeError) as error:
+            raise GeminiAnalysisError(
+                "gemini_validation_failed",
+                "Gemini 구조화 분석 결과 검증에 실패했습니다.",
+            ) from error
 
     async def _invoke(
         self,
@@ -266,11 +303,32 @@ def _public_manifests(manifests: Sequence[SourceManifest]) -> list[dict[str, Any
     ]
 
 
+def _primitive_catalog() -> dict[str, Any]:
+    return {
+        "names": [
+            "catalog_sources",
+            "profile_events",
+            "aggregate_events",
+            "segment_customers",
+            "detect_repetition",
+            "match_sequence",
+            "compare_segments",
+            "rank_customers",
+            "get_customer_journey",
+            "get_evidence",
+        ],
+        "input_schema": PRIMITIVE_INPUT_ADAPTER.json_schema(),
+    }
+
+
 def _stage_prompt(stage: str, payload: dict[str, Any]) -> str:
     return json.dumps(
         {
             "stage": stage,
-            "instruction": "Return only one value matching the supplied strict schema.",
+            "instruction": (
+                "Return one envelope whose document field is a JSON string matching "
+                "input.target_schema, with no additional prose."
+            ),
             "input": payload,
         },
         ensure_ascii=False,

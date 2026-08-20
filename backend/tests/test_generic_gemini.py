@@ -34,6 +34,7 @@ from customer_signal.domain.facts import (
     ProcessingStats,
     build_fact,
 )
+from customer_signal.domain.primitives import PRIMITIVE_INPUT_ADAPTER
 from customer_signal.domain.sources import (
     DimensionDescriptor,
     EventScope,
@@ -46,6 +47,7 @@ from customer_signal.domain.types import GenericPrimitiveName
 
 
 NOW = datetime(2026, 8, 20, 9, tzinfo=timezone.utc)
+FREE_QUESTION = "부정 피드백 고객은 이후 어떤 행동을 보이고 일반 고객과 무엇이 달라?"
 ALL_PRIMITIVES: frozenset[GenericPrimitiveName] = frozenset(
     {
         "catalog_sources",
@@ -62,9 +64,9 @@ ALL_PRIMITIVES: frozenset[GenericPrimitiveName] = frozenset(
 )
 
 
-def _request() -> RunRequest:
+def _request(question: str = FREE_QUESTION) -> RunRequest:
     return RunRequest(
-        question=NEGATIVE_TOPIC_QUESTION,
+        question=question,
         start_at=NOW - timedelta(days=30),
         end_at=NOW,
         enabled_sources=["voc"],
@@ -206,11 +208,14 @@ async def _never_returns():
     await asyncio.Future()
 
 
-async def _staged_values():
+async def _staged_values(*, question: str = FREE_QUESTION):
     fixture = GenericFixtureModel()
-    request = _request()
+    request = _request(question)
     manifests = [_manifest()]
-    goal = await fixture.create_goal(request, manifests)
+    goal = await fixture.create_goal(
+        request.model_copy(update={"question": NEGATIVE_TOPIC_QUESTION}),
+        manifests,
+    )
     assert goal.kind == "goal"
     plan = await fixture.create_plan(goal, manifests)
     scope = EventScope(
@@ -258,7 +263,7 @@ async def _staged_values():
 
 
 @pytest.mark.asyncio
-async def test_uses_provider_safe_scenario_schema_and_verified_stages() -> None:
+async def test_free_question_uses_five_flat_provider_documents() -> None:
     (
         request,
         manifests,
@@ -273,7 +278,13 @@ async def test_uses_provider_safe_scenario_schema_and_verified_stages() -> None:
     ) = await _staged_values()
     provider = _ScriptedProvider(
         {
-            "gemini-3.7-flash": [{"scenario": "negative"}],
+            "gemini-3.7-flash": [
+                {"document": goal.model_dump_json()},
+                {"document": plan.model_dump_json()},
+                {"document": note_draft.model_dump_json()},
+                {"document": selection.model_dump_json()},
+                {"document": report_draft.model_dump_json()},
+            ],
         }
     )
     model = GeminiAnalysisModel(
@@ -283,20 +294,37 @@ async def test_uses_provider_safe_scenario_schema_and_verified_stages() -> None:
     )
 
     assert await model.create_goal(request, manifests) == goal
-    assert await model.create_plan(goal, manifests) == plan
+    assert (
+        await model.create_plan(
+            goal,
+            manifests,
+            validation_feedback="첫 단계에서 Source 범위를 확인하세요.",
+        )
+        == plan
+    )
     assert await model.create_note(step_context) == note_draft
     assert await model.select_next(selection_context) == selection
     assert await model.create_report(report_context) == report_draft
 
     assert [call["schema_title"] for call in provider.structured_calls] == [
-        "AnalysisScenarioDecision"
+        "GoalDecisionDocument",
+        "AnalysisPlanDocument",
+        "AnalysisNoteDraftDocument",
+        "StepSelectionDocument",
+        "CustomerSignalReportDraftDocument",
     ]
     assert all(call["method"] == "json_schema" for call in provider.structured_calls)
-    provider_schema = json.dumps(provider.structured_calls[0]["schema"], sort_keys=True)
-    assert all(
-        unsupported not in provider_schema
-        for unsupported in ("$defs", "$ref", "oneOf", "discriminator")
-    )
+    for call in provider.structured_calls:
+        schema = call["schema"]
+        assert schema["type"] == "object"
+        assert schema["additionalProperties"] is False
+        assert set(schema["properties"]) == {"document"}
+        assert schema["required"] == ["document"]
+        serialized_schema = json.dumps(schema, sort_keys=True)
+        assert all(
+            unsupported not in serialized_schema
+            for unsupported in ("$defs", "$ref", "oneOf", "discriminator")
+        )
     assert provider.model_calls == [
         {
             "model": "gemini-3.7-flash",
@@ -306,11 +334,53 @@ async def test_uses_provider_safe_scenario_schema_and_verified_stages() -> None:
             "include_thoughts": False,
         }
     ]
+    prompts = [json.loads(call["prompt"]) for call in provider.structured_calls]
+    assert [prompt["stage"] for prompt in prompts] == [
+        "goal",
+        "plan",
+        "note",
+        "selection",
+        "report",
+    ]
+    goal_input = prompts[0]["input"]
+    plan_input = prompts[1]["input"]
+    assert goal_input["request"]["question"] == request.question
+    assert goal_input["sources"][0]["description"] == "Masked support signals"
+    assert plan_input["sources"] == goal_input["sources"]
+    assert plan_input["validation_feedback"] == "첫 단계에서 Source 범위를 확인하세요."
+    expected_primitive_names = [
+        "catalog_sources",
+        "profile_events",
+        "aggregate_events",
+        "segment_customers",
+        "detect_repetition",
+        "match_sequence",
+        "compare_segments",
+        "rank_customers",
+        "get_customer_journey",
+        "get_evidence",
+    ]
+    assert goal_input["primitive_catalog"]["names"] == expected_primitive_names
+    assert plan_input["primitive_catalog"]["names"] == expected_primitive_names
+    assert (
+        goal_input["primitive_catalog"]["input_schema"]
+        == PRIMITIVE_INPUT_ADAPTER.json_schema()
+    )
+    assert plan_input["constraints"] == {
+        "first_step_should_discover_sources": True,
+        "read_only": True,
+        "step_count": "3..6",
+    }
+
     public_prompts = "\n".join(call["prompt"] for call in provider.structured_calls)
+    assert request.question in public_prompts
+    assert NEGATIVE_TOPIC_QUESTION not in public_prompts
     assert "provider-secret-key" not in public_prompts
     assert "private-email-namespace" not in public_prompts
     assert '"email"' not in public_prompts
-    assert '"payload"' not in public_prompts
+    assert "private direct identity" not in public_prompts
+    assert "provider_response" not in public_prompts
+    assert "private provider transcript" not in public_prompts
     assert "chain_of_thought" not in public_prompts
     assert model.model_name == "gemini-3.7-flash"
 
@@ -321,7 +391,10 @@ async def test_typed_not_found_on_first_stage_switches_once_to_36() -> None:
     provider = _ScriptedProvider(
         {
             "gemini-3.7-flash": [_ModelNotFoundError("private primary response")],
-            "gemini-3.6-flash": [{"scenario": "negative"}],
+            "gemini-3.6-flash": [
+                {"document": goal.model_dump_json()},
+                {"document": plan.model_dump_json()},
+            ],
         }
     )
     model = GeminiAnalysisModel(api_key="key", model_factory=provider)
@@ -331,6 +404,11 @@ async def test_typed_not_found_on_first_stage_switches_once_to_36() -> None:
 
     assert [call["model"] for call in provider.model_calls] == [
         "gemini-3.7-flash",
+        "gemini-3.6-flash",
+    ]
+    assert [call["model"] for call in provider.structured_calls] == [
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
         "gemini-3.6-flash",
     ]
     assert model.model_name == "gemini-3.6-flash"
@@ -401,9 +479,9 @@ async def test_provider_failure_becomes_generic_safe_failure_without_fixture_fal
 
 
 @pytest.mark.asyncio
-async def test_malformed_structured_value_fails_closed() -> None:
+async def test_invalid_domain_document_fails_with_safe_validation_error() -> None:
     request, manifests, *_rest = await _staged_values()
-    provider = _ScriptedProvider({"gemini-3.7-flash": [{"scenario": "forged"}]})
+    provider = _ScriptedProvider({"gemini-3.7-flash": [{"document": "{}"}]})
     model = GeminiAnalysisModel(api_key="key", model_factory=provider)
 
     with pytest.raises(GeminiAnalysisError) as caught:
@@ -413,17 +491,15 @@ async def test_malformed_structured_value_fails_closed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_provider_scenario_maps_a_freeform_question_to_a_verified_goal() -> None:
-    request, manifests, *_rest = await _staged_values()
-    request = request.model_copy(
-        update={
-            "question": "같은 문제를 반복해서 찾은 뒤 고객센터까지 이동한 고객 흐름을 분석해 줘."
-        }
-    )
-    provider = _ScriptedProvider({"gemini-3.7-flash": [{"scenario": "repeat"}]})
+async def test_pii_request_is_rejected_before_provider_invocation() -> None:
+    provider = _ScriptedProvider({"gemini-3.7-flash": []})
     model = GeminiAnalysisModel(api_key="key", model_factory=provider)
 
-    goal = await model.create_goal(request, manifests)
+    decision = await model.create_goal(
+        _request("고객 이메일 원본을 모두 export해 줘"),
+        [_manifest()],
+    )
 
-    assert goal.kind == "goal"
-    assert goal.goal_id == "goal-repeat"
+    assert decision.kind == "unsupported"
+    assert decision.code == "pii_request"
+    assert provider.model_calls == []
