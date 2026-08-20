@@ -32,10 +32,13 @@ from customer_signal.domain.primitives import (
 )
 from customer_signal.domain.facts import (
     AggregateEventsPayload,
+    AnalysisFact,
+    AnalysisMetricDelta,
     AnalysisMetricFact,
     FactProvenance,
     FieldRef,
     ProcessingStats,
+    SegmentComparisonPayload,
     build_fact,
 )
 from customer_signal.domain.sources import (
@@ -305,6 +308,22 @@ def test_goal_fieldrefs_are_source_explicit_or_safe_on_every_selected_source() -
         )
 
 
+def test_goal_rejects_explicit_field_source_outside_scope_without_manifests() -> None:
+    request = RunRequest(
+        question="profile",
+        start_at=NOW,
+        end_at=NOW + timedelta(days=2),
+        enabled_sources=["voc", "billing"],
+    )
+    goal = _goal(
+        source_ids=["voc"],
+        group_by=[FieldRef(field="billing_tier", field_kind="dimension", source_id="billing")],
+    )
+
+    with pytest.raises(PlanValidationError, match="selected source"):
+        validate_goal_against_request(goal, request)
+
+
 def test_dynamic_payload_metric_must_be_declared_by_step_expected_output() -> None:
     step = AnalysisStep(
         step_id="step-aggregate",
@@ -360,6 +379,74 @@ def test_dynamic_payload_metric_must_be_declared_by_step_expected_output() -> No
         created_at=NOW,
     )
     with pytest.raises(PlanValidationError, match="canonical metric"):
+        validate_fact_against_step(step, fact)
+
+
+def test_comparison_fact_metric_must_match_compare_step_parameter() -> None:
+    step = AnalysisStep(
+        step_id="step-compare",
+        primitive="compare_segments",
+        parameters=CompareSegmentsInput(
+            primitive="compare_segments", metric_key="segment_customer_count"
+        ),
+        source_ids=["voc"],
+        input_step_ids=["step-baseline", "step-comparison"],
+        expected_output=ExpectedOutputSpec(
+            payload_kind="compare_segments", required_metric_keys=["other_metric_delta"]
+        ),
+        stop_condition=ContinueAfterStep(),
+        limits=LIMITS,
+    )
+    scope = EventScope(
+        start_at=NOW,
+        end_at=NOW + timedelta(days=1),
+        source_ids=["voc"],
+        max_events=100,
+    )
+    payload = SegmentComparisonPayload(
+        kind="compare_segments",
+        input_fact_ids=["fact-a", "fact-b"],
+        processing=ProcessingStats(scanned_events=2, matched_events=2, returned_rows=1),
+        provenance=FactProvenance(
+            scope=scope,
+            source_ids=["voc"],
+            adapter_versions={"voc": "1"},
+            manifest_versions={"voc": "1"},
+            dataset_version="test",
+        ),
+        metrics=[
+            AnalysisMetricFact(
+                metric_key="other_metric_delta",
+                label="Other metric delta",
+                value=1,
+                unit="events",
+            )
+        ],
+        requested_metric_key="other_metric_delta",
+        baseline_fact_id="fact-a",
+        comparison_fact_id="fact-b",
+        deltas=[
+            AnalysisMetricDelta(
+                metric_key="other_metric",
+                baseline=1,
+                comparison=2,
+                delta=1,
+                unit="events",
+            )
+        ],
+    )
+    fact = AnalysisFact(
+        fact_id="fact-comparison",
+        step_id="step-compare",
+        primitive="compare_segments",
+        result_id="result-comparison",
+        source_ids=["voc"],
+        metrics=payload.metrics,
+        payload=payload,
+        created_at=NOW,
+    )
+
+    with pytest.raises(PlanValidationError, match="step parameter"):
         validate_fact_against_step(step, fact)
 
 

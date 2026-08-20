@@ -13,9 +13,11 @@ from customer_signal.agent.claim_validator import (
 )
 from customer_signal.domain.analysis import AnalysisNoteDraft, ClaimDraft, FactRef
 from customer_signal.domain.facts import (
+    AnalysisMetricDelta,
     AnalysisMetricFact,
     FactProvenance,
     ProcessingStats,
+    SegmentComparisonPayload,
     SegmentCustomersPayload,
     build_fact,
 )
@@ -213,6 +215,93 @@ def test_claim_rejects_cross_fact_and_sensitive_operations() -> None:
         unsafe = _metric_claim(subject=subject)
         with pytest.raises(ClaimValidationError, match="sensitive"):
             validate_claim(unsafe, facts=[_fact()], plan_revision=2)
+
+
+def test_comparison_claim_revalidates_ordered_input_fact_metrics() -> None:
+    baseline = _fact(value=6)
+    comparison = _fact(value=8).model_copy(
+        update={"fact_id": "fact-comparison-input", "result_id": "result-comparison-input"}
+    )
+    payload = SegmentComparisonPayload(
+        kind="compare_segments",
+        input_fact_ids=[baseline.fact_id, comparison.fact_id],
+        processing=ProcessingStats(scanned_events=2, matched_events=2, returned_rows=1),
+        provenance=baseline.payload.provenance,
+        metrics=[
+            AnalysisMetricFact(
+                metric_key="segment_customer_count_delta",
+                label="Segment customer delta",
+                value=2,
+                unit="customers",
+            )
+        ],
+        requested_metric_key="segment_customer_count_delta",
+        baseline_fact_id=baseline.fact_id,
+        comparison_fact_id=comparison.fact_id,
+        deltas=[
+            AnalysisMetricDelta(
+                metric_key="segment_customer_count",
+                baseline=6,
+                comparison=8,
+                delta=2,
+                unit="customers",
+            )
+        ],
+    )
+    comparison_fact = build_fact(
+        fact_id="fact-comparison",
+        step_id="step-comparison",
+        primitive="compare_segments",
+        result_id="result-comparison",
+        payload=payload,
+        scope=SCOPE,
+        created_at=NOW,
+        input_facts=[baseline, comparison],
+    )
+    claim = ClaimDraft(
+        claim_type="metric",
+        subject="segment_customer_count_delta",
+        operator="eq",
+        target=2,
+        fact_refs=[
+            FactRef(
+                fact_id=comparison_fact.fact_id,
+                metric_key="segment_customer_count_delta",
+                label="Segment customer delta",
+                unit="customers",
+                plan_revision=2,
+            )
+        ],
+    )
+
+    verified = validate_claim(
+        claim,
+        facts=[comparison_fact, baseline, comparison],
+        plan_revision=2,
+    )
+    assert verified.target == 2
+
+    with pytest.raises(ClaimValidationError, match="both ordered input Facts"):
+        validate_claim(claim, facts=[comparison_fact], plan_revision=2)
+
+    forged_comparison = comparison.model_copy(
+        update={
+            "metrics": [
+                AnalysisMetricFact(
+                    metric_key="segment_customer_count",
+                    label="Segment customers",
+                    value=9,
+                    unit="customers",
+                )
+            ]
+        }
+    )
+    with pytest.raises(ClaimValidationError, match="input Fact binding"):
+        validate_claim(
+            claim,
+            facts=[comparison_fact, baseline, forged_comparison],
+            plan_revision=2,
+        )
 
 
 def test_render_note_publishes_only_verified_claims_and_server_fact_metadata() -> None:

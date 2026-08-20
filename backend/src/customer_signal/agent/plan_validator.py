@@ -17,6 +17,7 @@ from customer_signal.domain.facts import (
 )
 from customer_signal.domain.primitives import (
     AggregateEventsInput,
+    CompareSegmentsInput,
     DetectRepetitionInput,
     ProfileEventsInput,
     SegmentCustomersInput,
@@ -74,6 +75,11 @@ def validate_goal_against_request(
         raise PlanValidationError("goal source selection must be nonempty")
     if not set(goal.source_ids) <= set(request.enabled_sources):
         raise PlanValidationError("goal source selection cannot add an unenabled source")
+    for field in _goal_field_refs(goal):
+        if field.source_id is not None and field.source_id not in goal.source_ids:
+            raise PlanValidationError("FieldRef source_id must be a selected source")
+        if any(token in field.field.split("_") for token in _SENSITIVE_TOKENS):
+            raise PlanValidationError("PII or raw FieldRef use is not allowed")
     if manifests is not None:
         manifest_by_source = {manifest.source_id: manifest for manifest in manifests}
         if len(manifest_by_source) != len(manifests):
@@ -160,6 +166,17 @@ def validate_fact_against_step(step: AnalysisStep, fact: AnalysisFact) -> None:
         raise PlanValidationError(
             "payload requested metric must be declared by step expected_output"
         )
+    if isinstance(fact.payload, SegmentComparisonPayload):
+        if not isinstance(step.parameters, CompareSegmentsInput):
+            raise PlanValidationError("comparison Fact requires compare step parameters")
+        delta = fact.payload.deltas[0]
+        if (
+            delta.metric_key != step.parameters.metric_key
+            or fact.payload.requested_metric_key != f"{step.parameters.metric_key}_delta"
+        ):
+            raise PlanValidationError(
+                "comparison Fact metric must exactly match the compare step parameter"
+            )
 
 
 def _revalidate_plan(plan: AnalysisPlan) -> AnalysisPlan:
@@ -170,6 +187,12 @@ def _revalidate_plan(plan: AnalysisPlan) -> AnalysisPlan:
         if "dependency" in message or "prior steps" in message:
             raise PlanValidationError(f"invalid plan dependency: {message}") from error
         raise PlanValidationError(f"invalid bounded analysis plan: {message}") from error
+
+
+def _goal_field_refs(goal: AnalysisGoal) -> Iterable[FieldRef]:
+    yield from goal.group_by
+    yield from (measure.field for measure in goal.measures if measure.field is not None)
+    yield from (predicate.field for predicate in goal.predicates)
 
 
 def _validate_topology_and_arity(steps: Sequence[AnalysisStep]) -> None:
