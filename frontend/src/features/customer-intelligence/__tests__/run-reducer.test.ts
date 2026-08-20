@@ -1,7 +1,27 @@
 import { describe, expect, it } from "vitest";
 
-import type { InsightReport, RunStreamEvent } from "../contracts";
+import type {
+  AnalysisFact,
+  AnalysisGoal,
+  AnalysisNote,
+  AnalysisPlan,
+  AnyRunStreamEvent,
+  CustomerSignalReport,
+  InsightReport,
+  RunArtifact,
+  RunRequest,
+  RunStreamEvent,
+} from "../contracts";
 import { initialRunState, runReducer } from "../run-reducer";
+import {
+  genericArtifact,
+  genericFact,
+  genericGoal,
+  genericNote,
+  genericPlan,
+  genericReport,
+  genericRequest,
+} from "./generic-fixtures";
 
 const completedReport: InsightReport = {
   analysis_type: "journey",
@@ -261,5 +281,232 @@ describe("runReducer", () => {
 
     expect(selected.selectedCustomerId).toBe("CUST-007");
     expect(unknown).toBe(selected);
+  });
+
+  it("retains the full generic goal, plan, Fact, Note and report lifecycle", () => {
+    let state = runReducer(initialRunState, {
+      kind: "start",
+      runId: "run-generic",
+      request: genericRequest as RunRequest,
+    });
+    const events: AnyRunStreamEvent[] = [
+      {
+        id: 1,
+        type: "goal_created",
+        data: { goal: genericGoal as AnalysisGoal },
+      },
+      {
+        id: 2,
+        type: "plan_created",
+        data: { plan: genericPlan as AnalysisPlan },
+      },
+      {
+        id: 3,
+        type: "step_started",
+        data: {
+          step_id: "step-aggregate",
+          primitive: "aggregate_events",
+          started_at: "2026-08-20T01:00:00Z",
+        },
+      },
+      {
+        id: 4,
+        type: "fact_created",
+        data: {
+          step_id: "step-aggregate",
+          fact: genericFact as AnalysisFact,
+        },
+      },
+      {
+        id: 5,
+        type: "analysis_note_created",
+        data: { note: genericNote as AnalysisNote },
+      },
+      {
+        id: 6,
+        type: "step_completed",
+        data: {
+          step_id: "step-aggregate",
+          status: "completed",
+          result_ids: [genericFact.result_id],
+          duration_ms: 1000,
+        },
+      },
+      {
+        id: 7,
+        type: "report_validating",
+        data: { fact_ids: [genericFact.fact_id], result_ids: [] },
+      },
+      {
+        id: 8,
+        type: "result",
+        data: { report: genericReport as CustomerSignalReport },
+      },
+      { id: 9, type: "done", data: { status: "completed" } },
+    ];
+
+    for (const streamEvent of events) {
+      state = runReducer(state, {
+        kind: "event",
+        runId: "run-generic",
+        event: streamEvent,
+      });
+    }
+
+    expect(state.phase).toBe("completed");
+    expect(state.status).toBe("completed");
+    expect(state.request).toEqual(genericRequest);
+    expect(state.goal?.goal_id).toBe(genericGoal.goal_id);
+    expect(state.plan?.plan_id).toBe(genericPlan.plan_id);
+    expect(state.stepStates["step-aggregate"]).toMatchObject({
+      status: "completed",
+      primitive: "aggregate_events",
+      resultIds: [genericFact.result_id],
+    });
+    expect(state.facts).toEqual([genericFact]);
+    expect(state.notes).toEqual([genericNote]);
+    expect(state.runReport).toEqual(genericReport);
+    expect(state.report).toBeNull();
+    expect(state.limitations).toEqual(genericNote.limitations);
+    expect(state.lastEventId).toBe(9);
+  });
+
+  it("pauses for clarification and resumes the same run with the public answer", () => {
+    let state = runReducer(initialRunState, {
+      kind: "start",
+      runId: "run-clarification",
+      request: genericRequest as RunRequest,
+    });
+    state = runReducer(state, {
+      kind: "event",
+      runId: "run-clarification",
+      event: {
+        id: 1,
+        type: "clarification_required",
+        data: {
+          kind: "clarification",
+          clarification_id: "clarification-1",
+          question: "Topic별로 비교할까요?",
+        },
+      },
+    });
+
+    expect(state.phase).toBe("awaiting_clarification");
+    expect(state.status).toBe("awaiting_clarification");
+
+    state = runReducer(state, {
+      kind: "clarification_submitted",
+      runId: "run-clarification",
+      clarificationId: "clarification-1",
+      answer: "Topic별로 비교해 줘",
+    });
+
+    expect(state.runId).toBe("run-clarification");
+    expect(state.phase).toBe("running");
+    expect(state.status).toBe("running");
+    expect(state.clarification).toMatchObject({
+      clarification_id: "clarification-1",
+      answer: "Topic별로 비교해 줘",
+    });
+  });
+
+  it("allows an explicit degraded terminal state without a report", () => {
+    const started = runReducer(initialRunState, {
+      kind: "start",
+      runId: "run-degraded",
+      request: genericRequest as RunRequest,
+    });
+    const state = runReducer(started, {
+      kind: "event",
+      runId: "run-degraded",
+      event: {
+        id: 1,
+        type: "done",
+        data: {
+          status: "degraded",
+          limitations: ["조건에 맞는 공개 데이터가 없습니다."],
+        },
+      },
+    });
+
+    expect(state.phase).toBe("degraded");
+    expect(state.status).toBe("degraded");
+    expect(state.error).toBeNull();
+    expect(state.runReport).toBeNull();
+    expect(state.limitations).toEqual([
+      "조건에 맞는 공개 데이터가 없습니다.",
+    ]);
+  });
+
+  it("retains partial public work and safe suggestions when a generic run fails", () => {
+    let state = runReducer(initialRunState, {
+      kind: "start",
+      runId: "run-failed",
+      request: genericRequest as RunRequest,
+    });
+    for (const streamEvent of [
+      {
+        id: 1,
+        type: "goal_created" as const,
+        data: { goal: genericGoal as AnalysisGoal },
+      },
+      {
+        id: 2,
+        type: "fact_created" as const,
+        data: {
+          step_id: "step-aggregate",
+          fact: genericFact as AnalysisFact,
+        },
+      },
+      {
+        id: 3,
+        type: "analysis_note_created" as const,
+        data: { note: genericNote as AnalysisNote },
+      },
+      {
+        id: 4,
+        type: "error" as const,
+        data: {
+          code: "unsupported_question",
+          message: "원본 전체 추출은 지원하지 않습니다.",
+          step_id: "step-aggregate",
+          suggested_questions: ["부정 피드백 Topic을 비교해 줘"],
+        },
+      },
+      { id: 5, type: "done" as const, data: { status: "failed" as const } },
+    ] satisfies AnyRunStreamEvent[]) {
+      state = runReducer(state, {
+        kind: "event",
+        runId: "run-failed",
+        event: streamEvent,
+      });
+    }
+
+    expect(state.phase).toBe("failed");
+    expect(state.facts).toEqual([genericFact]);
+    expect(state.notes).toEqual([genericNote]);
+    expect(state.limitations).toEqual(genericNote.limitations);
+    expect(state.suggestedQuestions).toEqual([
+      "부정 피드백 Topic을 비교해 줘",
+    ]);
+    expect(state.error).toMatchObject({
+      code: "unsupported_question",
+      step_id: "step-aggregate",
+    });
+  });
+
+  it("hydrates one typed artifact action for completed history", () => {
+    const state = runReducer(initialRunState, {
+      kind: "hydrate_artifact",
+      artifact: genericArtifact as RunArtifact,
+    });
+
+    expect(state.runId).toBe(genericArtifact.run_id);
+    expect(state.phase).toBe("completed");
+    expect(state.goal).toEqual(genericGoal);
+    expect(state.facts).toEqual([genericFact]);
+    expect(state.notes).toEqual([genericNote]);
+    expect(state.runReport).toEqual(genericReport);
+    expect(state.lastEventId).toBe(9);
   });
 });

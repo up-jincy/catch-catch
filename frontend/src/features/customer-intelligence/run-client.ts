@@ -1,6 +1,10 @@
 import type {
   AgentMode,
   AnalysisScope,
+  AnyRunStreamEvent,
+  ArtifactDocument,
+  ArtifactListResponse,
+  ClarificationAnswer,
   CustomerJourneyResult,
   EvidenceRecord,
   EvidenceResult,
@@ -8,9 +12,12 @@ import type {
   InsightReport,
   JourneyEvent,
   Metric,
+  PublicSourceList,
   RankedCustomer,
   Recommendation,
   RunAccepted,
+  RunArtifact,
+  RunDownloadFormat,
   RunError,
   RunEventType,
   RunRequest,
@@ -23,6 +30,21 @@ import type {
   ToolName,
   ToolStats,
 } from "./contracts";
+import {
+  decodeAnalysisFact,
+  decodeAnalysisGoal,
+  decodeAnalysisNote,
+  decodeAnalysisPlan,
+  decodeArtifactDocument,
+  decodeArtifactListResponse,
+  decodeGenericPrimitive,
+  decodePublicSourceList,
+  decodeRunArtifact,
+  decodeRunError as decodePublicRunError,
+  decodeRunReport,
+  decodeRunStatus,
+  decodeSourceId,
+} from "./run-contract-decoders";
 import {
   SseParseError,
   createSseParser,
@@ -81,15 +103,15 @@ class ContractValidationError extends Error {
   }
 }
 
-const SOURCE_IDS = [
-  "search_history",
-  "search_feedback",
-  "digital_behavior",
-  "subscription",
-  "voc",
-] as const;
 const AGENT_MODES = ["fixture", "gemini"] as const;
-const RUN_STATUSES = ["queued", "running", "completed", "failed"] as const;
+const RUN_STATUSES = [
+  "queued",
+  "running",
+  "awaiting_clarification",
+  "completed",
+  "degraded",
+  "failed",
+] as const;
 const EVENT_TYPES = [
   "search",
   "feedback",
@@ -116,13 +138,28 @@ const ACTION_IDS = [
 ] as const;
 const TOOL_NAMES = [
   "catalog_sources",
+  "profile_events",
   "aggregate_events",
+  "segment_customers",
+  "detect_repetition",
+  "match_sequence",
+  "compare_segments",
   "match_journey_pattern",
   "rank_customers",
   "get_customer_journey",
   "get_evidence",
 ] as const satisfies readonly ToolName[];
 const RUN_EVENT_TYPES = [
+  "run_started",
+  "goal_created",
+  "clarification_required",
+  "plan_created",
+  "plan_revised",
+  "step_started",
+  "fact_created",
+  "analysis_note_created",
+  "step_completed",
+  "report_validating",
   "plan",
   "tool_started",
   "tool_completed",
@@ -203,7 +240,7 @@ function expectTimestamp(value: unknown, path: string): string {
 }
 
 function decodeSource(value: unknown, path: string): SourceId {
-  return expectOneOf(value, SOURCE_IDS, path);
+  return decodeSourceId(value, path);
 }
 
 function decodeAgentMode(value: unknown, path: string): AgentMode {
@@ -211,11 +248,7 @@ function decodeAgentMode(value: unknown, path: string): AgentMode {
 }
 
 function decodeRunError(value: unknown, path: string): RunError {
-  const record = expectRecord(value, path);
-  return {
-    code: expectId(record.code, `${path}.code`),
-    message: expectString(record.message, `${path}.message`),
-  };
+  return decodePublicRunError(value, path);
 }
 
 function decodeRunRequest(value: unknown, path: string): RunRequest {
@@ -225,9 +258,6 @@ function decodeRunRequest(value: unknown, path: string): RunRequest {
     `${path}.enabled_sources`,
     decodeSource,
   );
-  if (enabledSources.length < 1 || enabledSources.length > 3) {
-    return invalid(`${path}.enabled_sources`);
-  }
   return {
     question: expectId(record.question, `${path}.question`),
     start_at: expectTimestamp(record.start_at, `${path}.start_at`),
@@ -453,14 +483,25 @@ function decodeRunSnapshot(value: unknown): RunSnapshot {
   const error = record.error;
   return {
     run_id: expectId(record.run_id, "snapshot.run_id"),
-    status: expectOneOf(record.status, RUN_STATUSES, "snapshot.status"),
+    status: decodeRunStatus(record.status, "snapshot.status"),
     request: decodeRunRequest(record.request, "snapshot.request"),
     created_at: expectTimestamp(record.created_at, "snapshot.created_at"),
     updated_at: expectTimestamp(record.updated_at, "snapshot.updated_at"),
     agent_mode:
       agentMode === null ? null : decodeAgentMode(agentMode, "snapshot.agent_mode"),
-    report: report === null ? null : decodeInsightReport(report, "snapshot.report"),
+    report:
+      report === null
+        ? null
+        : decodeRunReport(report, "snapshot.report", decodeInsightReport),
     error: error === null ? null : decodeRunError(error, "snapshot.error"),
+    ...(record.last_event_id === undefined
+      ? {}
+      : {
+          last_event_id: expectNonnegativeInteger(
+            record.last_event_id,
+            "snapshot.last_event_id",
+          ),
+        }),
   };
 }
 
@@ -495,7 +536,7 @@ function abortReason(signal: AbortSignal | undefined, fallback: unknown): unknow
 function decodeEvent(
   parsed: ParsedSseEvent<unknown>,
   expectedRunId: string,
-): RunStreamEvent {
+): AnyRunStreamEvent {
   try {
     const type = expectOneOf(parsed.type, RUN_EVENT_TYPES, "event.type");
     const envelope = expectRecord(parsed.data, "event.data");
@@ -508,6 +549,114 @@ function decodeEvent(
     const payload = expectRecord(envelope.payload, "event.data.payload");
 
     switch (type) {
+      case "run_started":
+        return {
+          id: parsed.id,
+          type,
+          data: { status: decodeRunStatus(payload.status, "event.payload.status") },
+        };
+      case "goal_created":
+        return {
+          id: parsed.id,
+          type,
+          data: {
+            goal: decodeAnalysisGoal(payload.goal, "event.payload.goal"),
+          },
+        };
+      case "clarification_required":
+        return {
+          id: parsed.id,
+          type,
+          data: {
+            kind: "clarification",
+            clarification_id: expectId(
+              payload.clarification_id,
+              "event.payload.clarification_id",
+            ),
+            question: expectId(payload.question, "event.payload.question"),
+          },
+        };
+      case "plan_created":
+      case "plan_revised":
+        return {
+          id: parsed.id,
+          type,
+          data: {
+            plan: decodeAnalysisPlan(payload.plan, "event.payload.plan"),
+          },
+        };
+      case "step_started": {
+        const data: Extract<AnyRunStreamEvent, { type: "step_started" }>["data"] = {
+          step_id: expectId(payload.step_id, "event.payload.step_id"),
+          primitive: decodeGenericPrimitive(
+            payload.primitive,
+            "event.payload.primitive",
+          ),
+        };
+        if (payload.started_at !== undefined) {
+          data.started_at = expectTimestamp(
+            payload.started_at,
+            "event.payload.started_at",
+          );
+        }
+        if (payload.objective !== undefined) {
+          data.objective = expectString(payload.objective, "event.payload.objective");
+        }
+        return { id: parsed.id, type, data };
+      }
+      case "fact_created":
+        return {
+          id: parsed.id,
+          type,
+          data: {
+            step_id: expectId(payload.step_id, "event.payload.step_id"),
+            fact: decodeAnalysisFact(payload.fact, "event.payload.fact"),
+          },
+        };
+      case "analysis_note_created":
+        return {
+          id: parsed.id,
+          type,
+          data: {
+            note: decodeAnalysisNote(payload.note, "event.payload.note"),
+          },
+        };
+      case "step_completed":
+        return {
+          id: parsed.id,
+          type,
+          data: {
+            step_id: expectId(payload.step_id, "event.payload.step_id"),
+            status: expectOneOf(
+              payload.status,
+              ["completed", "degraded", "failed"] as const,
+              "event.payload.status",
+            ),
+            result_ids: expectIdArray(
+              payload.result_ids,
+              "event.payload.result_ids",
+            ),
+            duration_ms: expectFiniteNumber(
+              payload.duration_ms,
+              "event.payload.duration_ms",
+            ),
+          },
+        };
+      case "report_validating":
+        return {
+          id: parsed.id,
+          type,
+          data: {
+            fact_ids:
+              payload.fact_ids === undefined
+                ? []
+                : expectIdArray(payload.fact_ids, "event.payload.fact_ids"),
+            result_ids:
+              payload.result_ids === undefined
+                ? []
+                : expectIdArray(payload.result_ids, "event.payload.result_ids"),
+          },
+        };
       case "plan":
         return {
           id: parsed.id,
@@ -551,8 +700,19 @@ function decodeEvent(
           id: parsed.id,
           type,
           data: {
-            agent_mode: decodeAgentMode(payload.agent_mode, "event.payload.agent_mode"),
-            report: decodeInsightReport(payload.report, "event.payload.report"),
+            ...(payload.agent_mode === undefined
+              ? {}
+              : {
+                  agent_mode: decodeAgentMode(
+                    payload.agent_mode,
+                    "event.payload.agent_mode",
+                  ),
+                }),
+            report: decodeRunReport(
+              payload.report,
+              "event.payload.report",
+              decodeInsightReport,
+            ),
           },
         };
       case "error":
@@ -580,9 +740,17 @@ function decodeEvent(
           data: {
             status: expectOneOf(
               payload.status,
-              ["completed", "failed"] as const,
+              ["completed", "degraded", "failed"] as const,
               "event.payload.status",
             ),
+            ...(payload.limitations === undefined
+              ? {}
+              : {
+                  limitations: expectStringArray(
+                    payload.limitations,
+                    "event.payload.limitations",
+                  ),
+                }),
           },
         };
     }
@@ -641,6 +809,23 @@ export class RunClient {
     );
   }
 
+  async submitClarification(
+    runId: string,
+    answer: string,
+    signal?: AbortSignal,
+  ): Promise<RunAccepted> {
+    return this.requestJson(
+      `/api/runs/${encodeURIComponent(runId)}/clarification`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answer } satisfies ClarificationAnswer),
+      },
+      signal,
+      decodeRunAccepted,
+    );
+  }
+
   async getRun(runId: string, signal?: AbortSignal): Promise<RunSnapshot> {
     return this.requestJson(
       `/api/runs/${encodeURIComponent(runId)}`,
@@ -648,6 +833,52 @@ export class RunClient {
       signal,
       decodeRunSnapshot,
     );
+  }
+
+  async listSources(signal?: AbortSignal): Promise<PublicSourceList> {
+    return this.requestJson("/api/sources", {}, signal, decodePublicSourceList);
+  }
+
+  async listRunArtifacts(signal?: AbortSignal): Promise<ArtifactListResponse> {
+    return this.requestJson(
+      "/api/run-artifacts",
+      {},
+      signal,
+      decodeArtifactListResponse,
+    );
+  }
+
+  async getRunArtifact(runId: string, signal?: AbortSignal): Promise<RunArtifact> {
+    return this.requestJson(
+      `/api/run-artifacts/${encodeURIComponent(runId)}`,
+      {},
+      signal,
+      (value) => decodeRunArtifact(value, decodeInsightReport),
+    );
+  }
+
+  async getRunDocument(
+    runId: string,
+    signal?: AbortSignal,
+  ): Promise<ArtifactDocument> {
+    return this.requestJson(
+      `/api/run-artifacts/${encodeURIComponent(runId)}/document`,
+      {},
+      signal,
+      (value) => decodeArtifactDocument(value, decodeInsightReport),
+    );
+  }
+
+  getRunDownloadUrl(runId: string, format: RunDownloadFormat): string {
+    return `${this.apiBaseUrl}/api/run-artifacts/${encodeURIComponent(runId)}/download.${format}`;
+  }
+
+  jsonDownloadUrl(runId: string): string {
+    return this.getRunDownloadUrl(runId, "json");
+  }
+
+  markdownDownloadUrl(runId: string): string {
+    return this.getRunDownloadUrl(runId, "md");
   }
 
   async getJourney(
@@ -679,7 +910,7 @@ export class RunClient {
   async *streamRunEvents(
     runId: string,
     options: StreamRunOptions = {},
-  ): AsyncGenerator<RunStreamEvent> {
+  ): AsyncGenerator<AnyRunStreamEvent> {
     let cursor = options.lastEventId ?? 0;
     if (!Number.isInteger(cursor) || cursor < 0) {
       throw new RangeError("lastEventId must be a non-negative integer");

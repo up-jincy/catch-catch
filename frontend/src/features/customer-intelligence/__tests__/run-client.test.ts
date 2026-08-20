@@ -2,6 +2,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RunRequest } from "../contracts";
 import { RunClient, RunClientError } from "../run-client";
+import {
+  dynamicSourceId,
+  genericArtifact,
+  genericDocument,
+  genericFact,
+  genericGoal,
+  genericNote,
+  genericPlan,
+  genericReport,
+} from "./generic-fixtures";
 
 const request: RunRequest = {
   question: "AI 검색 실패 후 문의한 고객이 몇 명이야?",
@@ -283,6 +293,7 @@ describe("RunClient", () => {
         },
       },
     ],
+    ["result", { report: { ...validReport, report_kind: "unknown" } }],
     ["error", { code: "run_failed" }],
     ["fallback", { reason: 42 }],
     ["done", { status: "bogus" }],
@@ -451,5 +462,205 @@ describe("RunClient", () => {
 
     await expect(consume()).rejects.toBeInstanceOf(RunClientError);
     await expect(consume()).rejects.toMatchObject({ code: "stream_ended" });
+  });
+
+  it("decodes a complete generic analysis stream with a dynamic source", async () => {
+    const fetchImpl: typeof fetch = async () =>
+      responseStream([
+        frame("run-1", 1, "goal_created", { goal: genericGoal }),
+        frame("run-1", 2, "plan_created", { plan: genericPlan }),
+        frame("run-1", 3, "step_started", {
+          step_id: "step-aggregate",
+          primitive: "aggregate_events",
+          started_at: "2026-08-20T01:00:00Z",
+        }),
+        frame("run-1", 4, "fact_created", {
+          step_id: "step-aggregate",
+          fact: genericFact,
+        }),
+        frame("run-1", 5, "analysis_note_created", { note: genericNote }),
+        frame("run-1", 6, "step_completed", {
+          step_id: "step-aggregate",
+          status: "completed",
+          result_ids: [genericFact.result_id],
+          duration_ms: 1000,
+        }),
+        frame("run-1", 7, "report_validating", {
+          fact_ids: [genericFact.fact_id],
+        }),
+        frame("run-1", 8, "result", { report: genericReport }),
+        frame("run-1", 9, "done", { status: "completed" }),
+      ]);
+    const client = new RunClient({ apiBaseUrl: "http://api.test", fetchImpl });
+
+    const events = await consume(client);
+
+    expect(events.map((event) => event.type)).toEqual([
+      "goal_created",
+      "plan_created",
+      "step_started",
+      "fact_created",
+      "analysis_note_created",
+      "step_completed",
+      "report_validating",
+      "result",
+      "done",
+    ]);
+    expect(events[0]).toMatchObject({
+      type: "goal_created",
+      data: { goal: { source_ids: [dynamicSourceId] } },
+    });
+    expect(events[7]).toMatchObject({
+      type: "result",
+      data: { report: { report_kind: "customer_signal" } },
+    });
+  });
+
+  it("submits a clarification answer to the existing encoded run", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      calls.push({ url: String(input), init });
+      return Response.json(
+        {
+          run_id: "run/clarification",
+          status_url: "/api/runs/run%2Fclarification",
+          events_url: "/api/runs/run%2Fclarification/events",
+        },
+        { status: 202 },
+      );
+    };
+    const client = new RunClient({ apiBaseUrl: "http://api.test", fetchImpl });
+
+    const accepted = await client.submitClarification(
+      "run/clarification",
+      "Topic별로 비교해 줘",
+    );
+
+    expect(accepted.run_id).toBe("run/clarification");
+    expect(calls).toEqual([
+      {
+        url: "http://api.test/api/runs/run%2Fclarification/clarification",
+        init: expect.objectContaining({
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ answer: "Topic별로 비교해 줘" }),
+        }),
+      },
+    ]);
+  });
+
+  it("decodes artifact list, detail, document and builds download URLs", async () => {
+    const urls: string[] = [];
+    const fetchImpl: typeof fetch = async (input) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.endsWith("/api/run-artifacts")) {
+        return Response.json({
+          artifacts: [
+            {
+              run_id: genericArtifact.run_id,
+              status: "completed",
+              question: genericArtifact.request.question,
+              headline: genericReport.headline,
+              created_at: genericArtifact.created_at,
+              updated_at: genericArtifact.updated_at,
+              completed_at: genericArtifact.completed_at,
+              error_code: null,
+            },
+          ],
+        });
+      }
+      if (url.endsWith("/document")) {
+        return Response.json(genericDocument);
+      }
+      return Response.json(genericArtifact);
+    };
+    const client = new RunClient({ apiBaseUrl: "http://api.test", fetchImpl });
+
+    const history = await client.listRunArtifacts();
+    const artifact = await client.getRunArtifact(genericArtifact.run_id);
+    const document = await client.getRunDocument(genericArtifact.run_id);
+
+    expect(history.artifacts[0]).toMatchObject({
+      run_id: genericArtifact.run_id,
+      status: "completed",
+    });
+    expect(artifact).toMatchObject({
+      schema_version: 1,
+      last_event_id: 9,
+      report: { report_kind: "customer_signal" },
+      facts: [
+        {
+          payload: { provenance: { scope: { max_events: 1000 } } },
+        },
+      ],
+    });
+    expect(document).toMatchObject({
+      document_kind: "run_artifact",
+      provenance: { last_event_id: 9 },
+    });
+    expect(urls).toEqual([
+      "http://api.test/api/run-artifacts",
+      `http://api.test/api/run-artifacts/${genericArtifact.run_id}`,
+      `http://api.test/api/run-artifacts/${genericArtifact.run_id}/document`,
+    ]);
+    expect(client.getRunDownloadUrl("run/one", "json")).toBe(
+      "http://api.test/api/run-artifacts/run%2Fone/download.json",
+    );
+    expect(client.getRunDownloadUrl("run/one", "md")).toBe(
+      "http://api.test/api/run-artifacts/run%2Fone/download.md",
+    );
+    expect(client.jsonDownloadUrl("run/one")).toBe(
+      "http://api.test/api/run-artifacts/run%2Fone/download.json",
+    );
+    expect(client.markdownDownloadUrl("run/one")).toBe(
+      "http://api.test/api/run-artifacts/run%2Fone/download.md",
+    );
+  });
+
+  it("decodes a dynamic public source catalog", async () => {
+    const fetchImpl: typeof fetch = async () =>
+      Response.json({
+        items: [
+          {
+            source_id: "support_chat_v2",
+            label: "상담 채팅",
+            description: "상담 채팅 이벤트",
+            data_interval: {
+              start_at: "2026-07-20T00:00:00Z",
+              end_at: "2026-08-20T00:00:00Z",
+            },
+            refresh_cadence: "daily",
+            supported_event_types: ["chat"],
+            supported_topics: ["billing"],
+            supported_outcomes: ["resolved"],
+            dimensions: {
+              topic: {
+                semantic_type: "category",
+                description: "상담 주제",
+                allowed_values: ["billing"],
+              },
+            },
+            measures: {
+              duration_seconds: {
+                semantic_type: "number",
+                description: "상담 시간",
+                unit: "초",
+              },
+            },
+            capabilities: ["catalog_sources", "aggregate_events"],
+            adapter_version: "adapter-v2",
+            manifest_version: "manifest-v2",
+          },
+        ],
+      });
+    const client = new RunClient({ apiBaseUrl: "http://api.test", fetchImpl });
+
+    const catalog = await client.listSources();
+
+    expect(catalog.items[0]).toMatchObject({
+      source_id: "support_chat_v2",
+      capabilities: ["catalog_sources", "aggregate_events"],
+    });
   });
 });
