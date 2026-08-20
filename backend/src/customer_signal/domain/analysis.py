@@ -12,6 +12,7 @@ from pydantic import (
     StrictBool,
     StrictInt,
     StrictStr,
+    StringConstraints,
     field_validator,
     model_validator,
 )
@@ -55,6 +56,10 @@ type PredicateScalar = DimensionValue | MeasureValue
 type PredicateValue = PredicateScalar | list[PredicateScalar]
 type ClaimTarget = StrictStr | StrictInt | FiniteNumber | StrictBool | list[StrictStr]
 type ClaimId = Annotated[str, Field(pattern=r"^claim-[a-f0-9]{24}$")]
+type PublicExplanation = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=500),
+]
 type RunStatus = Literal[
     "queued",
     "running",
@@ -227,6 +232,7 @@ class AnalysisStep(AnalysisContractModel):
     expected_output: ExpectedOutputSpec
     stop_condition: StopCondition
     limits: StepLimits
+    selection_reason: PublicExplanation = "분석 목표를 달성하기 위해 이 단계를 선택했습니다."
 
     @model_validator(mode="after")
     def bind_step_contract(self) -> Self:
@@ -263,6 +269,7 @@ class AnalysisPlan(AnalysisContractModel):
     revision: int = Field(ge=0)
     goal_id: str = Field(min_length=1, max_length=128)
     steps: list[AnalysisStep] = Field(min_length=3, max_length=6)
+    rationale: PublicExplanation = "요청한 분석 목표를 달성하기 위한 실행 계획입니다."
 
     @model_validator(mode="after")
     def require_bounded_topological_plan(self) -> Self:
@@ -368,6 +375,7 @@ class AnalysisNote(AnalysisContractModel):
     fact_ids: list[str] = Field(min_length=1, max_length=4)
     claims: list[VerifiedClaim] = Field(default_factory=list, max_length=32)
     next_step_id: str | None = Field(default=None, pattern=r"^step-[a-z0-9-]+$", max_length=128)
+    next_action: PublicExplanation = "현재 단계의 검증 결과를 기록했습니다."
     limitations: list[str] = Field(default_factory=list, max_length=16)
     source_ids: list[SourceId] = Field(min_length=1, max_length=32)
     result_ids: list[str] = Field(min_length=1, max_length=4)
@@ -402,16 +410,19 @@ class AnalysisNote(AnalysisContractModel):
 class ContinueSelection(AnalysisContractModel):
     kind: Literal["continue"] = "continue"
     next_step_id: str = Field(pattern=r"^step-[a-z0-9-]+$", max_length=128)
+    reason: PublicExplanation = "분석 계획의 다음 단계를 계속 실행합니다."
 
 
 class StopSelection(AnalysisContractModel):
     kind: Literal["stop"] = "stop"
+    reason: PublicExplanation = "검증 가능한 분석 단계를 모두 완료했습니다."
 
 
 class ReviseSelection(AnalysisContractModel):
     kind: Literal["revise"] = "revise"
     revised_plan: AnalysisPlan
     next_step_id: str = Field(pattern=r"^step-[a-z0-9-]+$", max_length=128)
+    reason: PublicExplanation = "검증 결과에 맞춰 분석 계획을 수정합니다."
 
     @model_validator(mode="after")
     def require_selected_revised_step(self) -> Self:
@@ -491,6 +502,7 @@ __all__ = [
     "OutputKind",
     "PopulationSpec",
     "Predicate",
+    "PublicExplanation",
     "PublicRunError",
     "RecommendedActionDraft",
     "ReviseSelection",

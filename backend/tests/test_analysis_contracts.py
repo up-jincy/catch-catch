@@ -7,6 +7,13 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
+from customer_signal.agent.contracts import RunRequest, SelectionContext
+from customer_signal.agent.generic_fixture import (
+    NEGATIVE_TOPIC_QUESTION,
+    REPEAT_JOURNEY_QUESTION,
+    SIGNUP_ABANDONMENT_QUESTION,
+    GenericFixtureModel,
+)
 from customer_signal.domain.analysis import (
     AnalysisGoal,
     AnalysisNoteDraft,
@@ -14,11 +21,14 @@ from customer_signal.domain.analysis import (
     AnalysisStep,
     ClaimDraft,
     ContinueAfterStep,
+    ContinueSelection,
     ExpectedOutputSpec,
     FactRef,
     GoalDecision,
     MeasureSpec,
     PopulationSpec,
+    ReviseSelection,
+    StopSelection,
     StopOnMetric,
     StepLimits,
     UnsupportedAnalysis,
@@ -129,6 +139,26 @@ def _step(
     )
 
 
+def _bounded_plan_steps() -> list[AnalysisStep]:
+    return [
+        _step("step-catalog", "catalog_sources", CatalogSourcesInput(primitive="catalog_sources")),
+        _step(
+            "step-profile",
+            "profile_events",
+            ProfileEventsInput(primitive="profile_events"),
+        ),
+        _step(
+            "step-segment",
+            "segment_customers",
+            SegmentCustomersInput(
+                primitive="segment_customers",
+                predicates=["outcome"],
+                minimum_matching_events=1,
+            ),
+        ),
+    ]
+
+
 def test_goal_decision_is_discriminated_and_strict() -> None:
     goal = AnalysisGoal(
         goal_id="goal-1",
@@ -189,6 +219,146 @@ def test_plan_requires_three_to_six_unique_topological_steps() -> None:
         AnalysisPlan(plan_id="plan-1", revision=0, goal_id="goal-1", steps=[first])
     with pytest.raises(ValidationError, match="step_id values must be unique"):
         AnalysisPlan(plan_id="plan-1", revision=0, goal_id="goal-1", steps=[first, second, second])
+
+
+def test_plan_and_steps_publish_explanations_with_schema_v1_defaults() -> None:
+    first, second, third = _bounded_plan_steps()
+
+    explained_step = AnalysisStep.model_validate(
+        {
+            **first.model_dump(),
+            "selection_reason": "  사용 가능한 Source를 먼저 확인합니다.  ",
+        }
+    )
+    plan = AnalysisPlan(
+        plan_id="plan-1",
+        revision=0,
+        goal_id="goal-1",
+        steps=[explained_step, second, third],
+        rationale="  요청 범위의 고객 Segment를 단계적으로 검증합니다.  ",
+    )
+
+    assert plan.steps[0].selection_reason == "사용 가능한 Source를 먼저 확인합니다."
+    assert plan.rationale == "요청 범위의 고객 Segment를 단계적으로 검증합니다."
+    assert second.selection_reason
+    legacy_plan = plan.model_dump(exclude={"rationale"})
+    legacy_plan["steps"] = [step.model_dump(exclude={"selection_reason"}) for step in plan.steps]
+    restored = AnalysisPlan.model_validate(legacy_plan)
+    assert restored.rationale
+    assert all(step.selection_reason for step in restored.steps)
+
+
+def test_step_selections_publish_bounded_public_reasons() -> None:
+    first, second, third = _bounded_plan_steps()
+    revised_plan = AnalysisPlan(
+        plan_id="plan-revised",
+        revision=1,
+        goal_id="goal-1",
+        steps=[first, second, third],
+    )
+    factories = [
+        lambda reason=None: ContinueSelection(
+            next_step_id="step-profile", **({} if reason is None else {"reason": reason})
+        ),
+        lambda reason=None: StopSelection(**({} if reason is None else {"reason": reason})),
+        lambda reason=None: ReviseSelection(
+            revised_plan=revised_plan,
+            next_step_id="step-profile",
+            **({} if reason is None else {"reason": reason}),
+        ),
+    ]
+
+    for factory in factories:
+        assert factory().reason
+        assert factory("  검증 결과에 따라 다음 단계를 선택합니다.  ").reason == (
+            "검증 결과에 따라 다음 단계를 선택합니다."
+        )
+        for invalid in ("", "   ", "가" * 501):
+            with pytest.raises(ValidationError):
+                factory(invalid)
+
+
+@pytest.mark.parametrize(
+    ("question", "expected_rationale", "expected_step_reasons", "expected_stop_reason"),
+    [
+        (
+            NEGATIVE_TOPIC_QUESTION,
+            "Source 범위와 이벤트 품질을 확인한 뒤 Topic별 부정 피드백 고객 규모를 집계합니다.",
+            [
+                "분석 가능한 Source와 요청 기간의 데이터 범위를 먼저 확인합니다.",
+                "Topic별 집계 전에 이벤트 분포와 데이터 품질을 확인합니다.",
+                "부정 결과를 Topic별로 집계해 관련 고객 규모를 확인합니다.",
+            ],
+            "Topic별 부정 피드백 집계를 완료해 분석을 종료합니다.",
+        ),
+        (
+            REPEAT_JOURNEY_QUESTION,
+            "Source를 확인한 뒤 반복 행동과 상담의 Sequence를 찾고, 대표 Journey와 마스킹된 근거를 순서대로 확인합니다.",
+            [
+                "분석 가능한 Source와 요청 기간의 데이터 범위를 먼저 확인합니다.",
+                "반복 행동 뒤 상담으로 이어지는 Sequence 일치 고객을 찾습니다.",
+                "Sequence 일치 고객의 대표 Journey를 확인합니다.",
+                "대표 Journey를 뒷받침하는 마스킹된 근거를 확인합니다.",
+            ],
+            "Sequence, Journey, 근거 확인을 완료해 분석을 종료합니다.",
+        ),
+        (
+            SIGNUP_ABANDONMENT_QUESTION,
+            "Source를 확인한 뒤 가입 시작과 완료 Sequence를 분석하고, 완료하지 못한 고객 Segment를 확인합니다.",
+            [
+                "분석 가능한 Source와 요청 기간의 데이터 범위를 먼저 확인합니다.",
+                "가입 시작과 완료 Sequence에서 완료하지 못한 고객 규모를 확인합니다.",
+                "이탈 결과를 기준으로 가입을 완료하지 못한 고객 Segment를 구성합니다.",
+            ],
+            "미완료 고객 식별과 Segment 구성을 완료해 분석을 종료합니다.",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_generic_fixture_publishes_scenario_specific_explanations(
+    question: str,
+    expected_rationale: str,
+    expected_step_reasons: list[str],
+    expected_stop_reason: str,
+) -> None:
+    model = GenericFixtureModel()
+    goal = await model.create_goal(
+        RunRequest(
+            question=question,
+            start_at=NOW,
+            end_at=NOW + timedelta(days=1),
+            enabled_sources=["voc"],
+        ),
+        [],
+    )
+    assert isinstance(goal, AnalysisGoal)
+    plan = await model.create_plan(goal, [])
+
+    assert plan.rationale == expected_rationale
+    assert [step.selection_reason for step in plan.steps] == expected_step_reasons
+    for index, step in enumerate(plan.steps):
+        selection = await model.select_next(
+            SelectionContext(
+                goal=goal,
+                plan=plan,
+                completed_step_ids=frozenset(completed.step_id for completed in plan.steps[:index]),
+                facts=[],
+            )
+        )
+        assert isinstance(selection, ContinueSelection)
+        assert selection.next_step_id == step.step_id
+        assert selection.reason == step.selection_reason
+
+    stopped = await model.select_next(
+        SelectionContext(
+            goal=goal,
+            plan=plan,
+            completed_step_ids=frozenset(step.step_id for step in plan.steps),
+            facts=[],
+        )
+    )
+    assert isinstance(stopped, StopSelection)
+    assert stopped.reason == expected_stop_reason
 
 
 def test_step_binds_primitive_parameters_expected_output_and_metric_stop() -> None:

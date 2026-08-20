@@ -7,6 +7,7 @@ import re
 from collections.abc import Sequence
 from datetime import timedelta
 from hashlib import sha256
+from typing import cast
 
 from customer_signal.domain.analysis import (
     AnalysisNote,
@@ -32,6 +33,7 @@ _SENSITIVE_PATTERN = re.compile(
     r"(?:^|_)(?:raw|email|phone|address|password|secret|token|write|update|delete|insert|export)(?:_|$)",
     flags=re.IGNORECASE,
 )
+_UNSET_NEXT_STEP = object()
 
 
 def validate_claim(
@@ -113,13 +115,18 @@ def render_verified_note(
     fact: AnalysisFact,
     duration_ms: int,
     *,
+    next_step_id: str | None | object = _UNSET_NEXT_STEP,
+    next_action: str = "현재 단계의 검증 결과를 기록했습니다.",
     plan_revision: int = 0,
 ) -> AnalysisNote:
     """Derive a public Note only from a server Fact and verified Claim drafts."""
 
+    selected_step_id = (
+        draft.next_step_id if next_step_id is _UNSET_NEXT_STEP else cast(str | None, next_step_id)
+    )
     if draft.step_id != fact.step_id:
         raise ClaimValidationError("note draft step does not match server Fact")
-    if draft.next_step_id == fact.step_id:
+    if selected_step_id == fact.step_id:
         raise ClaimValidationError("note next step cannot select the completed step")
     if not 0 <= duration_ms <= 40_000:
         raise ClaimValidationError("note duration exceeds the bounded Step timeout")
@@ -136,7 +143,8 @@ def render_verified_note(
         "step_id": fact.step_id,
         "fact_id": fact.fact_id,
         "claim_ids": claim_ids,
-        "next_step_id": draft.next_step_id,
+        "next_step_id": selected_step_id,
+        "next_action": next_action,
         "plan_revision": plan_revision,
     }
     note_digest = sha256(
@@ -148,7 +156,8 @@ def render_verified_note(
         objective=_objective_for_primitive(fact.primitive),
         fact_ids=[fact.fact_id],
         claims=claims,
-        next_step_id=draft.next_step_id,
+        next_step_id=selected_step_id,
+        next_action=next_action,
         limitations=list(draft.limitations),
         source_ids=list(fact.source_ids),
         result_ids=[fact.result_id],

@@ -56,6 +56,22 @@ _SUGGESTIONS = [
     REPEAT_JOURNEY_QUESTION,
     SIGNUP_ABANDONMENT_QUESTION,
 ]
+_PLAN_RATIONALES = {
+    "negative": "Source 범위와 이벤트 품질을 확인한 뒤 Topic별 부정 피드백 고객 규모를 집계합니다.",
+    "repeat": (
+        "Source를 확인한 뒤 반복 행동과 상담의 Sequence를 찾고, "
+        "대표 Journey와 마스킹된 근거를 순서대로 확인합니다."
+    ),
+    "signup": (
+        "Source를 확인한 뒤 가입 시작과 완료 Sequence를 분석하고, "
+        "완료하지 못한 고객 Segment를 확인합니다."
+    ),
+}
+_STOP_REASONS = {
+    "negative": "Topic별 부정 피드백 집계를 완료해 분석을 종료합니다.",
+    "repeat": "Sequence, Journey, 근거 확인을 완료해 분석을 종료합니다.",
+    "signup": "미완료 고객 식별과 Segment 구성을 완료해 분석을 종료합니다.",
+}
 
 
 class GenericFixtureModel:
@@ -148,6 +164,9 @@ class GenericFixtureModel:
                         parameters=ProfileEventsInput(primitive="profile_events"),
                         source_ids=goal.source_ids,
                         required_metrics=["customer_count", "event_count"],
+                        selection_reason=(
+                            "Topic별 집계 전에 이벤트 분포와 데이터 품질을 확인합니다."
+                        ),
                     ),
                     _step(
                         step_id="step-negative-topic",
@@ -161,6 +180,9 @@ class GenericFixtureModel:
                         ),
                         source_ids=goal.source_ids,
                         required_metrics=["negative_feedback_customer_count"],
+                        selection_reason=(
+                            "부정 결과를 Topic별로 집계해 관련 고객 규모를 확인합니다."
+                        ),
                     ),
                 ]
             )
@@ -176,6 +198,9 @@ class GenericFixtureModel:
                         ),
                         source_ids=goal.source_ids,
                         required_metrics=["matched_customer_count"],
+                        selection_reason=(
+                            "반복 행동 뒤 상담으로 이어지는 Sequence 일치 고객을 찾습니다."
+                        ),
                     ),
                     _step(
                         step_id="step-repeat-journey",
@@ -186,6 +211,7 @@ class GenericFixtureModel:
                         source_ids=goal.source_ids,
                         input_step_ids=["step-repeat-sequence"],
                         required_metrics=["journey_event_count"],
+                        selection_reason="Sequence 일치 고객의 대표 Journey를 확인합니다.",
                     ),
                     _step(
                         step_id="step-repeat-evidence",
@@ -194,6 +220,7 @@ class GenericFixtureModel:
                         source_ids=goal.source_ids,
                         input_step_ids=["step-repeat-journey"],
                         required_metrics=["evidence_record_count"],
+                        selection_reason="대표 Journey를 뒷받침하는 마스킹된 근거를 확인합니다.",
                     ),
                 ]
             )
@@ -212,6 +239,9 @@ class GenericFixtureModel:
                             "abandoned_customer_count",
                             "matched_customer_count",
                         ],
+                        selection_reason=(
+                            "가입 시작과 완료 Sequence에서 완료하지 못한 고객 규모를 확인합니다."
+                        ),
                     ),
                     _step(
                         step_id="step-signup-segment",
@@ -223,6 +253,9 @@ class GenericFixtureModel:
                         ),
                         source_ids=goal.source_ids,
                         required_metrics=["segment_customer_count"],
+                        selection_reason=(
+                            "이탈 결과를 기준으로 가입을 완료하지 못한 고객 Segment를 구성합니다."
+                        ),
                     ),
                 ]
             )
@@ -233,6 +266,7 @@ class GenericFixtureModel:
             revision=0,
             goal_id=goal.goal_id,
             steps=steps,
+            rationale=_PLAN_RATIONALES[scenario],
         )
 
     async def create_note(self, context: StepModelContext) -> AnalysisNoteDraft:
@@ -278,8 +312,12 @@ class GenericFixtureModel:
             None,
         )
         if next_step is None:
-            return StopSelection()
-        return ContinueSelection(next_step_id=next_step.step_id)
+            scenario = context.plan.plan_id.removeprefix("plan-")
+            return StopSelection(reason=_STOP_REASONS[scenario])
+        return ContinueSelection(
+            next_step_id=next_step.step_id,
+            reason=next_step.selection_reason,
+        )
 
     async def create_report(self, context: ReportModelContext) -> CustomerSignalReportDraft:
         claims = [claim for note in context.notes for claim in note.claims]
@@ -313,6 +351,7 @@ def _catalog_step(goal: AnalysisGoal) -> AnalysisStep:
         parameters=CatalogSourcesInput(primitive="catalog_sources"),
         source_ids=goal.source_ids,
         required_metrics=["source_count"],
+        selection_reason="분석 가능한 Source와 요청 기간의 데이터 범위를 먼저 확인합니다.",
     )
 
 
@@ -323,6 +362,7 @@ def _step(
     parameters,
     source_ids,
     required_metrics,
+    selection_reason,
     input_step_ids=None,
 ) -> AnalysisStep:
     return AnalysisStep(
@@ -337,6 +377,7 @@ def _step(
         ),
         stop_condition=ContinueAfterStep(),
         limits=_LIMITS,
+        selection_reason=selection_reason,
     )
 
 

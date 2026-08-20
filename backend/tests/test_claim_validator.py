@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from pydantic import ValidationError
 
 from customer_signal.agent.claim_validator import (
     ClaimValidationError,
@@ -319,7 +320,80 @@ def test_render_note_publishes_only_verified_claims_and_server_fact_metadata() -
     assert note.evidence_ids == fact.evidence_ids
     assert note.claims[0].claim_id.startswith("claim-")
     assert note.duration_ms == 25
+    assert note.next_action == "현재 단계의 검증 결과를 기록했습니다."
+    restored_legacy_note = type(note).model_validate(note.model_dump(exclude={"next_action"}))
+    assert restored_legacy_note.next_action == "현재 단계의 검증 결과를 기록했습니다."
 
     forged = draft.model_copy(update={"step_id": "step-other"})
     with pytest.raises(ClaimValidationError, match="step"):
         render_verified_note(forged, fact, duration_ms=25, plan_revision=2)
+
+
+def test_render_note_publishes_server_selected_next_step_and_action() -> None:
+    fact = _fact()
+    draft = AnalysisNoteDraft(
+        step_id="step-segment",
+        claims=[_metric_claim()],
+        next_step_id="step-draft-selected",
+    )
+    next_action = "검증된 분포를 기준으로 고객 Segment를 계산합니다."
+
+    note = render_verified_note(
+        draft,
+        fact,
+        duration_ms=25,
+        plan_revision=2,
+        next_step_id="step-server-selected",
+        next_action=next_action,
+    )
+    changed_action = render_verified_note(
+        draft,
+        fact,
+        duration_ms=25,
+        plan_revision=2,
+        next_step_id="step-server-selected",
+        next_action="검증 결과를 기록하고 분석을 종료합니다.",
+    )
+
+    assert note.next_step_id == "step-server-selected"
+    assert note.next_action == next_action
+    assert note.note_id != changed_action.note_id
+
+
+def test_render_note_distinguishes_omitted_and_explicit_none_next_step() -> None:
+    fact = _fact()
+    draft = AnalysisNoteDraft(
+        step_id="step-segment",
+        claims=[_metric_claim()],
+        next_step_id="step-draft-selected",
+    )
+
+    omitted = render_verified_note(draft, fact, duration_ms=25, plan_revision=2)
+    cleared = render_verified_note(
+        draft,
+        fact,
+        duration_ms=25,
+        plan_revision=2,
+        next_step_id=None,
+    )
+
+    assert omitted.next_step_id == "step-draft-selected"
+    assert cleared.next_step_id is None
+    assert omitted.note_id != cleared.note_id
+
+
+@pytest.mark.parametrize("invalid", ["", "   ", "가" * 501])
+def test_render_note_rejects_unbounded_next_action(invalid: str) -> None:
+    draft = AnalysisNoteDraft(
+        step_id="step-segment",
+        claims=[_metric_claim()],
+    )
+
+    with pytest.raises(ValidationError):
+        render_verified_note(
+            draft,
+            _fact(),
+            duration_ms=25,
+            plan_revision=2,
+            next_action=invalid,
+        )
