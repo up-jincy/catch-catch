@@ -115,6 +115,7 @@ def render_verified_note(
     fact: AnalysisFact,
     duration_ms: int,
     *,
+    facts: Sequence[AnalysisFact] | None = None,
     next_step_id: str | None | object = _UNSET_NEXT_STEP,
     next_action: str = "현재 단계의 검증 결과를 기록했습니다.",
     plan_revision: int = 0,
@@ -131,8 +132,15 @@ def render_verified_note(
     if not 0 <= duration_ms <= 40_000:
         raise ClaimValidationError("note duration exceeds the bounded Step timeout")
 
+    fact_ledger = [fact] if facts is None else list(facts)
+    if facts is not None:
+        current_fact_matches = [item for item in fact_ledger if item.fact_id == fact.fact_id]
+        if len(current_fact_matches) != 1 or current_fact_matches[0] != fact:
+            raise ClaimValidationError("note Fact must appear exactly once in the Fact ledger")
+
     claims = [
-        validate_claim(claim, facts=[fact], plan_revision=plan_revision) for claim in draft.claims
+        validate_claim(claim, facts=fact_ledger, plan_revision=plan_revision)
+        for claim in draft.claims
     ]
     claim_ids = [claim.claim_id for claim in claims]
     if len(claim_ids) != len(set(claim_ids)):

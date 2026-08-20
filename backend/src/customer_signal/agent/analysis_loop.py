@@ -306,6 +306,7 @@ class AnalysisLoop:
                     draft,
                     fact,
                     duration_ms,
+                    facts=facts,
                     next_step_id=selected_next_step_id,
                     next_action=next_action,
                     plan_revision=plan.revision,

@@ -88,6 +88,65 @@ def _metric_claim(**updates: object) -> ClaimDraft:
     return ClaimDraft.model_validate(values)
 
 
+def _comparison_case():
+    baseline = _fact(value=6)
+    comparison = _fact(value=8).model_copy(
+        update={"fact_id": "fact-comparison-input", "result_id": "result-comparison-input"}
+    )
+    payload = SegmentComparisonPayload(
+        kind="compare_segments",
+        input_fact_ids=[baseline.fact_id, comparison.fact_id],
+        processing=ProcessingStats(scanned_events=2, matched_events=2, returned_rows=1),
+        provenance=baseline.payload.provenance,
+        metrics=[
+            AnalysisMetricFact(
+                metric_key="segment_customer_count_delta",
+                label="Segment customer delta",
+                value=2,
+                unit="customers",
+            )
+        ],
+        requested_metric_key="segment_customer_count_delta",
+        baseline_fact_id=baseline.fact_id,
+        comparison_fact_id=comparison.fact_id,
+        deltas=[
+            AnalysisMetricDelta(
+                metric_key="segment_customer_count",
+                baseline=6,
+                comparison=8,
+                delta=2,
+                unit="customers",
+            )
+        ],
+    )
+    comparison_fact = build_fact(
+        fact_id="fact-comparison",
+        step_id="step-comparison",
+        primitive="compare_segments",
+        result_id="result-comparison",
+        payload=payload,
+        scope=SCOPE,
+        created_at=NOW,
+        input_facts=[baseline, comparison],
+    )
+    claim = ClaimDraft(
+        claim_type="metric",
+        subject="segment_customer_count_delta",
+        operator="eq",
+        target=2,
+        fact_refs=[
+            FactRef(
+                fact_id=comparison_fact.fact_id,
+                metric_key="segment_customer_count_delta",
+                label="Segment customer delta",
+                unit="customers",
+                plan_revision=2,
+            )
+        ],
+    )
+    return baseline, comparison, comparison_fact, claim
+
+
 def test_claim_exactly_binds_metric_key_label_value_type_unit_and_revision() -> None:
     fact = _fact()
     verified = validate_claim(_metric_claim(), facts=[fact], plan_revision=2)
@@ -219,61 +278,7 @@ def test_claim_rejects_cross_fact_and_sensitive_operations() -> None:
 
 
 def test_comparison_claim_revalidates_ordered_input_fact_metrics() -> None:
-    baseline = _fact(value=6)
-    comparison = _fact(value=8).model_copy(
-        update={"fact_id": "fact-comparison-input", "result_id": "result-comparison-input"}
-    )
-    payload = SegmentComparisonPayload(
-        kind="compare_segments",
-        input_fact_ids=[baseline.fact_id, comparison.fact_id],
-        processing=ProcessingStats(scanned_events=2, matched_events=2, returned_rows=1),
-        provenance=baseline.payload.provenance,
-        metrics=[
-            AnalysisMetricFact(
-                metric_key="segment_customer_count_delta",
-                label="Segment customer delta",
-                value=2,
-                unit="customers",
-            )
-        ],
-        requested_metric_key="segment_customer_count_delta",
-        baseline_fact_id=baseline.fact_id,
-        comparison_fact_id=comparison.fact_id,
-        deltas=[
-            AnalysisMetricDelta(
-                metric_key="segment_customer_count",
-                baseline=6,
-                comparison=8,
-                delta=2,
-                unit="customers",
-            )
-        ],
-    )
-    comparison_fact = build_fact(
-        fact_id="fact-comparison",
-        step_id="step-comparison",
-        primitive="compare_segments",
-        result_id="result-comparison",
-        payload=payload,
-        scope=SCOPE,
-        created_at=NOW,
-        input_facts=[baseline, comparison],
-    )
-    claim = ClaimDraft(
-        claim_type="metric",
-        subject="segment_customer_count_delta",
-        operator="eq",
-        target=2,
-        fact_refs=[
-            FactRef(
-                fact_id=comparison_fact.fact_id,
-                metric_key="segment_customer_count_delta",
-                label="Segment customer delta",
-                unit="customers",
-                plan_revision=2,
-            )
-        ],
-    )
+    baseline, comparison, comparison_fact, claim = _comparison_case()
 
     verified = validate_claim(
         claim,
@@ -301,6 +306,51 @@ def test_comparison_claim_revalidates_ordered_input_fact_metrics() -> None:
         validate_claim(
             claim,
             facts=[comparison_fact, baseline, forged_comparison],
+            plan_revision=2,
+        )
+
+
+def test_render_comparison_note_uses_complete_verified_fact_ledger() -> None:
+    baseline, comparison, comparison_fact, claim = _comparison_case()
+    draft = AnalysisNoteDraft(step_id=comparison_fact.step_id, claims=[claim])
+
+    note = render_verified_note(
+        draft,
+        comparison_fact,
+        duration_ms=25,
+        facts=[baseline, comparison, comparison_fact],
+        plan_revision=2,
+    )
+
+    assert note.claims[0].target == 2
+
+    with pytest.raises(ClaimValidationError, match="both ordered input Facts"):
+        render_verified_note(
+            draft,
+            comparison_fact,
+            duration_ms=25,
+            facts=[baseline, comparison_fact],
+            plan_revision=2,
+        )
+
+    forged_comparison = comparison.model_copy(
+        update={
+            "metrics": [
+                AnalysisMetricFact(
+                    metric_key="segment_customer_count",
+                    label="Segment customers",
+                    value=9,
+                    unit="customers",
+                )
+            ]
+        }
+    )
+    with pytest.raises(ClaimValidationError, match="input Fact binding"):
+        render_verified_note(
+            draft,
+            comparison_fact,
+            duration_ms=25,
+            facts=[baseline, forged_comparison, comparison_fact],
             plan_revision=2,
         )
 

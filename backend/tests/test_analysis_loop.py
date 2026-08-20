@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+import customer_signal.agent.analysis_loop as analysis_loop_module
 from customer_signal.agent.analysis_loop import AnalysisLoop
 from customer_signal.agent.contracts import GenericRunnerOutcome, RunRequest
 from customer_signal.agent.generic_fixture import (
@@ -257,9 +258,7 @@ class RepairingPlanModel(GenericFixtureModel):
         plan = await super().create_plan(goal, manifests)
         self.accepted_plan = plan
         if len(self.validation_feedback) <= self.invalid_attempts:
-            invalid_first_step = plan.steps[0].model_copy(
-                update={"source_ids": ["unknown_v2"]}
-            )
+            invalid_first_step = plan.steps[0].model_copy(update={"source_ids": ["unknown_v2"]})
             return plan.model_copy(update={"steps": [invalid_first_step, *plan.steps[1:]]})
         return plan
 
@@ -287,12 +286,8 @@ class RevisionRepairingPlanModel(GenericFixtureModel):
 
 
 class CatalogFactRevisionModel(GenericFixtureModel):
-    revision_reason = (
-        "Catalog Fact에서 확인한 데이터 범위에 맞춰 새 Profile 단계를 실행합니다."
-    )
-    revised_rationale = (
-        "Catalog Fact에서 VOC Source를 확인해 새 Profile 단계를 Plan에 반영합니다."
-    )
+    revision_reason = "Catalog Fact에서 확인한 데이터 범위에 맞춰 새 Profile 단계를 실행합니다."
+    revised_rationale = "Catalog Fact에서 VOC Source를 확인해 새 Profile 단계를 Plan에 반영합니다."
     stop_reason = "새 Profile Fact로 필요한 범위를 확인해 분석을 종료합니다."
 
     def __init__(self) -> None:
@@ -390,9 +385,7 @@ async def test_nonzero_initial_revision_is_rewritten_before_plan_is_published() 
     assert len(model.validation_feedback) == 2
     assert model.validation_feedback[0] is None
     assert "initial Plan revision must be 0" in (model.validation_feedback[1] or "")
-    published_plans = [
-        event.payload["plan"] for event in events if event.type == "plan_created"
-    ]
+    published_plans = [event.payload["plan"] for event in events if event.type == "plan_created"]
     assert [plan["revision"] for plan in published_plans] == [0]
     assert executor.calls == [step.step_id for step in model.returned_plans[1].steps]
 
@@ -482,6 +475,28 @@ async def test_loop_executes_three_distinct_fact_backed_demo_questions(
     assert "fact_created" in event_types
     assert "analysis_note_created" in event_types
     assert event_types[-2:] == ["report_validating", "result"]
+
+
+@pytest.mark.asyncio
+async def test_loop_passes_accumulated_fact_ledger_to_note_validation(monkeypatch) -> None:
+    original_render_verified_note = analysis_loop_module.render_verified_note
+    ledger_sizes: list[int] = []
+
+    def capture_fact_ledger(*args, facts, **kwargs):
+        ledger_sizes.append(len(facts))
+        return original_render_verified_note(*args, facts=facts, **kwargs)
+
+    monkeypatch.setattr(analysis_loop_module, "render_verified_note", capture_fact_ledger)
+    loop = AnalysisLoop(
+        model=GenericFixtureModel(),
+        executor=ScriptedExecutor(),
+        manifests=[_manifest()],
+    )
+
+    outcome = await loop.run(_request(NEGATIVE_TOPIC_QUESTION), emit=lambda _event: None)
+
+    assert outcome.status == "completed"
+    assert ledger_sizes == list(range(1, len(outcome.facts) + 1))
 
 
 @pytest.mark.asyncio
