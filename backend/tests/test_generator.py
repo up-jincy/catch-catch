@@ -145,6 +145,63 @@ def test_dataset_is_seeded_and_contains_exact_customers_and_ground_truth():
     assert generate_dataset(seed=20260820).model_dump() != first.model_dump()
 
 
+def test_dataset_contains_distinct_generic_analysis_patterns() -> None:
+    dataset = generate_dataset(seed=20260819)
+    events_by_customer = _events_by_customer(dataset)
+    negative_pricing_feedback = [
+        event
+        for event in dataset.events
+        if event.event_type == "feedback"
+        and event.outcome == "negative"
+        and event.topic == "요금제 변경"
+    ]
+    signup_started = {
+        event.canonical_customer_id
+        for event in dataset.events
+        if event.source_id == "subscription" and event.topic == "가입" and event.action == "started"
+    }
+    signup_completed = {
+        event.canonical_customer_id
+        for event in dataset.events
+        if event.source_id == "subscription"
+        and event.topic == "가입"
+        and event.action == "completed"
+    }
+
+    assert len(negative_pricing_feedback) == 6
+    assert len({event.canonical_customer_id for event in negative_pricing_feedback}) == 6
+    assert (
+        sum(
+            _positive_sequence(events_by_customer[customer_id]) is not None
+            for customer_id in dataset.customers
+        )
+        == 6
+    )
+    assert len(signup_started) == 12
+    assert len(signup_completed) == 7
+    assert len(signup_started - signup_completed) == 5
+
+
+def test_dataset_normalizes_dimensions_and_measures_without_removing_legacy_attributes() -> None:
+    events = generate_dataset(seed=20260819).events
+
+    for measure_name in ("rating", "result_count", "session_depth"):
+        measured_events = [event for event in events if measure_name in event.attributes]
+        assert measured_events
+        assert all(
+            event.measures[measure_name] == event.attributes[measure_name]
+            for event in measured_events
+        )
+
+    signup_started = next(
+        event
+        for event in events
+        if event.source_id == "subscription" and event.topic == "가입" and event.action == "started"
+    )
+    assert signup_started.attributes["stage"] == "application"
+    assert signup_started.dimensions["stage"] == "application"
+
+
 def test_dataset_exposes_all_five_customer_journey_source_families():
     dataset = generate_dataset(seed=20260819)
 

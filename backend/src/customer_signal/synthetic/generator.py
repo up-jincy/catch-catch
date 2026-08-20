@@ -29,6 +29,10 @@ POSITIVE_CUSTOMER_IDS = (
     "CUST-028",
 )
 TOPICS = ("인터넷 장애", "로밍", "요금", "기기 변경")
+_DIMENSION_ATTRIBUTE_NAMES = frozenset(
+    {"authenticated", "contact_channel", "is_repeat", "noise", "product_family", "stage", "status"}
+)
+_MEASURE_ATTRIBUTE_NAMES = frozenset({"rating", "result_count", "session_depth"})
 
 
 class _DatasetBuilder:
@@ -128,7 +132,9 @@ class _DatasetBuilder:
                 continue
             visited.add(node)
             pending.extend(graph.get(node, set()) - visited)
-        resolved = sorted(value for namespace, value in visited if namespace == "canonical_customer")
+        resolved = sorted(
+            value for namespace, value in visited if namespace == "canonical_customer"
+        )
         if len(resolved) != 1:
             raise ValueError("source identity must resolve to exactly one canonical customer")
         return resolved[0]
@@ -146,6 +152,7 @@ class _DatasetBuilder:
         text: str,
         attributes: dict[str, Scalar] | None = None,
     ) -> None:
+        normalized_attributes = attributes or {}
         identity = self._source_identities[(customer_id, source_id)]
         resolved_customer_id = self._canonical_customer_id(identity)
         sequence = self._customer_sequences.get(customer_id, 0) + 1
@@ -167,7 +174,17 @@ class _DatasetBuilder:
             text=text,
             identities=[identity],
             canonical_customer_id=resolved_customer_id,
-            attributes=attributes or {},
+            attributes=normalized_attributes,
+            dimensions={
+                name: value
+                for name, value in normalized_attributes.items()
+                if name in _DIMENSION_ATTRIBUTE_NAMES
+            },
+            measures={
+                name: value
+                for name, value in normalized_attributes.items()
+                if name in _MEASURE_ATTRIBUTE_NAMES
+            },
         )
         evidence = EvidenceRecord(
             evidence_id=evidence_id,
@@ -504,6 +521,50 @@ def _add_failure_without_voc(
     )
 
 
+def _add_generic_analysis_patterns(
+    builder: _DatasetBuilder,
+    customer_ids: list[str],
+) -> None:
+    for index, customer_id in enumerate(customer_ids[12:18]):
+        builder.add_event(
+            customer_id=customer_id,
+            occurred_at=WINDOW_START + timedelta(days=27, hours=index),
+            source_id="search_feedback",
+            event_type="feedback",
+            action="submit_feedback",
+            topic="요금제 변경",
+            outcome="negative",
+            text="요금제 변경 안내가 불분명해 불만을 남겼습니다.",
+            attributes={"rating": 1},
+        )
+
+    for index, customer_id in enumerate(customer_ids[:12]):
+        started_at = WINDOW_START + timedelta(days=26, minutes=index)
+        builder.add_event(
+            customer_id=customer_id,
+            occurred_at=started_at,
+            source_id="subscription",
+            event_type="subscription",
+            action="started",
+            topic="가입",
+            outcome="pending",
+            text="가입 신청을 시작했습니다.",
+            attributes={"stage": "application"},
+        )
+        if index < 7:
+            builder.add_event(
+                customer_id=customer_id,
+                occurred_at=started_at + timedelta(hours=4),
+                source_id="subscription",
+                event_type="subscription",
+                action="completed",
+                topic="가입",
+                outcome="success",
+                text="가입 신청이 정상적으로 완료됐습니다.",
+                attributes={"stage": "activated"},
+            )
+
+
 def generate_dataset(seed: int = 20260819) -> SyntheticDataset:
     """Build the deterministic 30-customer Journey demo dataset."""
 
@@ -542,6 +603,7 @@ def generate_dataset(seed: int = 20260819) -> SyntheticDataset:
             risky=False,
         )
 
+    _add_generic_analysis_patterns(builder, customers)
     builder.events.sort(key=lambda event: (event.occurred_at, event.event_id))
     builder.evidence.sort(key=lambda record: (record.occurred_at, record.evidence_id))
     return SyntheticDataset(

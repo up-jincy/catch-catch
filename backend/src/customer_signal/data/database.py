@@ -10,15 +10,17 @@ from pathlib import Path
 import duckdb
 
 from customer_signal.domain.models import SyntheticDataset
+from customer_signal.synthetic.manifest import SYNTHETIC_MANIFEST_VERSION
 
 
-DATABASE_SCHEMA_VERSION = 1
-SYNTHETIC_DATASET_VERSION = 1
+DATABASE_SCHEMA_VERSION = 2
+SYNTHETIC_DATASET_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE database_metadata (
     schema_version INTEGER NOT NULL,
-    dataset_version INTEGER NOT NULL
+    dataset_version INTEGER NOT NULL,
+    manifest_version VARCHAR NOT NULL
 );
 
 CREATE TABLE customers (
@@ -46,7 +48,9 @@ CREATE TABLE events (
     text VARCHAR NOT NULL,
     identities JSON NOT NULL,
     canonical_customer_id VARCHAR NOT NULL,
-    attributes JSON NOT NULL
+    attributes JSON NOT NULL,
+    dimensions JSON NOT NULL,
+    measures JSON NOT NULL
 );
 
 CREATE TABLE identity_edges (
@@ -71,6 +75,7 @@ _REQUIRED_COLUMN_TYPES = {
     "database_metadata": {
         "schema_version": "INTEGER",
         "dataset_version": "INTEGER",
+        "manifest_version": "VARCHAR",
     },
     "customers": {"customer_id": "VARCHAR"},
     "evidence": {
@@ -94,6 +99,8 @@ _REQUIRED_COLUMN_TYPES = {
         "identities": "JSON",
         "canonical_customer_id": "VARCHAR",
         "attributes": "JSON",
+        "dimensions": "JSON",
+        "measures": "JSON",
     },
     "identity_edges": {
         "left_namespace": "VARCHAR",
@@ -118,8 +125,8 @@ _REQUIRED_SOURCE_IDS = frozenset(
 _REQUIRED_LINK_TYPES = frozenset({"EXACT", "DECLARED", "SYNTHETIC"})
 _REQUIRED_ROW_COUNTS = {
     "customers": 30,
-    "events": 174,
-    "evidence": 174,
+    "events": 199,
+    "evidence": 199,
     "identity_edges": 150,
 }
 
@@ -134,8 +141,12 @@ def _write_database(path: Path, dataset: SyntheticDataset) -> None:
         connection.execute("BEGIN TRANSACTION")
         connection.execute(_SCHEMA)
         connection.execute(
-            "INSERT INTO database_metadata VALUES (?, ?)",
-            [DATABASE_SCHEMA_VERSION, SYNTHETIC_DATASET_VERSION],
+            "INSERT INTO database_metadata VALUES (?, ?, ?)",
+            [
+                DATABASE_SCHEMA_VERSION,
+                SYNTHETIC_DATASET_VERSION,
+                SYNTHETIC_MANIFEST_VERSION,
+            ],
         )
         connection.executemany(
             "INSERT INTO customers VALUES (?)",
@@ -156,7 +167,7 @@ def _write_database(path: Path, dataset: SyntheticDataset) -> None:
             ],
         )
         connection.executemany(
-            "INSERT INTO events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     event.event_id,
@@ -171,6 +182,8 @@ def _write_database(path: Path, dataset: SyntheticDataset) -> None:
                     _json([identity.model_dump(mode="json") for identity in event.identities]),
                     event.canonical_customer_id,
                     _json(event.attributes),
+                    _json(event.dimensions),
+                    _json(event.measures),
                 )
                 for event in dataset.events
             ],
@@ -210,15 +223,20 @@ def is_database_ready(path: str | Path) -> bool:
             return False
 
         versions = connection.execute(
-            "SELECT schema_version, dataset_version FROM database_metadata"
+            "SELECT schema_version, dataset_version, manifest_version FROM database_metadata"
         ).fetchall()
-        if versions != [(DATABASE_SCHEMA_VERSION, SYNTHETIC_DATASET_VERSION)]:
+        if versions != [
+            (
+                DATABASE_SCHEMA_VERSION,
+                SYNTHETIC_DATASET_VERSION,
+                SYNTHETIC_MANIFEST_VERSION,
+            )
+        ]:
             return False
 
         for table, required_column_types in _REQUIRED_COLUMN_TYPES.items():
             column_types = {
-                row[0]: row[1]
-                for row in connection.execute(f"DESCRIBE {table}").fetchall()
+                row[0]: row[1] for row in connection.execute(f"DESCRIBE {table}").fetchall()
             }
             if column_types != required_column_types:
                 return False
@@ -231,8 +249,7 @@ def is_database_ready(path: str | Path) -> bool:
             return False
 
         source_ids = {
-            row[0]
-            for row in connection.execute("SELECT DISTINCT source_id FROM events").fetchall()
+            row[0] for row in connection.execute("SELECT DISTINCT source_id FROM events").fetchall()
         }
         if source_ids != _REQUIRED_SOURCE_IDS:
             return False

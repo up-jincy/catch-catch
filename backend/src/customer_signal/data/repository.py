@@ -208,7 +208,9 @@ class DuckDBRepository:
                     text,
                     identities,
                     canonical_customer_id,
-                    attributes
+                    attributes,
+                    dimensions,
+                    measures
                 FROM events
                 WHERE occurred_at >= ?
                   AND occurred_at < ?
@@ -237,6 +239,8 @@ class DuckDBRepository:
                     "identities": (json.loads(row[9]) if isinstance(row[9], str) else row[9]),
                     "canonical_customer_id": row[10],
                     "attributes": _parse_json(row[11]),
+                    "dimensions": _parse_json(row[12]),
+                    "measures": _parse_json(row[13]),
                 },
                 strict=True,
             )

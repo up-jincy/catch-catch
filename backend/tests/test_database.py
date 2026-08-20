@@ -27,6 +27,7 @@ from customer_signal.domain.models import (
     SyntheticDataset,
 )
 from customer_signal.synthetic.generator import generate_dataset
+from customer_signal.synthetic.manifest import SYNTHETIC_MANIFEST_VERSION
 
 
 SEOUL = ZoneInfo("Asia/Seoul")
@@ -120,7 +121,7 @@ def test_seed_database_atomically_creates_expected_schema_and_rows(
             )
         }
         database_version = connection.execute(
-            "SELECT schema_version, dataset_version FROM database_metadata"
+            "SELECT schema_version, dataset_version, manifest_version FROM database_metadata"
         ).fetchone()
         event_types = {row[0]: row[1] for row in connection.execute("DESCRIBE events").fetchall()}
         evidence_types = {
@@ -132,17 +133,20 @@ def test_seed_database_atomically_creates_expected_schema_and_rows(
     assert row_counts == {
         "database_metadata": 1,
         "customers": 30,
-        "events": 174,
-        "evidence": 174,
+        "events": 199,
+        "evidence": 199,
         "identity_edges": 150,
     }
     assert database_version == (
         database.DATABASE_SCHEMA_VERSION,
         database.SYNTHETIC_DATASET_VERSION,
+        SYNTHETIC_MANIFEST_VERSION,
     )
     assert event_types["occurred_at"] == "TIMESTAMP WITH TIME ZONE"
     assert event_types["identities"] == "JSON"
     assert event_types["attributes"] == "JSON"
+    assert event_types["dimensions"] == "JSON"
+    assert event_types["measures"] == "JSON"
     assert evidence_types["occurred_at"] == "TIMESTAMP WITH TIME ZONE"
     assert evidence_types["raw_fields"] == "JSON"
 
@@ -171,6 +175,8 @@ def test_database_readiness_accepts_only_a_current_managed_database(tmp_path: Pa
         "ALTER TABLE evidence ALTER COLUMN occurred_at SET DATA TYPE VARCHAR",
         "ALTER TABLE events ALTER COLUMN identities SET DATA TYPE VARCHAR",
         "ALTER TABLE events ALTER COLUMN attributes SET DATA TYPE VARCHAR",
+        "ALTER TABLE events ALTER COLUMN dimensions SET DATA TYPE VARCHAR",
+        "ALTER TABLE events ALTER COLUMN measures SET DATA TYPE VARCHAR",
         "ALTER TABLE evidence ALTER COLUMN raw_fields SET DATA TYPE VARCHAR",
         "ALTER TABLE identity_edges ALTER COLUMN confidence SET DATA TYPE VARCHAR",
     ],
@@ -188,6 +194,56 @@ def test_database_readiness_rejects_wrong_required_column_types(
         connection.close()
 
     assert database.is_database_ready(database_path) is False
+
+
+@pytest.mark.parametrize(
+    "alter_statement",
+    [
+        "ALTER TABLE events DROP COLUMN dimensions",
+        "ALTER TABLE events ALTER COLUMN measures SET DATA TYPE VARCHAR",
+    ],
+)
+def test_seed_database_atomically_replaces_outdated_generic_event_schema(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    alter_statement: str,
+) -> None:
+    database_path = tmp_path / "outdated.duckdb"
+    seed_database(database_path, generate_dataset())
+    connection = duckdb.connect(str(database_path))
+    try:
+        connection.execute(alter_statement)
+    finally:
+        connection.close()
+    assert database.is_database_ready(database_path) is False
+
+    replacements: list[tuple[Path, Path]] = []
+    real_replace = os.replace
+
+    def recording_replace(source: str | Path, destination: str | Path) -> None:
+        source_path = Path(source)
+        destination_path = Path(destination)
+        replacements.append((source_path, destination_path))
+        real_replace(source_path, destination_path)
+
+    monkeypatch.setattr(database.os, "replace", recording_replace)
+
+    seed_database(database_path, generate_dataset())
+
+    assert len(replacements) == 1
+    temporary_path, final_path = replacements[0]
+    assert temporary_path.parent == database_path.parent
+    assert final_path == database_path
+    assert not temporary_path.exists()
+    assert database.is_database_ready(database_path) is True
+
+    connection = duckdb.connect(str(database_path), read_only=True)
+    try:
+        event_types = {row[0]: row[1] for row in connection.execute("DESCRIBE events").fetchall()}
+    finally:
+        connection.close()
+    assert event_types["dimensions"] == "JSON"
+    assert event_types["measures"] == "JSON"
 
 
 def test_agent_database_contains_identity_provenance_but_not_evaluation_truth(

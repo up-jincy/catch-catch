@@ -118,6 +118,32 @@ def test_synthetic_manifests_declare_real_event_namespaces_and_static_cadence(
         }
 
 
+@pytest.mark.parametrize(
+    ("source_id", "dimensions", "measures"),
+    [
+        ("search_history", {"customer_ref", "is_repeat"}, {"result_count"}),
+        ("search_feedback", {"customer_ref"}, {"rating"}),
+        ("digital_behavior", {"customer_ref", "authenticated"}, {"session_depth"}),
+        (
+            "subscription",
+            {"customer_ref", "product_family", "stage", "status"},
+            set(),
+        ),
+        ("voc", {"customer_ref", "contact_channel", "noise"}, set()),
+    ],
+)
+def test_synthetic_manifests_declare_normalized_event_fields(
+    source_id: str,
+    dimensions: set[str],
+    measures: set[str],
+    synthetic_dataset,
+) -> None:
+    manifest = synthetic_source_manifest(source_id, synthetic_dataset.events)
+
+    assert set(manifest.dimensions) == dimensions
+    assert set(manifest.measures) == measures
+
+
 @pytest.mark.parametrize("adapter_kind", ["memory", "duckdb"])
 def test_registry_returns_only_requested_masked_evidence_in_requested_order(
     adapter_kind: str, repository, synthetic_dataset

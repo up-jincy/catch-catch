@@ -9,6 +9,7 @@ from customer_signal.domain.sources import (
     DimensionDescriptor,
     IdentityQualityDescriptor,
     MaskingPolicy,
+    MeasureDescriptor,
     SourceManifest,
     TimeRange,
 )
@@ -50,6 +51,85 @@ _ALL_CAPABILITIES: frozenset[GenericPrimitiveName] = frozenset(
         "get_evidence",
     }
 )
+SYNTHETIC_ADAPTER_VERSION = "2"
+SYNTHETIC_MANIFEST_VERSION = "2"
+
+_PUBLIC_DIMENSIONS: dict[SourceId, dict[str, DimensionDescriptor]] = {
+    "search_history": {
+        "is_repeat": DimensionDescriptor(
+            semantic_type="boolean",
+            description="Whether this search repeats an earlier search.",
+            pii_classification="none",
+        )
+    },
+    "search_feedback": {},
+    "digital_behavior": {
+        "authenticated": DimensionDescriptor(
+            semantic_type="boolean",
+            description="Whether the digital session was authenticated.",
+            pii_classification="none",
+        )
+    },
+    "subscription": {
+        "product_family": DimensionDescriptor(
+            semantic_type="category",
+            description="Subscription product family.",
+            pii_classification="none",
+            allowed_values=frozenset({"internet"}),
+        ),
+        "stage": DimensionDescriptor(
+            semantic_type="category",
+            description="Signup lifecycle stage.",
+            pii_classification="none",
+            allowed_values=frozenset({"application", "activated"}),
+        ),
+        "status": DimensionDescriptor(
+            semantic_type="category",
+            description="Current subscription status.",
+            pii_classification="none",
+            allowed_values=frozenset({"active"}),
+        ),
+    },
+    "voc": {
+        "contact_channel": DimensionDescriptor(
+            semantic_type="category",
+            description="Customer-service contact channel.",
+            pii_classification="none",
+            allowed_values=frozenset({"call", "chat"}),
+        ),
+        "noise": DimensionDescriptor(
+            semantic_type="boolean",
+            description="Whether the contact is an intentional near-miss event.",
+            pii_classification="none",
+        ),
+    },
+}
+
+_PUBLIC_MEASURES: dict[SourceId, dict[str, MeasureDescriptor]] = {
+    "search_history": {
+        "result_count": MeasureDescriptor(
+            semantic_type="integer",
+            description="Number of results returned for the search.",
+            unit="results",
+        )
+    },
+    "search_feedback": {
+        "rating": MeasureDescriptor(
+            semantic_type="integer",
+            description="Submitted feedback rating.",
+            unit="score",
+        )
+    },
+    "digital_behavior": {
+        "session_depth": MeasureDescriptor(
+            semantic_type="integer",
+            description="Number of meaningful steps in the support session.",
+            unit="steps",
+        )
+    },
+    "subscription": {},
+    "voc": {},
+}
 
 
 def synthetic_source_manifest(source_id: SourceId, events: list[CustomerEvent]) -> SourceManifest:
@@ -65,8 +145,8 @@ def synthetic_source_manifest(source_id: SourceId, events: list[CustomerEvent]) 
         source_id=source_id,
         label=_LABELS[source_id],
         description=_DESCRIPTIONS[source_id],
-        adapter_version="1",
-        manifest_version="1",
+        adapter_version=SYNTHETIC_ADAPTER_VERSION,
+        manifest_version=SYNTHETIC_MANIFEST_VERSION,
         data_interval=TimeRange(
             start_at=min(event.occurred_at for event in source_events),
             end_at=max(event.occurred_at for event in source_events) + timedelta(microseconds=1),
@@ -80,9 +160,10 @@ def synthetic_source_manifest(source_id: SourceId, events: list[CustomerEvent]) 
                 semantic_type="identifier",
                 description="Masked source-native customer reference.",
                 pii_classification="direct_identifier",
-            )
+            ),
+            **_PUBLIC_DIMENSIONS[source_id],
         },
-        measures={},
+        measures=_PUBLIC_MEASURES[source_id],
         capabilities=_ALL_CAPABILITIES,
         masking_policy=MaskingPolicy(rules={"customer_ref": "partial"}),
         identity_quality=IdentityQualityDescriptor(
@@ -93,4 +174,8 @@ def synthetic_source_manifest(source_id: SourceId, events: list[CustomerEvent]) 
     )
 
 
-__all__ = ["synthetic_source_manifest"]
+__all__ = [
+    "SYNTHETIC_ADAPTER_VERSION",
+    "SYNTHETIC_MANIFEST_VERSION",
+    "synthetic_source_manifest",
+]
