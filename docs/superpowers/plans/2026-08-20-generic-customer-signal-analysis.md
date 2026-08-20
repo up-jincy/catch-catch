@@ -430,17 +430,18 @@ class FactProvenance(DomainModel):
     manifest_versions: dict[SourceId, str]
     dataset_version: str
 
-class FactPayloadBase(DomainModel):
-    input_fact_ids: list[str] = Field(default_factory=list)
-    processing: ProcessingStats
-    provenance: FactProvenance
-
 class AnalysisMetricFact(DomainModel):
     metric_key: str = Field(pattern=r"^[a-z][a-z0-9_]{1,63}$")
     label: str = Field(min_length=1)
     value: FiniteFloat | int
     unit: str = Field(min_length=1)
     dimensions: dict[str, DimensionValue] = Field(default_factory=dict)
+
+class FactPayloadBase(DomainModel):
+    input_fact_ids: list[str] = Field(default_factory=list)
+    processing: ProcessingStats
+    provenance: FactProvenance
+    metrics: list[AnalysisMetricFact]
 
 class AnalysisFact(DomainModel):
     fact_id: str
@@ -520,6 +521,12 @@ Generic nested model은 모두 `Analysis` prefix를 사용해 기존 legacy anal
 `(-occurrence_count, customer_id)`, sequence/evidence는 요청 순서, ranking은 `(-score, customer_id)`로
 정렬합니다. 같은 입력 replay에서 모든 nested record 순서가 같아야 합니다.
 `processing`과 `provenance`는 10개 payload 모두 필수이며 Executor가 서버에서 채웁니다.
+`metrics`도 10개 payload 모두 필수입니다. 각 Primitive는 canonical metric key/label/unit을 서버에서
+생성하고 zero-result에도 value `0`인 Metric을 생략하지 않습니다. 최소 canonical key는
+catalog `source_count`, profile `event_count`/`customer_count`, aggregate의 requested metric,
+segment `segment_customer_count`, repetition `repeated_customer_count`, sequence `matched_customer_count`,
+compare의 requested delta, ranking `ranked_customer_count`, journey `journey_event_count`, evidence
+`evidence_record_count`입니다. `AnalysisFact.metrics`는 `payload.metrics`와 exact 같아야 합니다.
 실제 모듈에서는 10개 payload와 `FactPayload` union을 `AnalysisFact`보다 먼저 정의합니다.
 Generic `AnalysisMetricFact`는 legacy `agent.contracts.MetricFact`와 별도 타입입니다. Claim `FactRef`와
 `ExpectedOutputSpec.required_metric_keys`는 이 generic `metric_key`만 참조해 기존 Journey 계약을 깨지 않습니다.
@@ -822,13 +829,21 @@ Expected: import failure for `customer_signal.analytics.primitives`
 - [ ] **Step 4: Profile, Aggregate, Segment와 Sequence 순수 함수 구현**
 
 ```python
-CORE_HANDLERS: dict[GenericPrimitiveName, PrimitiveHandler] = {
-    "profile_events": profile_events,
-    "aggregate_events": aggregate_events,
-    "segment_customers": segment_customers,
-    "detect_repetition": detect_repetition,
-    "match_sequence": match_sequence,
-    "compare_segments": compare_segments,
+PrimitiveHandler = Callable[[PrimitiveContext, DomainModel], FactPayloadBase]
+
+@dataclass(frozen=True)
+class HandlerSpec:
+    input_type: type[DomainModel]
+    output_type: type[FactPayloadBase]
+    handler: PrimitiveHandler
+
+CORE_HANDLERS: dict[GenericPrimitiveName, HandlerSpec] = {
+    "profile_events": HandlerSpec(ProfileEventsInput, ProfileEventsPayload, profile_events),
+    "aggregate_events": HandlerSpec(AggregateEventsInput, AggregateEventsPayload, aggregate_events),
+    "segment_customers": HandlerSpec(SegmentCustomersInput, SegmentCustomersPayload, segment_customers),
+    "detect_repetition": HandlerSpec(DetectRepetitionInput, RepetitionPayload, detect_repetition),
+    "match_sequence": HandlerSpec(MatchSequenceInput, SequenceMatchPayload, match_sequence),
+    "compare_segments": HandlerSpec(CompareSegmentsInput, SegmentComparisonPayload, compare_segments),
 }
 ```
 
@@ -911,7 +926,10 @@ class PrimitiveExecutor:
         step_budget = budget.child(timeout_seconds=step.limits.timeout_seconds)
         step_budget.checkpoint()
         context = self._context(step_scope, inputs, step_budget)
-        payload = HANDLERS[step.primitive](context, step.parameters)
+        spec = HANDLERS[step.primitive]
+        parameters = spec.input_type.model_validate(step.parameters.model_dump())
+        raw_payload = spec.handler(context, parameters)
+        payload = spec.output_type.model_validate(raw_payload)
         step_budget.checkpoint()
         if payload.processing.scanned_events == 0:
             raise NoDataScope(payload.provenance)
@@ -937,7 +955,9 @@ class PrimitiveExecutor:
 ```
 
 이 단계에서 `catalog_sources`, `rank_customers`, `get_customer_journey`, `get_evidence`와 정확히
-10개인 최종 `HANDLERS` registry를 구현합니다.
+10개인 최종 `HANDLERS: dict[GenericPrimitiveName, HandlerSpec]` registry를 구현합니다.
+Registry contract test는 각 key의 input discriminator, output kind와 handler 반환 type을 교차검증하고
+다른 Primitive input/output을 주입하면 handler 전/Fact build 전에 실패하는지 확인합니다.
 `resolve_dependencies()`는 `step.input_step_ids`를 `prior_facts[*].step_id`에 매핑하고 누락, 중복,
 미래 Step을 거부한 뒤 ordered Fact list를 handler context에 전달합니다. Handler 반환은
 `step.expected_output`을 통과한 다음에만 `AnalysisFact`로 생성합니다.
@@ -1212,8 +1232,9 @@ class AnalysisLoop:
 ```
 
 Outcome validator는 `awaiting_clarification`일 때 clarification만, unsupported failure일 때
-`unsupported`와 safe error/suggested questions를, `degraded`일 때 non-empty limitation과 결론 없는
-report를 요구합니다. 이 필드는 Coordinator의 SSE error, Artifact와 UI까지 손실 없이 전달합니다.
+`unsupported`와 safe error/suggested questions를 요구합니다. no-data `degraded`는 `report is None`,
+empty Facts/Notes와 non-empty server limitation을 exact 요구합니다. 같은 규칙을 Outcome, Artifact,
+SSE golden과 UI reducer가 사용합니다. 이 필드는 Coordinator의 SSE error, Artifact와 UI까지 손실 없이 전달합니다.
 `EventScope.from_validated_goal()`만 실행 Scope를 만들 수 있습니다. 공개 Goal의 기간/Source와 실제
 Primitive Fact scope가 같아야 하며 hard `max_events`는 server settings에서만 주입합니다.
 `AnalysisRunner.run()`은 위 `RunnerOutcome` union을 반환합니다. 기존 Fixture/Gemini runner는
