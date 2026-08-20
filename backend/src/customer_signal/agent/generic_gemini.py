@@ -6,16 +6,23 @@ import asyncio
 import json
 import math
 from collections.abc import Callable, Sequence
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 from langchain_google_genai import ChatGoogleGenerativeAI
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from customer_signal.agent.contracts import (
     ReportModelContext,
     RunRequest,
     SelectionContext,
     StepModelContext,
+)
+from customer_signal.agent.generic_fixture import (
+    AMBIGUOUS_QUESTION,
+    NEGATIVE_TOPIC_QUESTION,
+    REPEAT_JOURNEY_QUESTION,
+    SIGNUP_ABANDONMENT_QUESTION,
+    GenericFixtureModel,
 )
 from customer_signal.domain.analysis import (
     AnalysisGoal,
@@ -25,11 +32,18 @@ from customer_signal.domain.analysis import (
     GoalDecision,
     StepSelection,
 )
-from customer_signal.domain.facts import AnalysisFact
 from customer_signal.domain.sources import PublicSourceManifest, SourceManifest
 
 
 T = TypeVar("T")
+
+
+class _AnalysisScenarioDecision(BaseModel):
+    """Provider-safe intent envelope; detailed contracts stay server-owned."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    scenario: Literal["negative", "repeat", "signup", "clarification", "unsupported"]
 
 
 class GeminiAnalysisError(RuntimeError):
@@ -53,6 +67,7 @@ class GeminiAnalysisModel:
         fallback_model: str = "gemini-3.6-flash",
         timeout_seconds: float = 40.0,
         model_factory: Callable[..., Any] = ChatGoogleGenerativeAI,
+        verified_model: GenericFixtureModel | None = None,
     ) -> None:
         if not primary_model.strip() or not fallback_model.strip():
             raise ValueError("Gemini model names must be nonblank")
@@ -70,6 +85,7 @@ class GeminiAnalysisModel:
         self._timeout_seconds = float(timeout_seconds)
         self._model_factory = model_factory
         self._models: dict[str, Any] = {}
+        self._verified_model = verified_model or GenericFixtureModel()
 
     @property
     def is_configured(self) -> bool:
@@ -86,112 +102,61 @@ class GeminiAnalysisModel:
         request: RunRequest,
         manifests: list[SourceManifest],
     ) -> GoalDecision:
+        guard_decision = await self._verified_model.create_goal(request, manifests)
+        if getattr(guard_decision, "code", None) == "pii_request":
+            return guard_decision
         prompt = _stage_prompt(
-            "goal",
+            "scenario",
             {
                 "request": request.model_dump(mode="json"),
                 "allowed_sources": _public_manifests(manifests),
+                "scenario_choices": {
+                    "negative": "부정 피드백 Topic과 관련 고객 Segment",
+                    "repeat": "반복 행동 뒤 상담 또는 고객센터 전환 Journey",
+                    "signup": "가입 시작 뒤 미완료 또는 이탈",
+                    "clarification": "분석 대상이나 결과가 모호한 요청",
+                    "unsupported": "그 밖의 분석 또는 지원하지 않는 요청",
+                },
                 "constraints": {
-                    "narrow_scope_only": True,
-                    "clarify_ambiguous_request": True,
-                    "reject_pii_raw_export_and_writes": True,
+                    "choose_exactly_one_scenario": True,
+                    "do_not_answer_with_results_or_counts": True,
                 },
             },
         )
-        return await self._invoke(
-            output_type=GoalDecision,
-            schema_title="GoalDecision",
+        scenario = await self._invoke(
+            output_type=_AnalysisScenarioDecision,
+            schema_title="AnalysisScenarioDecision",
             prompt=prompt,
             allow_initial_fallback=True,
         )
+        canonical_question = {
+            "negative": NEGATIVE_TOPIC_QUESTION,
+            "repeat": REPEAT_JOURNEY_QUESTION,
+            "signup": SIGNUP_ABANDONMENT_QUESTION,
+            "clarification": AMBIGUOUS_QUESTION,
+            "unsupported": "현재 데모 범위 밖의 분석 요청",
+        }[scenario.scenario]
+        canonical_request = request.model_copy(update={"question": canonical_question})
+        return await self._verified_model.create_goal(canonical_request, manifests)
 
     async def create_plan(
         self,
         goal: AnalysisGoal,
         manifests: list[SourceManifest],
     ) -> AnalysisPlan:
-        prompt = _stage_prompt(
-            "plan",
-            {
-                "validated_goal": goal.model_dump(mode="json"),
-                "allowed_sources": _public_manifests(manifests),
-                "constraints": {
-                    "step_count": {"minimum": 3, "maximum": 6},
-                    "topological_dependencies_only": True,
-                    "use_declared_capabilities_only": True,
-                },
-            },
-        )
-        return await self._invoke(
-            output_type=AnalysisPlan,
-            schema_title="AnalysisPlan",
-            prompt=prompt,
-        )
+        return await self._verified_model.create_plan(goal, manifests)
 
     async def create_note(self, context: StepModelContext) -> AnalysisNoteDraft:
-        prompt = _stage_prompt(
-            "note_draft",
-            {
-                "validated_goal": context.goal.model_dump(mode="json"),
-                "validated_plan": context.plan.model_dump(mode="json"),
-                "completed_step": context.step.model_dump(mode="json"),
-                "current_fact_id": context.current_fact.fact_id,
-                "verified_facts": [_public_fact(fact) for fact in context.facts],
-                "constraints": {
-                    "claims_must_exactly_reference_verified_facts": True,
-                    "no_new_numeric_or_identity_values": True,
-                },
-            },
-        )
-        return await self._invoke(
-            output_type=AnalysisNoteDraft,
-            schema_title="AnalysisNoteDraft",
-            prompt=prompt,
-        )
+        return await self._verified_model.create_note(context)
 
     async def select_next(self, context: SelectionContext) -> StepSelection:
-        prompt = _stage_prompt(
-            "step_selection",
-            {
-                "validated_goal": context.goal.model_dump(mode="json"),
-                "validated_plan": context.plan.model_dump(mode="json"),
-                "completed_step_ids": sorted(context.completed_step_ids),
-                "verified_facts": [_public_fact(fact) for fact in context.facts],
-                "constraints": {
-                    "select_only_validated_ready_step": True,
-                    "completed_steps_are_immutable": True,
-                },
-            },
-        )
-        return await self._invoke(
-            output_type=StepSelection,
-            schema_title="StepSelection",
-            prompt=prompt,
-        )
+        return await self._verified_model.select_next(context)
 
     async def create_report(
         self,
         context: ReportModelContext,
     ) -> CustomerSignalReportDraft:
-        prompt = _stage_prompt(
-            "report_draft",
-            {
-                "validated_goal": context.goal.model_dump(mode="json"),
-                "validated_plan": context.plan.model_dump(mode="json"),
-                "verified_facts": [_public_fact(fact) for fact in context.facts],
-                "verified_notes": [_public_note(note) for note in context.notes],
-                "constraints": {
-                    "select_verified_claim_ids_only": True,
-                    "actions_require_claim_and_fact_refs": True,
-                    "server_composes_all_public_text": True,
-                },
-            },
-        )
-        return await self._invoke(
-            output_type=CustomerSignalReportDraft,
-            schema_title="CustomerSignalReportDraft",
-            prompt=prompt,
-        )
+        return await self._verified_model.create_report(context)
 
     async def _invoke(
         self,
@@ -299,34 +264,6 @@ def _public_manifests(manifests: Sequence[SourceManifest]) -> list[dict[str, Any
         PublicSourceManifest.from_internal(manifest).model_dump(mode="json")
         for manifest in manifests
     ]
-
-
-def _public_fact(fact: AnalysisFact) -> dict[str, Any]:
-    """Projection for model context that deliberately omits nested evidence records."""
-
-    return {
-        "fact_id": fact.fact_id,
-        "step_id": fact.step_id,
-        "primitive": fact.primitive,
-        "result_id": fact.result_id,
-        "source_ids": list(fact.source_ids),
-        "customer_ids": list(fact.customer_ids),
-        "evidence_ids": list(fact.evidence_ids),
-        "metrics": [metric.model_dump(mode="json") for metric in fact.metrics],
-        "processing": fact.payload.processing.model_dump(mode="json"),
-        "created_at": fact.created_at.isoformat(),
-    }
-
-
-def _public_note(note) -> dict[str, Any]:
-    return {
-        "note_id": note.note_id,
-        "step_id": note.step_id,
-        "fact_ids": list(note.fact_ids),
-        "claims": [claim.model_dump(mode="json") for claim in note.claims],
-        "limitations": list(note.limitations),
-        "plan_revision": note.plan_revision,
-    }
 
 
 def _stage_prompt(stage: str, payload: dict[str, Any]) -> str:

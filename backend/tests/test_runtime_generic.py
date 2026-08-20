@@ -16,7 +16,8 @@ from customer_signal.agent.generic_fixture import (
     REPEAT_JOURNEY_QUESTION,
     SIGNUP_ABANDONMENT_QUESTION,
 )
-from customer_signal.api import create_app
+from customer_signal.agent.contracts import RunRequest
+from customer_signal.api import _default_dependencies, create_app
 from customer_signal.config import Settings
 
 
@@ -54,6 +55,33 @@ def _request(
         "end_at": end_at,
         "enabled_sources": SOURCES,
     }
+
+
+@pytest.mark.asyncio
+async def test_default_gemini_loop_uses_the_same_functional_plan_as_fixture(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(
+        agent_mode="gemini",
+        gemini_api_key="test-key",
+        database_path=tmp_path / "customer-signal.duckdb",
+        artifact_directory=tmp_path / "artifacts",
+        _env_file=None,
+    )
+    dependencies = _default_dependencies(settings)
+    loop = dependencies.coordinator._generic_gemini_loop
+    assert loop is not None
+    model = loop._model
+    verified_model = model._verified_model
+    request = RunRequest.model_validate(_request(NEGATIVE_TOPIC_QUESTION))
+    manifests = dependencies.registry.manifests(SOURCES)
+
+    goal = await verified_model.create_goal(request, manifests)
+    plan = await verified_model.create_plan(goal, manifests)
+    aggregate = next(step for step in plan.steps if step.step_id == "step-negative-topic")
+
+    assert aggregate.source_ids == ["search_feedback"]
+    assert "topic == '요금제 변경'" in aggregate.parameters.predicates
 
 
 def _wait_for_status(

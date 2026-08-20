@@ -192,8 +192,9 @@ def _default_dependencies(settings: Settings) -> ApiDependencies:
     api_key = (
         settings.gemini_api_key.get_secret_value() if settings.gemini_api_key is not None else None
     )
+    functional_model = _FunctionalFixtureModel()
     generic_fixture_loop = AnalysisLoop(
-        model=_FunctionalFixtureModel(),
+        model=functional_model,
         executor=executor,
         registry=registry,
     )
@@ -204,6 +205,7 @@ def _default_dependencies(settings: Settings) -> ApiDependencies:
                 api_key=api_key,
                 primary_model=settings.gemini_model,
                 fallback_model=settings.gemini_fallback_model,
+                verified_model=functional_model,
             ),
             executor=executor,
             registry=registry,

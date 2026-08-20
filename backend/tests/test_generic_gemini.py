@@ -258,7 +258,7 @@ async def _staged_values():
 
 
 @pytest.mark.asyncio
-async def test_uses_five_strict_structured_stages_and_public_prompts() -> None:
+async def test_uses_provider_safe_scenario_schema_and_verified_stages() -> None:
     (
         request,
         manifests,
@@ -273,7 +273,7 @@ async def test_uses_five_strict_structured_stages_and_public_prompts() -> None:
     ) = await _staged_values()
     provider = _ScriptedProvider(
         {
-            "gemini-3.7-flash": [goal, plan, note_draft, selection, report_draft],
+            "gemini-3.7-flash": [{"scenario": "negative"}],
         }
     )
     model = GeminiAnalysisModel(
@@ -289,13 +289,14 @@ async def test_uses_five_strict_structured_stages_and_public_prompts() -> None:
     assert await model.create_report(report_context) == report_draft
 
     assert [call["schema_title"] for call in provider.structured_calls] == [
-        "GoalDecision",
-        "AnalysisPlan",
-        "AnalysisNoteDraft",
-        "StepSelection",
-        "CustomerSignalReportDraft",
+        "AnalysisScenarioDecision"
     ]
     assert all(call["method"] == "json_schema" for call in provider.structured_calls)
+    provider_schema = json.dumps(provider.structured_calls[0]["schema"], sort_keys=True)
+    assert all(
+        unsupported not in provider_schema
+        for unsupported in ("$defs", "$ref", "oneOf", "discriminator")
+    )
     assert provider.model_calls == [
         {
             "model": "gemini-3.7-flash",
@@ -320,7 +321,7 @@ async def test_typed_not_found_on_first_stage_switches_once_to_36() -> None:
     provider = _ScriptedProvider(
         {
             "gemini-3.7-flash": [_ModelNotFoundError("private primary response")],
-            "gemini-3.6-flash": [goal, plan],
+            "gemini-3.6-flash": [{"scenario": "negative"}],
         }
     )
     model = GeminiAnalysisModel(api_key="key", model_factory=provider)
@@ -333,26 +334,6 @@ async def test_typed_not_found_on_first_stage_switches_once_to_36() -> None:
         "gemini-3.6-flash",
     ]
     assert model.model_name == "gemini-3.6-flash"
-
-
-@pytest.mark.asyncio
-async def test_not_found_after_goal_never_falls_back() -> None:
-    request, manifests, goal, *_rest = await _staged_values()
-    provider = _ScriptedProvider(
-        {
-            "gemini-3.7-flash": [goal, _ModelNotFoundError("private plan response")],
-            "gemini-3.6-flash": [],
-        }
-    )
-    model = GeminiAnalysisModel(api_key="key", model_factory=provider)
-
-    await model.create_goal(request, manifests)
-    with pytest.raises(GeminiAnalysisError) as caught:
-        await model.create_plan(goal, manifests)
-
-    assert caught.value.code == "gemini_model_not_found"
-    assert "private" not in str(caught.value).casefold()
-    assert [call["model"] for call in provider.model_calls] == ["gemini-3.7-flash"]
 
 
 @pytest.mark.asyncio
@@ -422,10 +403,27 @@ async def test_provider_failure_becomes_generic_safe_failure_without_fixture_fal
 @pytest.mark.asyncio
 async def test_malformed_structured_value_fails_closed() -> None:
     request, manifests, *_rest = await _staged_values()
-    provider = _ScriptedProvider({"gemini-3.7-flash": [{"kind": "goal", "source_ids": ["forged"]}]})
+    provider = _ScriptedProvider({"gemini-3.7-flash": [{"scenario": "forged"}]})
     model = GeminiAnalysisModel(api_key="key", model_factory=provider)
 
     with pytest.raises(GeminiAnalysisError) as caught:
         await model.create_goal(request, manifests)
 
     assert caught.value.code == "gemini_validation_failed"
+
+
+@pytest.mark.asyncio
+async def test_provider_scenario_maps_a_freeform_question_to_a_verified_goal() -> None:
+    request, manifests, *_rest = await _staged_values()
+    request = request.model_copy(
+        update={
+            "question": "같은 문제를 반복해서 찾은 뒤 고객센터까지 이동한 고객 흐름을 분석해 줘."
+        }
+    )
+    provider = _ScriptedProvider({"gemini-3.7-flash": [{"scenario": "repeat"}]})
+    model = GeminiAnalysisModel(api_key="key", model_factory=provider)
+
+    goal = await model.create_goal(request, manifests)
+
+    assert goal.kind == "goal"
+    assert goal.goal_id == "goal-repeat"
