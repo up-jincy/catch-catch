@@ -26,14 +26,21 @@ from customer_signal.domain.analysis import (
 from customer_signal.domain.facts import (
     AggregateEventsPayload,
     AnalysisFact,
+    AnalysisJourneyEvent,
     AnalysisMetricDelta,
     AnalysisMetricFact,
+    AnalysisQualityMetric,
+    AnalysisRankedCustomer,
+    AnalysisRepetitionMatch,
+    AnalysisSequenceMatch,
+    AnalysisSignal,
     CatalogSourcesPayload,
     CustomerJourneyPayload,
     CustomerRankingPayload,
     EvidencePayload,
     FactPayload,
     FactProvenance,
+    FieldRef,
     ProfileEventsPayload,
     ProcessingStats,
     RepetitionPayload,
@@ -41,6 +48,7 @@ from customer_signal.domain.facts import (
     SegmentCustomersPayload,
     SequenceMatchPayload,
     build_fact,
+    validate_comparison_payload,
 )
 from customer_signal.domain.primitives import (
     CatalogSourcesInput,
@@ -320,6 +328,7 @@ def test_all_ten_payloads_are_discriminated_and_require_common_server_fields() -
         ),
         AggregateEventsPayload(
             kind="aggregate_events",
+            requested_metric_key="event_count",
             buckets=[],
             series=[],
             **common([zero("event_count")]),
@@ -344,6 +353,7 @@ def test_all_ten_payloads_are_discriminated_and_require_common_server_fields() -
         ),
         SegmentComparisonPayload(
             kind="compare_segments",
+            requested_metric_key="event_count_delta",
             baseline_fact_id="fact-a",
             comparison_fact_id="fact-b",
             deltas=[
@@ -355,7 +365,18 @@ def test_all_ten_payloads_are_discriminated_and_require_common_server_fields() -
                     unit="events",
                 )
             ],
-            **common([zero("event_count_delta")], returned_rows=1),
+            **{
+                **common([zero("event_count_delta")], returned_rows=1),
+                "metrics": [
+                    AnalysisMetricFact(
+                        metric_key="event_count_delta",
+                        label="Event Count Delta",
+                        value=0,
+                        unit="events",
+                    )
+                ],
+                "input_fact_ids": ["fact-a", "fact-b"],
+            },
         ),
         CustomerRankingPayload(
             kind="rank_customers",
@@ -389,6 +410,401 @@ def test_all_ten_payloads_are_discriminated_and_require_common_server_fields() -
     ]
     with pytest.raises(ValidationError):
         adapter.validate_python({**payloads[-1].model_dump(), "raw_fields": {"email": "x"}})
+
+
+def test_comparison_binds_ordered_input_fact_ids_and_requested_delta_metric() -> None:
+    values = {
+        "kind": "compare_segments",
+        "input_fact_ids": ["fact-x", "fact-y"],
+        "processing": ProcessingStats(scanned_events=2, matched_events=2, returned_rows=1),
+        "provenance": _payload().provenance,
+        "metrics": [
+            AnalysisMetricFact(
+                metric_key="event_count_delta",
+                label="Event count delta",
+                value=1,
+                unit="events",
+            )
+        ],
+        "requested_metric_key": "event_count_delta",
+        "baseline_fact_id": "fact-a",
+        "comparison_fact_id": "fact-b",
+        "deltas": [
+            AnalysisMetricDelta(
+                metric_key="event_count_delta",
+                baseline=1,
+                comparison=2,
+                delta=1,
+                unit="events",
+            )
+        ],
+    }
+    with pytest.raises(ValidationError, match="ordered input_fact_ids"):
+        SegmentComparisonPayload.model_validate(values)
+
+    values["input_fact_ids"] = ["fact-a", "fact-b"]
+    values["metrics"] = [
+        AnalysisMetricFact(
+            metric_key="arbitrary_metric",
+            label="Arbitrary",
+            value=1,
+            unit="events",
+        )
+    ]
+    with pytest.raises(ValidationError, match="requested metric"):
+        SegmentComparisonPayload.model_validate(values)
+
+
+def test_comparison_delta_exactly_binds_ordered_input_fact_metrics() -> None:
+    baseline = build_fact(
+        fact_id="fact-a",
+        step_id="step-baseline",
+        primitive="segment_customers",
+        result_id="result-a",
+        payload=_payload(),
+        scope=SCOPE,
+        created_at=NOW,
+    )
+    comparison_payload = SegmentCustomersPayload(
+        **{
+            **_payload().model_dump(),
+            "metrics": [_metric(3)],
+            "customer_ids": ["customer-1", "customer-2", "customer-3"],
+            "predicate_counts": {"outcome=negative": 3},
+            "processing": ProcessingStats(scanned_events=5, matched_events=3, returned_rows=3),
+        }
+    )
+    comparison = build_fact(
+        fact_id="fact-b",
+        step_id="step-comparison",
+        primitive="segment_customers",
+        result_id="result-b",
+        payload=comparison_payload,
+        scope=SCOPE,
+        created_at=NOW,
+    )
+    payload = SegmentComparisonPayload(
+        kind="compare_segments",
+        input_fact_ids=["fact-a", "fact-b"],
+        processing=ProcessingStats(scanned_events=2, matched_events=2, returned_rows=1),
+        provenance=_payload().provenance,
+        metrics=[
+            AnalysisMetricFact(
+                metric_key="segment_customer_count_delta",
+                label="Segment customer delta",
+                value=1,
+                unit="customers",
+            )
+        ],
+        requested_metric_key="segment_customer_count_delta",
+        baseline_fact_id="fact-a",
+        comparison_fact_id="fact-b",
+        deltas=[
+            AnalysisMetricDelta(
+                metric_key="segment_customer_count",
+                baseline=2,
+                comparison=3,
+                delta=1,
+                unit="customers",
+            )
+        ],
+    )
+    validate_comparison_payload(payload, [baseline, comparison])
+    with pytest.raises(ValueError, match="ordered input Facts"):
+        build_fact(
+            fact_id="fact-delta",
+            step_id="step-compare",
+            primitive="compare_segments",
+            result_id="result-delta",
+            payload=payload,
+            scope=SCOPE,
+            created_at=NOW,
+        )
+    built = build_fact(
+        fact_id="fact-delta",
+        step_id="step-compare",
+        primitive="compare_segments",
+        result_id="result-delta",
+        payload=payload,
+        scope=SCOPE,
+        created_at=NOW,
+        input_facts=[baseline, comparison],
+    )
+    assert built.metrics[0].value == 1
+
+    forged = payload.model_copy(deep=True)
+    forged.deltas[0] = AnalysisMetricDelta(
+        metric_key="segment_customer_count",
+        baseline=1,
+        comparison=2,
+        delta=1,
+        unit="customers",
+    )
+    with pytest.raises(ValueError, match="input Fact metrics"):
+        validate_comparison_payload(forged, [baseline, comparison])
+
+
+def test_aggregate_requires_its_payload_owned_requested_metric_even_when_zero() -> None:
+    common = {
+        "kind": "aggregate_events",
+        "input_fact_ids": [],
+        "processing": ProcessingStats(scanned_events=0, matched_events=0, returned_rows=0),
+        "provenance": _payload().provenance,
+        "requested_metric_key": "conversion_rate",
+        "buckets": [],
+        "series": [],
+    }
+    with pytest.raises(ValidationError, match="requested metric"):
+        AggregateEventsPayload(
+            **common,
+            metrics=[
+                AnalysisMetricFact(
+                    metric_key="arbitrary_metric",
+                    label="Arbitrary",
+                    value=0,
+                    unit="rate",
+                )
+            ],
+        )
+    payload = AggregateEventsPayload(
+        **common,
+        metrics=[
+            AnalysisMetricFact(
+                metric_key="conversion_rate",
+                label="Conversion rate",
+                value=0,
+                unit="rate",
+            )
+        ],
+    )
+    assert payload.metrics[0].value == 0
+
+
+def test_fact_rejects_nested_field_source_outside_restricted_scope() -> None:
+    payload = ProfileEventsPayload(
+        kind="profile_events",
+        input_fact_ids=[],
+        processing=ProcessingStats(scanned_events=1, matched_events=1, returned_rows=1),
+        provenance=_payload().provenance,
+        metrics=[
+            AnalysisMetricFact(
+                metric_key="customer_count",
+                label="Customers",
+                value=1,
+                unit="customers",
+            ),
+            AnalysisMetricFact(
+                metric_key="event_count",
+                label="Events",
+                value=1,
+                unit="events",
+            ),
+        ],
+        distributions=[],
+        data_quality=[
+            AnalysisQualityMetric(
+                field=FieldRef(field="billing_tier", field_kind="dimension", source_id="billing"),
+                missing_count=0,
+                total_count=1,
+                missing_rate=0.0,
+            )
+        ],
+    )
+    with pytest.raises(ValidationError, match="nested source"):
+        AnalysisFact(
+            fact_id="fact-profile",
+            step_id="step-profile",
+            primitive="profile_events",
+            result_id="result-profile",
+            source_ids=["voc"],
+            customer_ids=[],
+            evidence_ids=[],
+            metrics=payload.metrics,
+            payload=payload,
+            created_at=NOW,
+        )
+
+    scoped_metric = _metric().model_copy(update={"dimensions": {"billing.billing_tier": "premium"}})
+    segment = SegmentCustomersPayload(
+        **{
+            **_payload().model_dump(),
+            "metrics": [scoped_metric],
+        }
+    )
+    with pytest.raises(ValidationError, match="nested source"):
+        AnalysisFact(
+            fact_id="fact-segment",
+            step_id="step-segment",
+            primitive="segment_customers",
+            result_id="result-segment",
+            source_ids=["voc"],
+            customer_ids=segment.customer_ids,
+            evidence_ids=[],
+            metrics=segment.metrics,
+            payload=segment,
+            created_at=NOW,
+        )
+
+    ranking = CustomerRankingPayload(
+        kind="rank_customers",
+        input_fact_ids=["fact-segment"],
+        processing=ProcessingStats(scanned_events=1, matched_events=1, returned_rows=1),
+        provenance=_payload().provenance,
+        metrics=[
+            AnalysisMetricFact(
+                metric_key="ranked_customer_count",
+                label="Ranked customers",
+                value=1,
+                unit="customers",
+            )
+        ],
+        customers=[
+            AnalysisRankedCustomer(
+                customer_id="customer-1",
+                score=90,
+                signals=[
+                    AnalysisSignal(
+                        signal_key="billing_risk",
+                        label="Billing risk",
+                        contribution=90,
+                        metric_refs=["billing.risk_score"],
+                        evidence_ids=[],
+                    )
+                ],
+            )
+        ],
+    )
+    with pytest.raises(ValidationError, match="nested source"):
+        AnalysisFact(
+            fact_id="fact-ranking",
+            step_id="step-ranking",
+            primitive="rank_customers",
+            result_id="result-ranking",
+            source_ids=["voc"],
+            customer_ids=["customer-1"],
+            evidence_ids=[],
+            metrics=ranking.metrics,
+            payload=ranking,
+            created_at=NOW,
+        )
+
+
+def test_semantic_ids_are_unique_independent_of_sort_tuple() -> None:
+    common = {
+        "input_fact_ids": [],
+        "processing": ProcessingStats(scanned_events=4, matched_events=2, returned_rows=2),
+        "provenance": _payload().provenance,
+    }
+    with pytest.raises(ValidationError, match="customer"):
+        RepetitionPayload(
+            kind="detect_repetition",
+            metrics=[
+                AnalysisMetricFact(
+                    metric_key="repeated_customer_count",
+                    label="Repeated customers",
+                    value=1,
+                    unit="customers",
+                )
+            ],
+            matches=[
+                AnalysisRepetitionMatch(
+                    customer_id="customer-1",
+                    occurrence_count=3,
+                    window=TimeRange(start_at=NOW, end_at=NOW + timedelta(hours=2)),
+                    evidence_ids=["evidence-a"],
+                ),
+                AnalysisRepetitionMatch(
+                    customer_id="customer-1",
+                    occurrence_count=2,
+                    window=TimeRange(start_at=NOW, end_at=NOW + timedelta(hours=1)),
+                    evidence_ids=["evidence-b"],
+                ),
+            ],
+            **common,
+        )
+    with pytest.raises(ValidationError, match="customer"):
+        CustomerRankingPayload(
+            kind="rank_customers",
+            metrics=[
+                AnalysisMetricFact(
+                    metric_key="ranked_customer_count",
+                    label="Ranked customers",
+                    value=1,
+                    unit="customers",
+                )
+            ],
+            customers=[
+                AnalysisRankedCustomer(customer_id="customer-1", score=90, signals=[]),
+                AnalysisRankedCustomer(customer_id="customer-1", score=80, signals=[]),
+            ],
+            **common,
+        )
+    with pytest.raises(ValidationError, match="event_id"):
+        CustomerJourneyPayload(
+            kind="get_customer_journey",
+            customer_id="customer-1",
+            metrics=[
+                AnalysisMetricFact(
+                    metric_key="journey_event_count",
+                    label="Journey events",
+                    value=2,
+                    unit="events",
+                )
+            ],
+            events=[
+                AnalysisJourneyEvent(
+                    event_id="event-shared",
+                    evidence_id="evidence-a",
+                    source_id="voc",
+                    occurred_at=NOW,
+                    event_type="voc",
+                    action="opened",
+                    topic="pricing",
+                    outcome="pending",
+                    text="masked",
+                ),
+                AnalysisJourneyEvent(
+                    event_id="event-shared",
+                    evidence_id="evidence-b",
+                    source_id="voc",
+                    occurred_at=NOW + timedelta(minutes=1),
+                    event_type="voc",
+                    action="closed",
+                    topic="pricing",
+                    outcome="resolved",
+                    text="masked",
+                ),
+            ],
+            **common,
+        )
+    with pytest.raises(ValidationError, match="event_id"):
+        SequenceMatchPayload(
+            kind="match_sequence",
+            matched_customer_ids=["customer-1", "customer-2"],
+            metrics=[
+                AnalysisMetricFact(
+                    metric_key="matched_customer_count",
+                    label="Matched customers",
+                    value=2,
+                    unit="customers",
+                )
+            ],
+            matches=[
+                AnalysisSequenceMatch(
+                    customer_id="customer-1",
+                    matched_event_ids=["event-shared", "event-a"],
+                    window=TimeRange(start_at=NOW, end_at=NOW + timedelta(hours=1)),
+                    evidence_ids=["evidence-a"],
+                ),
+                AnalysisSequenceMatch(
+                    customer_id="customer-2",
+                    matched_event_ids=["event-shared", "event-b"],
+                    window=TimeRange(start_at=NOW, end_at=NOW + timedelta(hours=1)),
+                    evidence_ids=["evidence-b"],
+                ),
+            ],
+            **common,
+        )
 
 
 def test_unsupported_sensitive_requests_remain_non_executable_goal_decisions() -> None:

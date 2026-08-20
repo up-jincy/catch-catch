@@ -15,7 +15,13 @@ from customer_signal.domain.analysis import (
     FactRef,
     VerifiedClaim,
 )
-from customer_signal.domain.facts import AnalysisFact, AnalysisMetricFact, SegmentCustomersPayload
+from customer_signal.domain.facts import (
+    AnalysisFact,
+    AnalysisMetricFact,
+    SegmentComparisonPayload,
+    SegmentCustomersPayload,
+    validate_comparison_payload,
+)
 
 
 class ClaimValidationError(ValueError):
@@ -51,6 +57,17 @@ def validate_claim(
     fact = fact_by_id.get(fact_id)
     if fact is None:
         raise ClaimValidationError("Claim references an unknown Fact")
+    if isinstance(fact.payload, SegmentComparisonPayload):
+        try:
+            input_facts = [fact_by_id[fact_id] for fact_id in fact.payload.input_fact_ids]
+        except KeyError as error:
+            raise ClaimValidationError(
+                "comparison Claim requires both ordered input Facts"
+            ) from error
+        try:
+            validate_comparison_payload(fact.payload, input_facts)
+        except ValueError as error:
+            raise ClaimValidationError("comparison Claim input Fact binding is invalid") from error
 
     canonical_refs = [
         _validate_reference(reference, fact=fact, plan_revision=plan_revision)

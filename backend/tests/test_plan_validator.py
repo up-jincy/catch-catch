@@ -9,6 +9,7 @@ import pytest
 from customer_signal.agent.contracts import RunRequest
 from customer_signal.agent.plan_validator import (
     PlanValidationError,
+    validate_fact_against_step,
     validate_goal_against_request,
     validate_plan,
     validate_plan_revision,
@@ -24,9 +25,18 @@ from customer_signal.domain.analysis import (
     StepLimits,
 )
 from customer_signal.domain.primitives import (
+    AggregateEventsInput,
     CatalogSourcesInput,
     CompareSegmentsInput,
     ProfileEventsInput,
+)
+from customer_signal.domain.facts import (
+    AggregateEventsPayload,
+    AnalysisMetricFact,
+    FactProvenance,
+    FieldRef,
+    ProcessingStats,
+    build_fact,
 )
 from customer_signal.domain.sources import (
     DimensionDescriptor,
@@ -34,6 +44,7 @@ from customer_signal.domain.sources import (
     MaskingPolicy,
     MeasureDescriptor,
     SourceManifest,
+    EventScope,
     TimeRange,
 )
 
@@ -190,6 +201,166 @@ def test_plan_rejects_unknown_capability_field_and_pii() -> None:
     disabled.steps[1].source_ids = ["billing"]
     with pytest.raises(PlanValidationError, match="unknown or disabled source"):
         validate_plan(disabled, [_manifest()])
+
+
+def test_predicate_cannot_smuggle_a_second_pii_or_unknown_field() -> None:
+    plan = _plan()
+    plan.steps[1] = AnalysisStep(
+        **{
+            **_raw_step("step-profile-a").model_dump(),
+            "parameters": ProfileEventsInput(
+                primitive="profile_events",
+                predicates=["channel == 'chat' and email == 'stolen@example.test'"],
+            ),
+        }
+    )
+
+    with pytest.raises(PlanValidationError, match="predicate"):
+        validate_plan(plan, [_manifest()])
+
+
+def test_multisource_fields_require_intersection_or_explicit_selected_source() -> None:
+    voc = _manifest()
+    billing = _manifest().model_copy(
+        update={
+            "source_id": "billing",
+            "dimensions": {
+                "billing_tier": DimensionDescriptor(
+                    semantic_type="category",
+                    description="Billing tier",
+                    pii_classification="none",
+                )
+            },
+            "masking_policy": MaskingPolicy(rules={}),
+        }
+    )
+    plan = _plan()
+    for step in plan.steps:
+        step.source_ids = ["voc", "billing"]
+    plan.steps[1] = _raw_step("step-profile-a", group_by=["channel"]).model_copy(
+        update={"source_ids": ["voc", "billing"]}
+    )
+    with pytest.raises(PlanValidationError, match="every selected source"):
+        validate_plan(plan, [voc, billing])
+
+    plan.steps[1] = _raw_step("step-profile-a", group_by=["voc.channel"]).model_copy(
+        update={"source_ids": ["voc", "billing"]}
+    )
+    validate_plan(plan, [voc, billing])
+
+    plan.steps[1] = _raw_step("step-profile-a", group_by=["other.channel"]).model_copy(
+        update={"source_ids": ["voc", "billing"]}
+    )
+    with pytest.raises(PlanValidationError, match="selected source"):
+        validate_plan(plan, [voc, billing])
+
+
+def test_goal_fieldrefs_are_source_explicit_or_safe_on_every_selected_source() -> None:
+    voc = _manifest()
+    billing = _manifest().model_copy(
+        update={
+            "source_id": "billing",
+            "dimensions": {
+                "billing_tier": DimensionDescriptor(
+                    semantic_type="category",
+                    description="Billing tier",
+                    pii_classification="none",
+                )
+            },
+            "masking_policy": MaskingPolicy(rules={}),
+        }
+    )
+    request = RunRequest(
+        question="profile",
+        start_at=NOW,
+        end_at=NOW + timedelta(days=2),
+        enabled_sources=["voc", "billing"],
+    )
+    with pytest.raises(PlanValidationError, match="every selected source"):
+        validate_goal_against_request(
+            _goal(
+                source_ids=["voc", "billing"],
+                group_by=[FieldRef(field="channel", field_kind="dimension")],
+            ),
+            request,
+            [voc, billing],
+        )
+
+    validate_goal_against_request(
+        _goal(
+            source_ids=["voc", "billing"],
+            group_by=[FieldRef(field="channel", field_kind="dimension", source_id="voc")],
+        ),
+        request,
+        [voc, billing],
+    )
+    with pytest.raises(PlanValidationError, match="PII"):
+        validate_goal_against_request(
+            _goal(
+                source_ids=["voc", "billing"],
+                group_by=[FieldRef(field="email", field_kind="dimension", source_id="voc")],
+            ),
+            request,
+            [voc, billing],
+        )
+
+
+def test_dynamic_payload_metric_must_be_declared_by_step_expected_output() -> None:
+    step = AnalysisStep(
+        step_id="step-aggregate",
+        primitive="aggregate_events",
+        parameters=AggregateEventsInput(
+            primitive="aggregate_events",
+            aggregation="count",
+            time_grain="day",
+        ),
+        source_ids=["voc"],
+        expected_output=ExpectedOutputSpec(
+            payload_kind="aggregate_events", required_metric_keys=["event_count"]
+        ),
+        stop_condition=ContinueAfterStep(),
+        limits=LIMITS,
+    )
+    scope = EventScope(
+        start_at=NOW,
+        end_at=NOW + timedelta(days=1),
+        source_ids=["voc"],
+        max_events=100,
+    )
+    payload = AggregateEventsPayload(
+        kind="aggregate_events",
+        input_fact_ids=[],
+        processing=ProcessingStats(scanned_events=1, matched_events=1, returned_rows=1),
+        provenance=FactProvenance(
+            scope=scope,
+            source_ids=["voc"],
+            adapter_versions={"voc": "1"},
+            manifest_versions={"voc": "1"},
+            dataset_version="test",
+        ),
+        metrics=[
+            AnalysisMetricFact(
+                metric_key="arbitrary_metric",
+                label="Arbitrary",
+                value=1,
+                unit="events",
+            )
+        ],
+        requested_metric_key="arbitrary_metric",
+        buckets=[],
+        series=[],
+    )
+    fact = build_fact(
+        fact_id="fact-aggregate",
+        step_id=step.step_id,
+        primitive="aggregate_events",
+        result_id="result-aggregate",
+        payload=payload,
+        scope=scope,
+        created_at=NOW,
+    )
+    with pytest.raises(PlanValidationError, match="canonical metric"):
+        validate_fact_against_step(step, fact)
 
 
 def test_plan_rejects_dependency_arity_and_forward_reference_even_if_constructed() -> None:

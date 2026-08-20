@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Iterable, Sequence
 from typing import Annotated, Any, Literal, Self, TypeVar
 
@@ -27,6 +28,8 @@ from customer_signal.domain.types import (
 
 type AnalysisNumber = StrictInt | FiniteNumber
 type FactPayloadKind = GenericPrimitiveName
+
+_SEMANTIC_FIELD_KEY = re.compile(r"^(?:(?P<source>[a-z][a-z0-9_]{1,63})\.)?[a-z][a-z0-9_]*$")
 
 
 class FactContractModel(DomainModel):
@@ -86,6 +89,13 @@ class AnalysisMetricFact(FactContractModel):
     unit: str = Field(min_length=1, max_length=64)
     dimensions: dict[str, DimensionValue] = Field(default_factory=dict, max_length=16)
 
+    @field_validator("dimensions")
+    @classmethod
+    def require_semantic_dimension_keys(
+        cls, value: dict[str, DimensionValue]
+    ) -> dict[str, DimensionValue]:
+        return _require_semantic_dimensions(value)
+
 
 class AnalysisSourceCatalogFact(FactContractModel):
     source_id: SourceId
@@ -104,6 +114,13 @@ class AnalysisDistributionBucket(FactContractModel):
     @classmethod
     def unique_evidence(cls, value: list[str]) -> list[str]:
         return _require_unique_nonblank(value, "distribution evidence_ids")
+
+    @field_validator("dimensions")
+    @classmethod
+    def require_semantic_dimension_keys(
+        cls, value: dict[str, DimensionValue]
+    ) -> dict[str, DimensionValue]:
+        return _require_semantic_dimensions(value)
 
 
 class AnalysisQualityMetric(FactContractModel):
@@ -132,6 +149,13 @@ class AnalysisAggregateBucket(FactContractModel):
         _require_unique_nonblank(self.evidence_ids, "aggregate bucket evidence_ids")
         return self
 
+    @field_validator("dimensions")
+    @classmethod
+    def require_semantic_dimension_keys(
+        cls, value: dict[str, DimensionValue]
+    ) -> dict[str, DimensionValue]:
+        return _require_semantic_dimensions(value)
+
 
 class AnalysisTimeBucket(FactContractModel):
     time_range: TimeRange
@@ -144,6 +168,13 @@ class AnalysisTimeBucket(FactContractModel):
         _require_metric_order(self.metrics, "time bucket metrics")
         _require_unique_nonblank(self.evidence_ids, "time bucket evidence_ids")
         return self
+
+    @field_validator("dimensions")
+    @classmethod
+    def require_semantic_dimension_keys(
+        cls, value: dict[str, DimensionValue]
+    ) -> dict[str, DimensionValue]:
+        return _require_semantic_dimensions(value)
 
 
 class AnalysisRepetitionMatch(FactContractModel):
@@ -310,11 +341,15 @@ class ProfileEventsPayload(FactPayloadBase):
 
 class AggregateEventsPayload(FactPayloadBase):
     kind: Literal["aggregate_events"]
+    requested_metric_key: str = Field(pattern=r"^[a-z][a-z0-9_]{1,63}$")
     buckets: list[AnalysisAggregateBucket] = Field(default_factory=list, max_length=100)
     series: list[AnalysisTimeBucket] = Field(default_factory=list, max_length=100)
 
     @model_validator(mode="after")
     def require_aggregate_order(self) -> Self:
+        _require_exact_requested_metric(
+            self.metrics, self.requested_metric_key, "aggregate requested metric"
+        )
         _require_sorted_unique(
             self.buckets,
             lambda bucket: _dimension_key(bucket.dimensions),
@@ -329,6 +364,9 @@ class AggregateEventsPayload(FactPayloadBase):
             ),
             "aggregate series",
         )
+        for nested in [*self.buckets, *self.series]:
+            if any(metric.metric_key != self.requested_metric_key for metric in nested.metrics):
+                raise ValueError("aggregate nested metrics must equal the requested metric key")
         return self
 
 
@@ -354,6 +392,9 @@ class RepetitionPayload(FactPayloadBase):
 
     @model_validator(mode="after")
     def require_repetition_order(self) -> Self:
+        _require_unique_nonblank(
+            [match.customer_id for match in self.matches], "repetition customer IDs"
+        )
         _require_sorted_unique(
             self.matches,
             lambda match: (-match.occurrence_count, match.customer_id),
@@ -374,11 +415,16 @@ class SequenceMatchPayload(FactPayloadBase):
         _require_unique_nonblank(match_ids, "sequence match customers")
         if self.matched_customer_ids != match_ids:
             raise ValueError("matched_customer_ids must equal Sequence match request order")
+        _require_unique_nonblank(
+            [event_id for match in self.matches for event_id in match.matched_event_ids],
+            "sequence event_id values",
+        )
         return self
 
 
 class SegmentComparisonPayload(FactPayloadBase):
     kind: Literal["compare_segments"]
+    requested_metric_key: str = Field(pattern=r"^[a-z][a-z0-9_]{1,63}$")
     baseline_fact_id: str = Field(min_length=1, max_length=128)
     comparison_fact_id: str = Field(min_length=1, max_length=128)
     deltas: list[AnalysisMetricDelta] = Field(min_length=1, max_length=32)
@@ -387,7 +433,23 @@ class SegmentComparisonPayload(FactPayloadBase):
     def require_comparison_order(self) -> Self:
         if self.baseline_fact_id == self.comparison_fact_id:
             raise ValueError("comparison Fact inputs must differ")
-        _require_sorted_unique(self.deltas, lambda delta: delta.metric_key, "metric deltas")
+        if self.input_fact_ids != [self.baseline_fact_id, self.comparison_fact_id]:
+            raise ValueError("comparison baseline/comparison must equal ordered input_fact_ids")
+        _require_exact_requested_metric(
+            self.metrics, self.requested_metric_key, "comparison requested metric"
+        )
+        if len(self.deltas) != 1:
+            raise ValueError("comparison payload requires exactly one requested metric delta")
+        delta = self.deltas[0]
+        if self.requested_metric_key != f"{delta.metric_key}_delta":
+            raise ValueError("comparison requested metric must bind its input metric delta")
+        published = self.metrics[0]
+        if (
+            type(published.value) is not type(delta.delta)
+            or published.value != delta.delta
+            or published.unit != delta.unit
+        ):
+            raise ValueError("comparison published metric must exactly equal its delta")
         return self
 
 
@@ -397,6 +459,9 @@ class CustomerRankingPayload(FactPayloadBase):
 
     @model_validator(mode="after")
     def require_ranking_order(self) -> Self:
+        _require_unique_nonblank(
+            [customer.customer_id for customer in self.customers], "ranking customer IDs"
+        )
         _require_sorted_unique(
             self.customers,
             lambda customer: (-customer.score, customer.customer_id),
@@ -412,6 +477,9 @@ class CustomerJourneyPayload(FactPayloadBase):
 
     @model_validator(mode="after")
     def require_journey_order(self) -> Self:
+        _require_unique_nonblank(
+            [event.event_id for event in self.events], "journey event_id values"
+        )
         _require_sorted_unique(
             self.events,
             lambda event: (event.occurred_at, event.event_id),
@@ -557,13 +625,14 @@ def build_fact(
     payload: FactPayload,
     scope: EventScope,
     created_at: AwareDatetime,
+    input_facts: Sequence[AnalysisFact] | None = None,
 ) -> AnalysisFact:
     """Build a Fact whose public authorization is derived only from server payload data."""
 
     if payload.provenance.scope != scope or payload.provenance.source_ids != scope.source_ids:
         raise ValueError("payload provenance must equal the restricted scope")
     projection = extract_fact_projection(payload)
-    return AnalysisFact(
+    fact = AnalysisFact(
         fact_id=fact_id,
         step_id=step_id,
         primitive=primitive,
@@ -575,6 +644,39 @@ def build_fact(
         payload=payload,
         created_at=created_at,
     )
+    if isinstance(payload, SegmentComparisonPayload):
+        if input_facts is None:
+            raise ValueError("comparison Fact build requires its ordered input Facts")
+        validate_comparison_payload(payload, input_facts)
+    return fact
+
+
+def validate_comparison_payload(
+    payload: SegmentComparisonPayload,
+    input_facts: Sequence[AnalysisFact],
+) -> None:
+    """Bind a comparison delta to its two immutable input Fact metrics."""
+
+    if [fact.fact_id for fact in input_facts] != payload.input_fact_ids:
+        raise ValueError("comparison input Facts must equal ordered input_fact_ids")
+    if len(input_facts) != 2:
+        raise ValueError("comparison requires exactly two input Facts")
+    baseline_fact, comparison_fact = input_facts
+    delta = payload.deltas[0]
+    try:
+        baseline_metric = baseline_fact.metric(delta.metric_key)
+        comparison_metric = comparison_fact.metric(delta.metric_key)
+    except LookupError as error:
+        raise ValueError("comparison input metric must resolve exactly in both Facts") from error
+    if baseline_metric.unit != delta.unit or comparison_metric.unit != delta.unit:
+        raise ValueError("comparison delta unit must equal both input Fact metric units")
+    if (
+        type(baseline_metric.value) is not type(delta.baseline)
+        or baseline_metric.value != delta.baseline
+        or type(comparison_metric.value) is not type(delta.comparison)
+        or comparison_metric.value != delta.comparison
+    ):
+        raise ValueError("comparison delta values must equal ordered input Fact metrics")
 
 
 T = TypeVar("T")
@@ -609,6 +711,21 @@ def _require_metric_order(metrics: Sequence[AnalysisMetricFact], context: str) -
     _require_sorted_unique(metrics, _metric_key, context)
 
 
+def _require_exact_requested_metric(
+    metrics: Sequence[AnalysisMetricFact], requested_metric_key: str, context: str
+) -> None:
+    if len(metrics) != 1 or metrics[0].metric_key != requested_metric_key:
+        raise ValueError(f"{context} must publish exactly the requested metric key")
+
+
+def _require_semantic_dimensions(
+    dimensions: dict[str, DimensionValue],
+) -> dict[str, DimensionValue]:
+    if any(_SEMANTIC_FIELD_KEY.fullmatch(name) is None for name in dimensions):
+        raise ValueError("dimension keys must be canonical semantic field references")
+    return dimensions
+
+
 def _dimension_key(dimensions: dict[str, DimensionValue]) -> str:
     return json.dumps(dimensions, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -622,13 +739,52 @@ def _extend_stable_unique(target: list[str], values: Iterable[str]) -> None:
 
 
 def _nested_source_ids(payload: FactPayload) -> set[SourceId]:
+    source_ids = _metric_source_ids(payload.metrics)
     if isinstance(payload, CatalogSourcesPayload):
-        return {source.source_id for source in payload.sources}
-    if isinstance(payload, CustomerJourneyPayload):
-        return {event.source_id for event in payload.events}
-    if isinstance(payload, EvidencePayload):
-        return {record.source_id for record in payload.records}
-    return set()
+        source_ids.update(source.source_id for source in payload.sources)
+    elif isinstance(payload, ProfileEventsPayload):
+        source_ids.update(
+            metric.field.source_id
+            for metric in payload.data_quality
+            if metric.field.source_id is not None
+        )
+        for bucket in payload.distributions:
+            source_ids.update(_dimension_source_ids(bucket.dimensions))
+    elif isinstance(payload, AggregateEventsPayload):
+        for bucket in payload.buckets:
+            source_ids.update(_dimension_source_ids(bucket.dimensions))
+            source_ids.update(_metric_source_ids(bucket.metrics))
+        for bucket in payload.series:
+            source_ids.update(_dimension_source_ids(bucket.dimensions))
+            source_ids.update(_metric_source_ids(bucket.metrics))
+    elif isinstance(payload, CustomerRankingPayload):
+        for customer in payload.customers:
+            for signal in customer.signals:
+                source_ids.update(_semantic_ref_source_ids(signal.metric_refs))
+    elif isinstance(payload, CustomerJourneyPayload):
+        source_ids.update(event.source_id for event in payload.events)
+    elif isinstance(payload, EvidencePayload):
+        source_ids.update(record.source_id for record in payload.records)
+    return source_ids
+
+
+def _dimension_source_ids(dimensions: dict[str, DimensionValue]) -> set[SourceId]:
+    return _semantic_ref_source_ids(dimensions)
+
+
+def _metric_source_ids(metrics: Sequence[AnalysisMetricFact]) -> set[SourceId]:
+    return {
+        source_id for metric in metrics for source_id in _dimension_source_ids(metric.dimensions)
+    }
+
+
+def _semantic_ref_source_ids(values: Iterable[str]) -> set[SourceId]:
+    sources: set[SourceId] = set()
+    for value in values:
+        match = _SEMANTIC_FIELD_KEY.fullmatch(value)
+        if match is not None and match.group("source") is not None:
+            sources.add(match.group("source"))
+    return sources
 
 
 __all__ = [
@@ -665,4 +821,5 @@ __all__ = [
     "SequenceMatchPayload",
     "build_fact",
     "extract_fact_projection",
+    "validate_comparison_payload",
 ]

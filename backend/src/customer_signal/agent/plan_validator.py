@@ -9,6 +9,12 @@ from pydantic import ValidationError
 
 from customer_signal.agent.contracts import RunRequest
 from customer_signal.domain.analysis import AnalysisGoal, AnalysisPlan, AnalysisStep
+from customer_signal.domain.facts import (
+    AggregateEventsPayload,
+    AnalysisFact,
+    FieldRef,
+    SegmentComparisonPayload,
+)
 from customer_signal.domain.primitives import (
     AggregateEventsInput,
     DetectRepetitionInput,
@@ -38,10 +44,28 @@ _SENSITIVE_TOKENS = frozenset(
         "token",
     }
 )
-_FIELD_PREFIX = re.compile(r"^([a-z][a-z0-9_]*)")
+_FIELD_REF_TEXT = r"(?:(?P<source>[a-z][a-z0-9_]{1,63})\.)?(?P<field>[a-z][a-z0-9_]*)"
+_FIELD_REF_PATTERN = re.compile(rf"^{_FIELD_REF_TEXT}$")
+_PREDICATE_PATTERN = re.compile(
+    rf"""
+    ^\s*{_FIELD_REF_TEXT}
+    (?:
+        \s*(?:==|!=|<=|>=|<|>|=|contains)\s*
+        (?:'[^'\r\n]{{0,256}}'|"[^"\r\n]{{0,256}}"|-?\d+(?:\.\d+)?|true|false|null|[^\s;()[\]{{}}]+)
+      | \s+(?:in|not\s+in)\s+\[(?:[^;\[\]\r\n]{{0,512}})\]
+      | \s+is\s+null
+    )?
+    \s*$
+    """,
+    flags=re.IGNORECASE | re.VERBOSE,
+)
 
 
-def validate_goal_against_request(goal: AnalysisGoal, request: RunRequest) -> None:
+def validate_goal_against_request(
+    goal: AnalysisGoal,
+    request: RunRequest,
+    manifests: Sequence[SourceManifest] | None = None,
+) -> None:
     """Ensure a model-created Goal only narrows the caller's original scope."""
 
     if not request.start_at <= goal.time_range.start_at < goal.time_range.end_at <= request.end_at:
@@ -50,6 +74,21 @@ def validate_goal_against_request(goal: AnalysisGoal, request: RunRequest) -> No
         raise PlanValidationError("goal source selection must be nonempty")
     if not set(goal.source_ids) <= set(request.enabled_sources):
         raise PlanValidationError("goal source selection cannot add an unenabled source")
+    if manifests is not None:
+        manifest_by_source = {manifest.source_id: manifest for manifest in manifests}
+        if len(manifest_by_source) != len(manifests):
+            raise PlanValidationError("source manifests must be unique")
+        unknown = set(goal.source_ids) - set(manifest_by_source)
+        if unknown:
+            raise PlanValidationError("goal references a source without an enabled manifest")
+        selected = [manifest_by_source[source_id] for source_id in goal.source_ids]
+        for field in goal.group_by:
+            _validate_typed_field_ref(field, selected)
+        for measure in goal.measures:
+            if measure.field is not None:
+                _validate_typed_field_ref(measure.field, selected)
+        for predicate in goal.predicates:
+            _validate_typed_field_ref(predicate.field, selected)
 
 
 def validate_plan(plan: AnalysisPlan, manifests: Sequence[SourceManifest]) -> None:
@@ -102,6 +141,25 @@ def validate_plan_revision(
             raise PlanValidationError("completed step is immutable")
 
     validate_plan(revised, manifests)
+
+
+def validate_fact_against_step(step: AnalysisStep, fact: AnalysisFact) -> None:
+    """Bind a server Fact's published metrics and scope to its validated Step contract."""
+
+    if fact.step_id != step.step_id or fact.primitive != step.primitive:
+        raise PlanValidationError("Fact identity and primitive must match the validated step")
+    if fact.source_ids != step.source_ids:
+        raise PlanValidationError("Fact sources must exactly match the validated step scope")
+    metric_keys = {metric.metric_key for metric in fact.metrics}
+    missing = set(step.expected_output.required_metric_keys) - metric_keys
+    if missing:
+        raise PlanValidationError("Fact is missing a step-required canonical metric")
+    if isinstance(fact.payload, (AggregateEventsPayload, SegmentComparisonPayload)) and (
+        fact.payload.requested_metric_key not in step.expected_output.required_metric_keys
+    ):
+        raise PlanValidationError(
+            "payload requested metric must be declared by step expected_output"
+        )
 
 
 def _revalidate_plan(plan: AnalysisPlan) -> AnalysisPlan:
@@ -173,57 +231,120 @@ def _validate_step_capability(
 
 
 def _validate_step_fields(step: AnalysisStep, manifests: Sequence[SourceManifest]) -> None:
-    for field_name in _parameter_field_names(step):
-        _validate_semantic_field(field_name, manifests)
+    for source_id, field_name in _parameter_field_refs(step):
+        _validate_semantic_field(source_id, field_name, manifests)
 
 
-def _parameter_field_names(step: AnalysisStep) -> Iterable[str]:
+def _parameter_field_refs(step: AnalysisStep) -> Iterable[tuple[str | None, str]]:
     parameters = step.parameters
     if isinstance(parameters, ProfileEventsInput):
-        yield from parameters.group_by
+        yield from (_parse_field_ref(field) for field in parameters.group_by)
         yield from (_predicate_field(predicate) for predicate in parameters.predicates)
     elif isinstance(parameters, AggregateEventsInput):
-        yield from parameters.group_by
+        yield from (_parse_field_ref(field) for field in parameters.group_by)
         yield from (_predicate_field(predicate) for predicate in parameters.predicates)
         if parameters.measure is not None:
-            yield parameters.measure
+            yield _parse_field_ref(parameters.measure)
     elif isinstance(parameters, SegmentCustomersInput):
         yield from (_predicate_field(predicate) for predicate in parameters.predicates)
     elif isinstance(parameters, DetectRepetitionInput):
-        yield parameters.topic_field
+        yield _parse_field_ref(parameters.topic_field)
 
 
-def _predicate_field(expression: str) -> str:
-    match = _FIELD_PREFIX.match(expression.strip())
+def _parse_field_ref(value: str) -> tuple[str | None, str]:
+    match = _FIELD_REF_PATTERN.fullmatch(value.strip())
     if match is None:
-        raise PlanValidationError("predicate contains an invalid semantic field")
-    return match.group(1)
+        raise PlanValidationError("field reference must be one explicit semantic field")
+    return match.group("source"), match.group("field")
+
+
+def _predicate_field(expression: str) -> tuple[str | None, str]:
+    match = _PREDICATE_PATTERN.fullmatch(expression)
+    if match is None:
+        raise PlanValidationError("predicate must contain exactly one bounded semantic expression")
+    return match.group("source"), match.group("field")
 
 
 def _validate_semantic_field(
+    source_id: str | None,
     field_name: str,
     manifests: Sequence[SourceManifest],
 ) -> None:
     normalized = field_name.strip()
-    if normalized in _CANONICAL_FIELDS:
-        return
     if any(token in normalized.split("_") for token in _SENSITIVE_TOKENS):
         raise PlanValidationError("PII or raw field use is not allowed")
 
+    if source_id is not None:
+        selected = next(
+            (manifest for manifest in manifests if manifest.source_id == source_id), None
+        )
+        if selected is None:
+            raise PlanValidationError("explicit field source must be a selected source")
+        if normalized in _CANONICAL_FIELDS:
+            return
+        descriptor = selected.dimensions.get(normalized) or selected.measures.get(normalized)
+        if descriptor is None:
+            raise PlanValidationError(f"unknown field {source_id}.{normalized}")
+        if descriptor.pii_classification != "none":
+            raise PlanValidationError(f"PII field {source_id}.{normalized} is not allowed")
+        return
+
+    if normalized in _CANONICAL_FIELDS:
+        return
     descriptors = [
         manifest.dimensions.get(normalized) or manifest.measures.get(normalized)
         for manifest in manifests
     ]
-    known = [descriptor for descriptor in descriptors if descriptor is not None]
-    if not known:
+    if all(descriptor is None for descriptor in descriptors):
         raise PlanValidationError(f"unknown field {normalized}")
-    if any(descriptor.pii_classification != "none" for descriptor in known):
+    if any(descriptor is None for descriptor in descriptors):
+        raise PlanValidationError(
+            f"unqualified field {normalized} must be declared by every selected source"
+        )
+    if any(descriptor.pii_classification != "none" for descriptor in descriptors if descriptor):
         raise PlanValidationError(f"PII field {normalized} is not allowed")
+
+
+def _validate_typed_field_ref(
+    field: FieldRef,
+    manifests: Sequence[SourceManifest],
+) -> None:
+    if field.source_id is not None:
+        selected = next(
+            (manifest for manifest in manifests if manifest.source_id == field.source_id), None
+        )
+        if selected is None:
+            raise PlanValidationError("FieldRef source_id must be a selected source")
+        _validate_field_ref_on_manifest(field, selected)
+        return
+    for manifest in manifests:
+        try:
+            _validate_field_ref_on_manifest(field, manifest)
+        except PlanValidationError as error:
+            raise PlanValidationError(
+                f"unqualified FieldRef {field.field} must be safe on every selected source"
+            ) from error
+
+
+def _validate_field_ref_on_manifest(field: FieldRef, manifest: SourceManifest) -> None:
+    if field.field_kind == "canonical":
+        if field.field not in _CANONICAL_FIELDS:
+            raise PlanValidationError(f"unknown canonical FieldRef {field.field}")
+        return
+    descriptors = manifest.dimensions if field.field_kind == "dimension" else manifest.measures
+    descriptor = descriptors.get(field.field)
+    if descriptor is None:
+        raise PlanValidationError(
+            f"FieldRef {field.field} is not declared by source {manifest.source_id}"
+        )
+    if descriptor.pii_classification != "none":
+        raise PlanValidationError(f"PII FieldRef {field.field} is not allowed")
 
 
 __all__ = [
     "PlanValidationError",
     "validate_goal_against_request",
+    "validate_fact_against_step",
     "validate_plan",
     "validate_plan_revision",
 ]
