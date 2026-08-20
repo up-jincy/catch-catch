@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 
 import type { EvidenceResult, Scalar, SourceId } from "./contracts";
+import { sourceLabel } from "./source-catalog";
 import type { DetailState } from "./use-run-controller";
 
 interface EvidenceDrawerProps {
@@ -161,7 +162,7 @@ export function EvidenceDrawer({
               <article className="evidence-record" key={record.evidence_id}>
                 <div className="record-summary">
                   <span className={`record-source source-${record.source_id}`}>
-                    {sourceLabels[record.source_id]}
+                    {sourceLabels[record.source_id] ?? sourceLabel(record.source_id)}
                   </span>
                   <time dateTime={record.occurred_at}>
                     {seoulTime.format(new Date(record.occurred_at))}

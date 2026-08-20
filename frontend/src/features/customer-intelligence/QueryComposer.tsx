@@ -3,13 +3,32 @@
 import { useRef } from "react";
 
 import type { RunPhase, SourceId } from "./contracts";
-import { RECOMMENDED_QUESTION } from "./use-run-controller";
+import {
+  KNOWN_SOURCE_OPTIONS,
+  type SourceOption,
+} from "./source-catalog";
 
-interface QueryComposerProps {
+export const RECOMMENDED_QUESTIONS = [
+  {
+    label: "부정 피드백 Topic과 Segment",
+    question: "최근 부정 피드백이 많은 Topic과 관련 고객 Segment를 알려줘.",
+  },
+  {
+    label: "반복 행동 뒤 상담 Journey",
+    question: "반복 행동 뒤 상담으로 전환되는 Journey를 보여줘.",
+  },
+  {
+    label: "가입 미완료와 이탈 단계",
+    question: "가입 시작 뒤 완료하지 못한 고객과 이탈 단계를 알려줘.",
+  },
+] as const;
+
+export interface QueryComposerProps {
   question: string;
   startDate: string;
   endDate: string;
   enabledSources: SourceId[];
+  sourceOptions?: readonly SourceOption[];
   isCreating: boolean;
   runPhase: RunPhase;
   submissionError: string | null;
@@ -20,45 +39,12 @@ interface QueryComposerProps {
   onSubmit: () => void;
 }
 
-const sources: Array<{
-  id: SourceId;
-  label: string;
-  note: string;
-  required?: boolean;
-}> = [
-  {
-    id: "search_history",
-    label: "검색 이력",
-    note: "Journey 분석 필수 Source",
-    required: true,
-  },
-  {
-    id: "search_feedback",
-    label: "검색 피드백",
-    note: "부정 피드백 신호",
-  },
-  {
-    id: "digital_behavior",
-    label: "디지털 행동",
-    note: "GA 기반 페이지·Funnel 행동",
-  },
-  {
-    id: "subscription",
-    label: "가입 정보",
-    note: "상품 가입·변경 상태",
-  },
-  {
-    id: "voc",
-    label: "VOC",
-    note: "고객센터 미해결 문의",
-  },
-];
-
 export function QueryComposer({
   question,
   startDate,
   endDate,
   enabledSources,
+  sourceOptions = KNOWN_SOURCE_OPTIONS,
   isCreating,
   runPhase,
   submissionError,
@@ -87,22 +73,25 @@ export function QueryComposer({
           onSubmit();
         }}
       >
-        <button
-          className="suggestion-card"
-          type="button"
-          onClick={() => {
-            onQuestionChange(RECOMMENDED_QUESTION);
-            questionRef.current?.focus();
-          }}
-        >
-          <span className="suggestion-icon" aria-hidden="true">
-            ↗
-          </span>
-          <span>
-            <strong>검색 실패 후 상담 전환 고객 찾기</strong>
-            <small>{RECOMMENDED_QUESTION}</small>
-          </span>
-        </button>
+        <div className="suggestion-list" aria-label="추천 분석 질문">
+          {RECOMMENDED_QUESTIONS.map((suggestion) => (
+            <button
+              className="suggestion-card"
+              type="button"
+              key={suggestion.question}
+              onClick={() => {
+                onQuestionChange(suggestion.question);
+                questionRef.current?.focus();
+              }}
+            >
+              <span className="suggestion-icon" aria-hidden="true">↗</span>
+              <span>
+                <strong>{suggestion.label}</strong>
+                <small>{suggestion.question}</small>
+              </span>
+            </button>
+          ))}
+        </div>
 
         <label className="field-label" htmlFor="analysis-question">
           분석 질문
@@ -122,7 +111,7 @@ export function QueryComposer({
           </span>
         </div>
         <p id="question-hint" className="field-hint">
-          현재 데모는 검색 실패 → 동일 Topic 재검색 → 고객센터 문의 흐름을 지원합니다.
+          Source가 공개한 범위 안에서 집계, Segment, Journey와 이탈 단계를 분석합니다.
         </p>
 
         <div className="date-grid">
@@ -158,17 +147,18 @@ export function QueryComposer({
         <fieldset className="source-fieldset">
           <legend>분석 Source</legend>
           <div className="source-options">
-            {sources.map((source) => {
+            {sourceOptions.map((source) => {
               const noteId = `source-note-${source.id}`;
+              const required = source.id === "search_history";
               return (
                 <label
-                  className={`source-option ${source.required ? "is-required" : ""}`}
+                  className={`source-option ${required ? "is-required" : ""}`}
                   key={source.id}
                 >
                   <input
                     type="checkbox"
                     checked={enabledSources.includes(source.id)}
-                    disabled={source.required}
+                    disabled={required}
                     onChange={() => onToggleSource(source.id)}
                     aria-describedby={noteId}
                   />

@@ -11,17 +11,30 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  AnyRunStreamEvent,
+  ArtifactDocument,
+  ArtifactListResponse,
   CustomerJourneyResult,
   EvidenceResult,
   InsightReport,
   JourneyEvent,
+  PublicSourceList,
   RunAccepted,
+  RunArtifact,
   RunRequest,
-  RunStreamEvent,
 } from "../contracts";
 import { CustomerIntelligencePage } from "../CustomerIntelligencePage";
 import type { CustomerIntelligenceClient } from "../use-run-controller";
 import { RunClientError } from "../run-client";
+import {
+  genericArtifact,
+  genericDocument,
+  genericFact,
+  genericGoal,
+  genericNote,
+  genericPlan,
+  genericReport,
+} from "./generic-fixtures";
 
 const scope = {
   start_at: "2026-07-20T00:00:00+09:00",
@@ -208,10 +221,10 @@ function deferred<T>() {
 }
 
 class EventQueue {
-  private events: RunStreamEvent[] = [];
-  private readers: Array<(event: RunStreamEvent) => void> = [];
+  private events: AnyRunStreamEvent[] = [];
+  private readers: Array<(event: AnyRunStreamEvent) => void> = [];
 
-  emit(event: RunStreamEvent) {
+  emit(event: AnyRunStreamEvent) {
     const reader = this.readers.shift();
     if (reader) {
       reader(event);
@@ -220,7 +233,7 @@ class EventQueue {
     }
   }
 
-  async next(): Promise<RunStreamEvent> {
+  async next(): Promise<AnyRunStreamEvent> {
     const event = this.events.shift();
     return event ?? new Promise((resolve) => this.readers.push(resolve));
   }
@@ -272,22 +285,51 @@ class ControlledClient implements CustomerIntelligenceClient {
       _signal?: AbortSignal,
     ): Promise<EvidenceResult> => evidence,
   );
+  readonly submitClarification = vi.fn(
+    async (runId: string, _answer: string, _signal?: AbortSignal) => ({
+      run_id: runId,
+      status_url: `/api/runs/${runId}`,
+      events_url: `/api/runs/${runId}/events`,
+    }),
+  );
+  readonly listSources = vi.fn(
+    async (_signal?: AbortSignal): Promise<PublicSourceList> => ({ items: [] }),
+  );
+  readonly listRunArtifacts = vi.fn(
+    async (_signal?: AbortSignal): Promise<ArtifactListResponse> => ({
+      artifacts: [],
+    }),
+  );
+  readonly getRunArtifact = vi.fn(
+    async (_runId: string, _signal?: AbortSignal): Promise<RunArtifact> =>
+      genericArtifact as RunArtifact,
+  );
+  readonly getRunDocument = vi.fn(
+    async (_runId: string, _signal?: AbortSignal): Promise<ArtifactDocument> =>
+      genericDocument as ArtifactDocument,
+  );
+  jsonDownloadUrl(runId: string) {
+    return `/api/run-artifacts/${encodeURIComponent(runId)}/download.json`;
+  }
+  markdownDownloadUrl(runId: string) {
+    return `/api/run-artifacts/${encodeURIComponent(runId)}/download.md`;
+  }
 
-  emit(runId: string, event: RunStreamEvent) {
+  emit(runId: string, event: AnyRunStreamEvent) {
     const queue = this.queues.get(runId);
     if (!queue) throw new Error(`unknown run ${runId}`);
     act(() => queue.emit(event));
   }
 }
 
-function event<T extends RunStreamEvent>(value: T): T {
+function event<T extends AnyRunStreamEvent>(value: T): T {
   return value;
 }
 
 async function startRun(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(
-    screen.getByRole("button", { name: /검색 실패 후 상담 전환 고객 찾기/ }),
-  );
+  fireEvent.change(screen.getByLabelText("분석 질문"), {
+    target: { value: "AI 검색 실패 후 고객센터까지 문의한 고객이 얼마나 돼?" },
+  });
   await user.click(screen.getByRole("button", { name: /분석 시작/ }));
   await waitFor(() => expect(screen.getByText("분석 중")).toBeInTheDocument());
 }
@@ -364,6 +406,206 @@ afterEach(() => {
 });
 
 describe("CustomerIntelligencePage", () => {
+  it("keeps Chat before Workspace and loads dynamic Source plus the three accepted questions", async () => {
+    const client = new ControlledClient();
+    client.listSources.mockResolvedValueOnce({
+      items: [
+        {
+          source_id: "support_chat_v2",
+          label: "상담 채팅",
+          description: "상담 채팅 이벤트",
+          data_interval: {
+            start_at: "2026-07-20T00:00:00Z",
+            end_at: "2026-08-20T00:00:00Z",
+          },
+          refresh_cadence: "daily",
+          supported_event_types: ["chat"],
+          supported_topics: ["billing"],
+          supported_outcomes: ["resolved"],
+          dimensions: {},
+          measures: {},
+          capabilities: ["catalog_sources", "aggregate_events"],
+          adapter_version: "adapter-v2",
+          manifest_version: "manifest-v2",
+        },
+      ],
+    });
+    render(<CustomerIntelligencePage client={client} />);
+
+    expect(
+      await screen.findByRole("checkbox", { name: /상담 채팅/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: /최근 부정 피드백이 많은 Topic과 관련 고객 Segment를 알려줘/,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: /반복 행동 뒤 상담으로 전환되는 Journey를 보여줘/,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: /가입 시작 뒤 완료하지 못한 고객과 이탈 단계를 알려줘/,
+      }),
+    ).toBeInTheDocument();
+
+    const chat = screen.getByRole("complementary", { name: "질문과 Run 기록" });
+    const workspace = screen.getByRole("region", { name: "분석 Workspace" });
+    expect(
+      chat.compareDocumentPosition(workspace) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("answers clarification without creating a second Run", async () => {
+    const user = userEvent.setup();
+    const client = new ControlledClient();
+    render(<CustomerIntelligencePage client={client} />);
+
+    fireEvent.change(screen.getByLabelText("분석 질문"), {
+      target: { value: "최근 고객 신호를 분석해줘." },
+    });
+    await user.click(screen.getByRole("button", { name: "분석 시작" }));
+    await waitFor(() => expect(client.createRun).toHaveBeenCalledTimes(1));
+    client.emit("run-1", {
+      id: 1,
+      type: "clarification_required",
+      data: {
+        kind: "clarification",
+        clarification_id: "clarification-1",
+        question: "어떤 고객 신호를 분석할까요?",
+      },
+    });
+
+    const answer = await screen.findByRole("textbox", { name: "확인 답변" });
+    expect(answer).toHaveFocus();
+    await user.type(answer, "최근 30일 부정 피드백");
+    await user.click(screen.getByRole("button", { name: "답변하고 계속" }));
+
+    await waitFor(() =>
+      expect(client.submitClarification).toHaveBeenCalledWith(
+        "run-1",
+        "최근 30일 부정 피드백",
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(client.createRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("hydrates persisted generic history without requesting a legacy Journey", async () => {
+    const user = userEvent.setup();
+    const client = new ControlledClient();
+    client.listRunArtifacts.mockResolvedValueOnce({
+      artifacts: [
+        {
+          run_id: genericArtifact.run_id,
+          status: "completed",
+          question: genericArtifact.request.question,
+          headline: genericDocument.headline,
+          created_at: genericArtifact.created_at,
+          updated_at: genericArtifact.updated_at,
+          completed_at: genericArtifact.completed_at,
+          error_code: null,
+        },
+      ],
+    });
+    render(<CustomerIntelligencePage client={client} />);
+
+    await user.click(
+      await screen.findByRole("button", { name: /로밍 Topic에서 부정 피드백 12건/ }),
+    );
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "로밍 Topic에서 부정 피드백 12건을 확인했습니다.",
+      }),
+    ).toBeInTheDocument();
+    expect(client.getRunArtifact).toHaveBeenCalledWith(
+      genericArtifact.run_id,
+      expect.any(AbortSignal),
+    );
+    expect(client.getRunDocument).toHaveBeenCalledWith(
+      genericArtifact.run_id,
+      expect.any(AbortSignal),
+    );
+    expect(client.getJourney).not.toHaveBeenCalled();
+  });
+
+  it("streams a complete generic Goal, Plan, Fact, Note and document lifecycle", async () => {
+    const user = userEvent.setup();
+    const client = new ControlledClient();
+    render(<CustomerIntelligencePage client={client} />);
+
+    fireEvent.change(screen.getByLabelText("분석 질문"), {
+      target: { value: genericArtifact.request.question },
+    });
+    await user.click(screen.getByRole("button", { name: "분석 시작" }));
+    await waitFor(() => expect(client.createRun).toHaveBeenCalledTimes(1));
+
+    const events = [
+      { id: 1, type: "run_started", data: { status: "running" } },
+      { id: 2, type: "goal_created", data: { goal: genericGoal } },
+      { id: 3, type: "plan_created", data: { plan: genericPlan } },
+      {
+        id: 4,
+        type: "step_started",
+        data: {
+          step_id: genericFact.step_id,
+          primitive: genericFact.primitive,
+          started_at: genericNote.started_at,
+        },
+      },
+      {
+        id: 5,
+        type: "fact_created",
+        data: { step_id: genericFact.step_id, fact: genericFact },
+      },
+      { id: 6, type: "analysis_note_created", data: { note: genericNote } },
+      {
+        id: 7,
+        type: "step_completed",
+        data: {
+          step_id: genericFact.step_id,
+          status: "completed",
+          result_ids: [genericFact.result_id],
+          duration_ms: genericNote.duration_ms,
+        },
+      },
+      {
+        id: 8,
+        type: "report_validating",
+        data: {
+          fact_ids: [genericFact.fact_id],
+          result_ids: [genericFact.result_id],
+        },
+      },
+      {
+        id: 9,
+        type: "result",
+        data: { agent_mode: "fixture", report: genericReport },
+      },
+      { id: 10, type: "done", data: { status: "completed" } },
+    ] as AnyRunStreamEvent[];
+    for (const streamEvent of events) client.emit("run-1", streamEvent);
+
+    expect(
+      await screen.findByRole("heading", { name: genericReport.headline }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: genericGoal.objective }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(genericFact.result_id)).toBeInTheDocument();
+    expect(screen.getByText(genericNote.claims[0].rendered_text)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(client.getRunDocument).toHaveBeenCalledWith(
+        "run-1",
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(client.getJourney).not.toHaveBeenCalled();
+  });
+
   it("추천 질문부터 6명 Insight, 시간순 Journey, 마스킹 Evidence까지 탐색한다", async () => {
     const user = userEvent.setup();
     const client = new ControlledClient();
@@ -652,7 +894,9 @@ describe("CustomerIntelligencePage", () => {
       new RunClientError("network_error", "API 연결에 실패했습니다."),
     );
     render(<CustomerIntelligencePage client={network} />);
-    await user.click(screen.getByRole("button", { name: /검색 실패 후 상담 전환 고객 찾기/ }));
+    fireEvent.change(screen.getByLabelText("분석 질문"), {
+      target: { value: "AI 검색 실패 후 고객센터까지 문의한 고객이 얼마나 돼?" },
+    });
     await user.click(screen.getByRole("button", { name: /분석 시작/ }));
 
     expect(await screen.findByText("분석 서버에 연결하지 못했어요")).toBeInTheDocument();
