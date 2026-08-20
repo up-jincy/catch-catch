@@ -178,21 +178,49 @@ class GeminiAnalysisModel:
             public_input={
                 "context": context.model_dump(mode="json"),
                 "claim_constraints": {
+                    "cardinality": (
+                        "each Claim must bind exactly one Fact through exactly one FactRef"
+                    ),
                     "fact_ref_binding": {
                         "fact_id": context.current_fact.fact_id,
                         "result_id": context.current_fact.result_id,
                         "plan_revision": context.plan.revision,
                     },
-                    "allowed_selectors_by_claim_type": {
-                        "metric": ["metric_key", "label", "unit", "dimensions"],
-                        "segment": ["segment_id"],
-                        "customer": ["customer_id"],
-                        "source": ["source_id"],
-                        "evidence": ["evidence_id"],
+                    "claim_type_rules": {
+                        "metric": {
+                            "subject": "selected Fact metric_key",
+                            "operator": "eq",
+                            "target": "selected Fact metric exact typed value",
+                            "selector": "metric_key only",
+                            "optional_selector_fields": ["label", "unit", "dimensions"],
+                        },
+                        "segment": {
+                            "subject": "segment_id",
+                            "operator": "eq",
+                            "target": "selected FactRef segment_id exact string",
+                            "selector": "segment_id only",
+                        },
+                        "customer": {
+                            "subject": "customer_id",
+                            "operator": "eq",
+                            "target": "selected FactRef customer_id exact string",
+                            "selector": "customer_id only",
+                        },
+                        "source": {
+                            "subject": "source_id",
+                            "operator": "eq",
+                            "target": "selected FactRef source_id exact string",
+                            "selector": "source_id only",
+                        },
+                        "evidence": {
+                            "subject": "evidence_id",
+                            "operator": "eq",
+                            "target": "selected FactRef evidence_id exact string",
+                            "selector": "evidence_id only",
+                        },
                     },
-                    "selector_rule": (
-                        "use only the listed selector fields for the Claim type; "
-                        "all other selector fields must be null"
+                    "availability_rule": (
+                        "do not create a Claim type or selector that is absent from current_fact"
                     ),
                 },
             },
@@ -214,7 +242,27 @@ class GeminiAnalysisModel:
             output_type=CustomerSignalReportDraft,
             schema_title="CustomerSignalReportDraft",
             stage="report",
-            public_input={"context": context.model_dump(mode="json")},
+            public_input={
+                "context": context.model_dump(mode="json"),
+                "report_constraints": {
+                    "goal_id": {"required_exact": context.goal.goal_id},
+                    "claim_refs": {
+                        "allowed_values": [
+                            claim.claim_id
+                            for note in context.notes
+                            for claim in note.claims
+                        ],
+                        "rule": "subset only",
+                    },
+                    "recommended_actions.fact_refs": {
+                        "allowed_values": [fact.fact_id for fact in context.facts],
+                        "rule": "subset only",
+                    },
+                    "recommended_actions.claim_refs": {
+                        "rule": "subset of selected top-level claim_refs only",
+                    },
+                },
+            },
         )
 
     async def _invoke_document(

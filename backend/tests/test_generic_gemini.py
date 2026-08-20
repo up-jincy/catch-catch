@@ -363,6 +363,7 @@ async def test_free_question_uses_five_flat_provider_documents() -> None:
     goal_input = prompts[0]["input"]
     plan_input = prompts[1]["input"]
     note_input = prompts[2]["input"]
+    report_input = prompts[4]["input"]
     assert goal_input["request"]["question"] == request.question
     assert goal_input["sources"][0]["description"] == "Masked support signals"
     assert plan_input["sources"] == goal_input["sources"]
@@ -423,22 +424,65 @@ async def test_free_question_uses_five_flat_provider_documents() -> None:
         "step_count": "3..6",
     }
     assert note_input["claim_constraints"] == {
+        "cardinality": "each Claim must bind exactly one Fact through exactly one FactRef",
         "fact_ref_binding": {
             "fact_id": step_context.current_fact.fact_id,
             "result_id": step_context.current_fact.result_id,
             "plan_revision": step_context.plan.revision,
         },
-        "allowed_selectors_by_claim_type": {
-            "metric": ["metric_key", "label", "unit", "dimensions"],
-            "segment": ["segment_id"],
-            "customer": ["customer_id"],
-            "source": ["source_id"],
-            "evidence": ["evidence_id"],
+        "claim_type_rules": {
+            "metric": {
+                "subject": "selected Fact metric_key",
+                "operator": "eq",
+                "target": "selected Fact metric exact typed value",
+                "selector": "metric_key only",
+                "optional_selector_fields": ["label", "unit", "dimensions"],
+            },
+            "segment": {
+                "subject": "segment_id",
+                "operator": "eq",
+                "target": "selected FactRef segment_id exact string",
+                "selector": "segment_id only",
+            },
+            "customer": {
+                "subject": "customer_id",
+                "operator": "eq",
+                "target": "selected FactRef customer_id exact string",
+                "selector": "customer_id only",
+            },
+            "source": {
+                "subject": "source_id",
+                "operator": "eq",
+                "target": "selected FactRef source_id exact string",
+                "selector": "source_id only",
+            },
+            "evidence": {
+                "subject": "evidence_id",
+                "operator": "eq",
+                "target": "selected FactRef evidence_id exact string",
+                "selector": "evidence_id only",
+            },
         },
-        "selector_rule": (
-            "use only the listed selector fields for the Claim type; "
-            "all other selector fields must be null"
+        "availability_rule": (
+            "do not create a Claim type or selector that is absent from current_fact"
         ),
+    }
+    verified_claim_ids = [
+        claim.claim_id for note in report_context.notes for claim in note.claims
+    ]
+    assert report_input["report_constraints"] == {
+        "goal_id": {"required_exact": report_context.goal.goal_id},
+        "claim_refs": {
+            "allowed_values": verified_claim_ids,
+            "rule": "subset only",
+        },
+        "recommended_actions.fact_refs": {
+            "allowed_values": [fact.fact_id for fact in report_context.facts],
+            "rule": "subset only",
+        },
+        "recommended_actions.claim_refs": {
+            "rule": "subset of selected top-level claim_refs only",
+        },
     }
 
     public_prompts = "\n".join(call["prompt"] for call in provider.structured_calls)
