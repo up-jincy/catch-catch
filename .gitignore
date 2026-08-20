@@ -9,6 +9,7 @@ __pycache__/
 *.py[cod]
 *.duckdb
 *.duckdb.wal
+data/run-artifacts/
 node_modules/
 .next/
 frontend/AGENTS.md
