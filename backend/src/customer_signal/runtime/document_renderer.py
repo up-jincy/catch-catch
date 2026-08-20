@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import json
 from collections.abc import Iterable
 
 from customer_signal.domain.reports import CustomerSignalReport, InsightReport
@@ -67,6 +68,14 @@ def render_document(artifact: RunArtifact) -> ArtifactDocument:
         goal=artifact.goal,
         clarification=artifact.clarification,
         plan=artifact.plan,
+        plan_history=(
+            list(artifact.plan_history)
+            if artifact.plan_history
+            else [artifact.plan]
+            if artifact.plan is not None
+            else []
+        ),
+        facts=list(artifact.facts),
         notes=list(artifact.notes),
         report=artifact.report,
         provenance=ArtifactDocumentProvenance(
@@ -114,6 +123,7 @@ def render_markdown(artifact: RunArtifact) -> str:
     )
     _render_goal(lines, document)
     _render_plan(lines, document)
+    _render_facts(lines, document)
     _render_notes(lines, document)
     _render_report(lines, document)
     _render_provenance(lines, document)
@@ -165,24 +175,64 @@ def _render_goal(lines: list[str], document: ArtifactDocument) -> None:
 
 def _render_plan(lines: list[str], document: ArtifactDocument) -> None:
     lines.extend(["", "## 분석 계획", ""])
-    if document.plan is None:
+    if not document.plan_history:
         lines.append("기록 없음")
         return
-    lines.append(
-        f"Plan {_inline(document.plan.plan_id)}, revision {_inline(document.plan.revision)}"
-    )
-    for index, step in enumerate(document.plan.steps, start=1):
+    for plan in document.plan_history:
         lines.extend(
             [
+                f"### Plan {_inline(plan.plan_id)}, revision {_inline(plan.revision)}",
                 "",
-                f"### {index}\\. {_inline(step.primitive)}",
-                "",
-                f"- Step ID: {_inline(step.step_id)}",
-                f"- Sources: {_joined(step.source_ids)}",
-                f"- Inputs: {_joined(step.input_step_ids) if step.input_step_ids else '없음'}",
-                f"- Required metrics: {_joined(step.expected_output.required_metric_keys)}",
+                f"- Rationale: {_inline(plan.rationale)}",
             ]
         )
+        for index, step in enumerate(plan.steps, start=1):
+            lines.extend(
+                [
+                    "",
+                    f"#### {index}\\. {_inline(step.primitive)}",
+                    "",
+                    f"- Step ID: {_inline(step.step_id)}",
+                    f"- Selection reason: {_inline(step.selection_reason)}",
+                    f"- Parameters: {_inline(_structured_json(step.parameters))}",
+                    f"- Sources: {_joined(step.source_ids)}",
+                    f"- Inputs: {_joined(step.input_step_ids) if step.input_step_ids else '없음'}",
+                    f"- Required metrics: {_joined(step.expected_output.required_metric_keys)}",
+                ]
+            )
+        lines.append("")
+    if lines[-1] == "":
+        lines.pop()
+
+
+def _render_facts(lines: list[str], document: ArtifactDocument) -> None:
+    lines.extend(["", "## 공개 Facts", ""])
+    if not document.facts:
+        lines.append("기록 없음")
+        return
+    for index, fact in enumerate(document.facts, start=1):
+        processing = fact.payload.processing
+        lines.extend(
+            [
+                f"### {index}\\. {_inline(fact.primitive)}",
+                "",
+                f"- Fact ID: {_inline(fact.fact_id)}",
+                f"- Step: {_inline(fact.step_id)}",
+                f"- Result ID: {_inline(fact.result_id)}",
+                f"- Sources: {_joined(fact.source_ids)}",
+                f"- Processing: scanned={_inline(processing.scanned_events)}, "
+                f"matched={_inline(processing.matched_events)}, "
+                f"returned={_inline(processing.returned_rows)}",
+            ]
+        )
+        for metric in fact.metrics:
+            lines.append(
+                f"- Metric: {_inline(metric.label)} ({_inline(metric.metric_key)}) = "
+                f"{_inline(metric.value)} {_inline(metric.unit)}"
+            )
+        lines.append("")
+    if lines[-1] == "":
+        lines.pop()
 
 
 def _render_notes(lines: list[str], document: ArtifactDocument) -> None:
@@ -199,6 +249,7 @@ def _render_notes(lines: list[str], document: ArtifactDocument) -> None:
                 f"- Sources: {_joined(note.source_ids)}",
                 f"- Result IDs: {_joined(note.result_ids)}",
                 f"- Duration: {_inline(note.duration_ms)} ms",
+                f"- Next action: {_inline(note.next_action)}",
             ]
         )
         for claim in note.claims:
@@ -286,6 +337,12 @@ def _inline(value: object) -> str:
 
 def _joined(values: Iterable[object]) -> str:
     return ", ".join(_inline(value) for value in values)
+
+
+def _structured_json(value: object) -> str:
+    if hasattr(value, "model_dump"):
+        value = value.model_dump(mode="json")
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def _stable_unique(values: Iterable[str]) -> list[str]:

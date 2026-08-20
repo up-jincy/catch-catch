@@ -107,6 +107,7 @@ class RunArtifact(ArtifactContractModel):
     goal: AnalysisGoal | None = None
     clarification: ClarificationRecord | None = None
     plan: AnalysisPlan | None = None
+    plan_history: list[AnalysisPlan] = Field(default_factory=list, max_length=32)
     facts: list[AnalysisFact] = Field(default_factory=list, max_length=128)
     notes: list[AnalysisNote] = Field(default_factory=list, max_length=128)
     report: GenericOrLegacyReport | None = None
@@ -158,6 +159,12 @@ class RunArtifact(ArtifactContractModel):
             and self.plan.goal_id != self.goal.goal_id
         ):
             raise ValueError("Artifact Plan goal_id must equal the persisted Goal")
+        if self.plan_history:
+            revisions = [plan.revision for plan in self.plan_history]
+            if any(current >= following for current, following in zip(revisions, revisions[1:])):
+                raise ValueError("Artifact Plan history revisions must be unique and increasing")
+            if self.plan != self.plan_history[-1]:
+                raise ValueError("current Artifact Plan must equal the last Plan history revision")
         if self.failed_step_id is not None:
             if self.plan is None or self.failed_step_id not in {
                 step.step_id for step in self.plan.steps
@@ -207,6 +214,8 @@ class ArtifactDocument(ArtifactContractModel):
     goal: AnalysisGoal | None = None
     clarification: ClarificationRecord | None = None
     plan: AnalysisPlan | None = None
+    plan_history: list[AnalysisPlan] = Field(default_factory=list, max_length=32)
+    facts: list[AnalysisFact] = Field(default_factory=list, max_length=128)
     notes: list[AnalysisNote]
     report: GenericOrLegacyReport | None = None
     provenance: ArtifactDocumentProvenance

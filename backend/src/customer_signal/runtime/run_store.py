@@ -96,6 +96,7 @@ class RunSnapshot(BaseModel):
     goal: AnalysisGoal | None = None
     clarification: ClarificationRecord | None = None
     plan: AnalysisPlan | None = None
+    plan_history: list[AnalysisPlan] = Field(default_factory=list)
     facts: list[AnalysisFact] = Field(default_factory=list)
     notes: list[AnalysisNote] = Field(default_factory=list)
     report: GenericOrLegacyReport | None = None
@@ -113,6 +114,7 @@ class RunSnapshot(BaseModel):
                 "goal",
                 "clarification",
                 "plan",
+                "plan_history",
                 "facts",
                 "notes",
                 "limitations",
@@ -139,6 +141,7 @@ class _RunState:
     goal: AnalysisGoal | None = None
     clarification: ClarificationRecord | None = None
     plan: AnalysisPlan | None = None
+    plan_history: list[AnalysisPlan] = field(default_factory=list)
     facts: list[AnalysisFact] = field(default_factory=list)
     notes: list[AnalysisNote] = field(default_factory=list)
     report: GenericOrLegacyReport | None = None
@@ -206,6 +209,7 @@ class RunStore:
             if restored_mode == "fixture"
             else None
         )
+        plan_history = artifact.plan_history or ([artifact.plan] if artifact.plan else [])
         self._runs[run_id] = _RunState(
             run_id=run_id,
             request=artifact.request.model_copy(deep=True),
@@ -220,6 +224,7 @@ class RunStore:
                 artifact.clarification.model_copy(deep=True) if artifact.clarification else None
             ),
             plan=artifact.plan.model_copy(deep=True) if artifact.plan else None,
+            plan_history=[plan.model_copy(deep=True) for plan in plan_history],
             facts=[fact.model_copy(deep=True) for fact in artifact.facts],
             notes=[note.model_copy(deep=True) for note in artifact.notes],
             report=artifact.report.model_copy(deep=True) if artifact.report else None,
@@ -424,7 +429,14 @@ class RunStore:
         if event.type == "goal_created":
             state.goal = AnalysisGoal.model_validate_json(_json(payload["goal"]))
         elif event.type in {"plan_created", "plan_revised"}:
-            state.plan = AnalysisPlan.model_validate_json(_json(payload["plan"]))
+            plan = AnalysisPlan.model_validate_json(_json(payload["plan"]))
+            state.plan = plan
+            plan_key = (plan.plan_id, plan.revision)
+            if all(
+                (recorded.plan_id, recorded.revision) != plan_key
+                for recorded in state.plan_history
+            ):
+                state.plan_history.append(plan.model_copy(deep=True))
         elif event.type == "fact_created":
             state.facts = [
                 *state.facts,
@@ -467,6 +479,7 @@ class RunStore:
                 state.clarification.model_copy(deep=True) if state.clarification else None
             ),
             plan=state.plan.model_copy(deep=True) if state.plan else None,
+            plan_history=[plan.model_copy(deep=True) for plan in state.plan_history],
             facts=[fact.model_copy(deep=True) for fact in state.facts],
             notes=[note.model_copy(deep=True) for note in state.notes],
             report=state.report.model_copy(deep=True) if state.report else None,

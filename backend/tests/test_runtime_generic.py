@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from customer_signal.agent.contracts import RunRequest
 from customer_signal.agent.generic_fixture import (
     AMBIGUOUS_QUESTION,
     NEGATIVE_TOPIC_QUESTION,
@@ -20,7 +21,20 @@ from customer_signal.agent.generic_fixture import (
 from customer_signal.agent.generic_gemini import GeminiAnalysisModel
 from customer_signal.api import _default_dependencies, create_app
 from customer_signal.config import Settings
+from customer_signal.domain.analysis import (
+    AnalysisPlan,
+    AnalysisStep,
+    ContinueAfterStep,
+    ExpectedOutputSpec,
+    StepLimits,
+)
+from customer_signal.domain.primitives import (
+    AggregateEventsInput,
+    CatalogSourcesInput,
+    ProfileEventsInput,
+)
 from customer_signal.runtime.events import validate_generic_event
+from customer_signal.runtime.run_store import RunStore
 
 
 START_AT = "2026-07-20T00:00:00+09:00"
@@ -33,6 +47,12 @@ SOURCES = [
     "voc",
 ]
 ROOT = Path(__file__).resolve().parents[2]
+LIMITS = StepLimits(
+    max_input_events=100,
+    max_output_rows=20,
+    max_evidence=5,
+    timeout_seconds=10.0,
+)
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -57,6 +77,87 @@ def _request(
         "end_at": end_at,
         "enabled_sources": SOURCES,
     }
+
+
+def _runtime_plan(*, revision: int, rationale: str) -> AnalysisPlan:
+    return AnalysisPlan(
+        plan_id="plan-runtime-history",
+        revision=revision,
+        goal_id="goal-runtime-history",
+        rationale=rationale,
+        steps=[
+            AnalysisStep(
+                step_id="step-catalog",
+                primitive="catalog_sources",
+                parameters=CatalogSourcesInput(primitive="catalog_sources"),
+                source_ids=["voc"],
+                expected_output=ExpectedOutputSpec(
+                    payload_kind="catalog_sources",
+                    required_metric_keys=["source_count"],
+                ),
+                stop_condition=ContinueAfterStep(),
+                limits=LIMITS,
+            ),
+            AnalysisStep(
+                step_id="step-profile",
+                primitive="profile_events",
+                parameters=ProfileEventsInput(primitive="profile_events"),
+                source_ids=["voc"],
+                expected_output=ExpectedOutputSpec(
+                    payload_kind="profile_events",
+                    required_metric_keys=["customer_count", "event_count"],
+                ),
+                stop_condition=ContinueAfterStep(),
+                limits=LIMITS,
+            ),
+            AnalysisStep(
+                step_id="step-aggregate",
+                primitive="aggregate_events",
+                parameters=AggregateEventsInput(
+                    primitive="aggregate_events",
+                    aggregation="count",
+                    time_grain="day",
+                ),
+                source_ids=["voc"],
+                expected_output=ExpectedOutputSpec(
+                    payload_kind="aggregate_events",
+                    required_metric_keys=["event_count"],
+                ),
+                stop_condition=ContinueAfterStep(),
+                limits=LIMITS,
+            ),
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_snapshot_keeps_created_and_revised_plan_history() -> None:
+    store = RunStore()
+    request = RunRequest.model_validate(_request(NEGATIVE_TOPIC_QUESTION))
+    snapshot = store.create_run(request, run_kind="generic")
+    await store.mark_running(snapshot.run_id)
+    initial = _runtime_plan(revision=0, rationale="초기 실행 계획")
+    revised = _runtime_plan(revision=1, rationale="Fact 기반 수정 계획")
+
+    await store.append_generic_event(
+        snapshot.run_id,
+        "plan_created",
+        {"plan": initial.model_dump(mode="json")},
+    )
+    await store.append_generic_event(
+        snapshot.run_id,
+        "plan_revised",
+        {"plan": revised.model_dump(mode="json")},
+    )
+    await store.append_generic_event(
+        snapshot.run_id,
+        "plan_revised",
+        {"plan": revised.model_dump(mode="json")},
+    )
+
+    result = store.get_snapshot(snapshot.run_id)
+    assert [plan.revision for plan in result.plan_history] == [0, 1]
+    assert result.plan == revised
 
 
 def test_default_gemini_loop_owns_all_stages_without_fixture_delegate(
@@ -211,6 +312,7 @@ def test_three_generic_fixture_questions_publish_fact_backed_lifecycle_and_artif
     assert artifact.json()["last_event_id"] == events[-1]["id"]
     assert artifact.json()["facts"]
     assert artifact.json()["notes"]
+    assert [plan["revision"] for plan in artifact.json()["plan_history"]] == [0]
 
 
 def test_clarification_resumes_same_run_without_an_intermediate_done(tmp_path: Path) -> None:

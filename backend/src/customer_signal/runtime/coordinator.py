@@ -445,6 +445,7 @@ class RunCoordinator:
             goal=snapshot.goal,
             clarification=snapshot.clarification,
             plan=snapshot.plan,
+            plan_history=snapshot.plan_history,
             facts=snapshot.facts,
             notes=snapshot.notes,
             report=snapshot.report,

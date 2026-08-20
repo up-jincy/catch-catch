@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -281,6 +282,8 @@ def test_document_and_markdown_render_only_artifact_owned_facts() -> None:
     assert document.scope.source_ids == artifact.request.enabled_sources
     assert document.goal == artifact.goal
     assert document.plan == artifact.plan
+    assert document.plan_history == [artifact.plan]
+    assert document.facts == artifact.facts
     assert document.notes == artifact.notes
     assert document.report == artifact.report
     assert document.provenance.result_ids == artifact_result_ids(artifact)
@@ -289,6 +292,82 @@ def test_document_and_markdown_render_only_artifact_owned_facts() -> None:
     assert "raw_fields" not in markdown
     assert "provider_response" not in markdown
     assert render_markdown_bytes(replayed) == f"{markdown}\n".encode()
+
+
+def test_schema_v1_without_plan_history_projects_current_plan_and_public_facts() -> None:
+    payload = json.loads(artifact_json_bytes(_artifact()))
+    payload.pop("plan_history", None)
+
+    legacy = RunArtifact.model_validate_json(json.dumps(payload))
+    document = render_document(legacy)
+
+    assert legacy.plan_history == []
+    assert document.plan_history == [legacy.plan]
+    assert document.facts == legacy.facts
+
+
+def test_markdown_renders_plan_revisions_public_facts_claims_and_next_actions() -> None:
+    initial = _plan()
+    initial_steps = [
+        *initial.steps[:2],
+        initial.steps[2].model_copy(update={"selection_reason": "초기 집계 단계를 선택합니다."}),
+    ]
+    initial = initial.model_copy(
+        update={"rationale": "초기 요청을 바탕으로 계획했습니다.", "steps": initial_steps}
+    )
+    revised_step = initial.steps[2].model_copy(
+        update={
+            "parameters": AggregateEventsInput(
+                primitive="aggregate_events",
+                aggregation="count",
+                group_by=["topic"],
+                time_grain="day",
+            ),
+            "selection_reason": "Fact 결과에 따라 Topic 집계를 선택합니다.",
+        }
+    )
+    revised = initial.model_copy(
+        update={
+            "revision": 1,
+            "rationale": "Catalog Fact를 근거로 계획을 수정했습니다.",
+            "steps": [*initial.steps[:2], revised_step],
+        }
+    )
+    base = _artifact()
+    note = base.notes[0].model_copy(update={"next_action": "다음 검증 단계로 이동합니다."})
+    artifact = RunArtifact.model_validate(
+        {
+            **base.model_dump(),
+            "plan": revised,
+            "plan_history": [initial, revised],
+            "notes": [note],
+        }
+    )
+
+    document = render_document(artifact)
+    markdown = render_markdown(artifact)
+
+    assert document.plan_history == [initial, revised]
+    assert document.facts == artifact.facts
+    for expected in (
+        "revision 0",
+        "revision 1",
+        "초기 요청을 바탕으로 계획했습니다.",
+        "Catalog Fact를 근거로 계획을 수정했습니다.",
+        "초기 집계 단계를 선택합니다.",
+        "Fact 결과에 따라 Topic 집계를 선택합니다.",
+        r'\{"aggregation":"count","group_by":\["topic"\],"measure":null,',
+        "segment_customers",
+        "voc",
+        "Segment customers",
+        "scanned=10",
+        "matched=2",
+        "returned=2",
+        "segment_customers:document",
+        "Segment customers: 2 customers",
+        "다음 검증 단계로 이동합니다.",
+    ):
+        assert expected in markdown
 
 
 @pytest.mark.parametrize("status", ["running", "awaiting_clarification", "degraded", "failed"])

@@ -38,6 +38,7 @@ from customer_signal.runtime.artifacts import (
     RunVersions,
     artifact_json_bytes,
 )
+from customer_signal.runtime.run_store import RunStore
 
 
 NOW = datetime(2026, 8, 20, 9, tzinfo=timezone.utc)
@@ -189,6 +190,43 @@ def test_store_round_trips_partial_and_terminal_artifacts_atomically(
     assert RunArtifact.model_validate_json(store.load_bytes(artifact.run_id)) == artifact
     assert store.load_bytes(artifact.run_id) == artifact_json_bytes(artifact)
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_checkpoint_artifact_restores_complete_plan_history(tmp_path: Path) -> None:
+    initial = _plan()
+    revised = initial.model_copy(
+        update={"revision": 1, "rationale": "Fact 결과를 반영해 계획을 수정했습니다."}
+    )
+    values = _artifact().model_dump()
+    values.update(
+        plan=revised,
+        plan_history=[initial, revised],
+        versions=_versions().model_copy(update={"prompt_version": "generic-v1"}),
+    )
+    artifact = RunArtifact.model_validate(values)
+    store = ArtifactStore(tmp_path)
+
+    store.save(artifact)
+    restored = RunStore([store.load(artifact.run_id)]).get_snapshot(str(artifact.run_id))
+
+    assert [plan.revision for plan in restored.plan_history] == [0, 1]
+    assert restored.plan == revised
+
+
+def test_artifact_requires_increasing_history_with_current_plan_last() -> None:
+    initial = _plan()
+    revised = initial.model_copy(update={"revision": 1})
+    values = _artifact().model_dump()
+
+    with pytest.raises(ValidationError, match="unique and increasing"):
+        RunArtifact.model_validate(
+            {**values, "plan": initial, "plan_history": [revised, initial]}
+        )
+
+    with pytest.raises(ValidationError, match="current Artifact Plan"):
+        RunArtifact.model_validate(
+            {**values, "plan": initial, "plan_history": [initial, revised]}
+        )
 
 
 def test_store_lists_newest_updated_artifact_and_uses_settings_without_eager_write(
