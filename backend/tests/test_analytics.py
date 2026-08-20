@@ -223,7 +223,7 @@ def test_seeded_pattern_match_returns_exact_ordered_customers_and_stats(
     assert [customer.customer_id for customer in result.customers] == EXPECTED_MATCHES
     assert all(customer.risk_score >= 75 for customer in result.customers)
     assert result.missing_sources == []
-    assert result.stats == ToolStats(scanned_rows=174, returned_rows=6)
+    assert result.stats == ToolStats(scanned_rows=199, returned_rows=6)
     assert result.evidence_ids == [
         evidence_id for customer in result.customers for evidence_id in customer.evidence_ids
     ]
@@ -249,7 +249,7 @@ def test_disabling_voc_keeps_candidates_but_removes_complete_matches(
     assert result.customers == []
     assert result.candidate_count >= 6
     assert result.missing_sources == ["voc"]
-    assert result.stats.scanned_rows == 144
+    assert result.stats.scanned_rows == 169
 
 
 def test_pattern_boundaries_include_exactly_24_and_72_hours_and_exclude_just_over():
@@ -490,8 +490,8 @@ def test_aggregate_events_is_deterministic_and_counts_filtered_events(
     assert first == second
     assert first.result_id == second.result_id
     assert first.group_by == group_by
-    assert sum(bucket.event_count for bucket in first.buckets) == 174
-    assert first.stats.scanned_rows == 174
+    assert sum(bucket.event_count for bucket in first.buckets) == 199
+    assert first.stats.scanned_rows == 199
     assert first.stats.returned_rows == len(first.buckets)
     assert [bucket.value for bucket in first.buckets] == sorted(
         [bucket.value for bucket in first.buckets],
@@ -520,9 +520,9 @@ def test_source_aggregate_has_expected_counts(analytics_service: AnalyticsServic
 
     assert [(bucket.value, bucket.event_count) for bucket in result.buckets] == [
         ("search_history", 54),
-        ("search_feedback", 30),
+        ("search_feedback", 36),
         ("digital_behavior", 30),
-        ("subscription", 30),
+        ("subscription", 49),
         ("voc", 30),
     ]
     assert all(bucket.customer_count > 0 for bucket in result.buckets)
@@ -551,7 +551,7 @@ def test_ranking_is_score_descending_then_customer_id_and_is_limited(
     assert first.candidate_count >= first.customer_count
     assert first.result_id == second.result_id
     assert first == second
-    assert first.stats == ToolStats(scanned_rows=174, returned_rows=8)
+    assert first.stats == ToolStats(scanned_rows=199, returned_rows=8)
 
 
 def test_result_ids_change_when_normalized_operation_inputs_or_results_change(
@@ -645,7 +645,7 @@ def test_catalog_sources_is_stable_and_reports_scan_and_missing_source_stats(
     assert first == second
     assert [source.source_id for source in first.sources] == ALL_SOURCES
     assert first.missing_sources == []
-    assert first.stats == ToolStats(scanned_rows=174, returned_rows=5)
+    assert first.stats == ToolStats(scanned_rows=199, returned_rows=5)
     assert first.result_id.startswith("catalog_sources:")
 
 

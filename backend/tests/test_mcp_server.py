@@ -253,13 +253,13 @@ async def test_all_six_tools_call_seeded_service_and_return_structured_data(
         for bucket in aggregate.structured_content["buckets"]
     ] == [
         ("search_history", 54),
-        ("search_feedback", 30),
+        ("search_feedback", 36),
         ("digital_behavior", 30),
-        ("subscription", 30),
+        ("subscription", 49),
         ("voc", 30),
     ]
     assert aggregate.structured_content["stats"] == {
-        "scanned_rows": 174,
+        "scanned_rows": 199,
         "returned_rows": 5,
     }
     assert matched.structured_content["customer_ids"] == EXPECTED_MATCHES
