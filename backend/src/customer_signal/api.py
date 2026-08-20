@@ -16,13 +16,7 @@ from customer_signal.agent.analysis_loop import AnalysisLoop
 from customer_signal.agent.contracts import RunRequest
 from customer_signal.agent.fixture import FixtureRunner
 from customer_signal.agent.gemini import GeminiRunner
-from customer_signal.agent.generic_fixture import (
-    AMBIGUOUS_QUESTION,
-    NEGATIVE_TOPIC_QUESTION,
-    REPEAT_JOURNEY_QUESTION,
-    SIGNUP_ABANDONMENT_QUESTION,
-    GenericFixtureModel,
-)
+from customer_signal.agent.generic_fixture import GenericFixtureModel
 from customer_signal.agent.generic_gemini import GeminiAnalysisModel
 from customer_signal.agent.intent import is_supported_target_journey_question
 from customer_signal.analytics.executor import PrimitiveExecutor
@@ -87,16 +81,6 @@ _BUILT_IN_SOURCE_IDS = (
     "subscription",
     "voc",
 )
-_GENERIC_QUESTIONS = frozenset(
-    {
-        NEGATIVE_TOPIC_QUESTION,
-        REPEAT_JOURNEY_QUESTION,
-        SIGNUP_ABANDONMENT_QUESTION,
-        AMBIGUOUS_QUESTION,
-    }
-)
-
-
 @dataclass(frozen=True, slots=True)
 class ApiDependencies:
     """Injectable application services for deterministic tests and later runners."""
@@ -446,21 +430,7 @@ def create_app(
 
 
 def _is_generic_question(question: str) -> bool:
-    normalized = " ".join(question.casefold().split())
-    if any(normalized == " ".join(item.casefold().split()) for item in _GENERIC_QUESTIONS):
-        return True
-    if is_supported_target_journey_question(question):
-        return False
-    if ("부정" in normalized and "피드백" in normalized) or (
-        "반복" in normalized and ("상담" in normalized or "journey" in normalized)
-    ):
-        return True
-    if "가입" in normalized and ("완료" in normalized or "이탈" in normalized):
-        return True
-    unsafe_tokens = ("이메일", "전화번호", "개인정보", "원본", "raw", "export", "삭제")
-    return any(token in normalized for token in unsafe_tokens) and not (
-        "검색" in normalized and "문의" in normalized
-    )
+    return not is_supported_target_journey_question(question)
 
 
 __all__ = ["ApiDependencies", "RunAccepted", "create_app"]

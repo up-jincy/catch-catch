@@ -103,6 +103,18 @@ for (const analysisCase of cases) {
         )
         .first(),
     ).toBeVisible();
+    await expect(
+      workspace.getByText("선택 근거", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(
+      workspace.getByText("검증 Fact", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(
+      workspace.getByRole("region", { name: "관찰 Fact" }).first(),
+    ).toBeVisible();
+    await expect(
+      workspace.getByRole("region", { name: "다음 행동" }).first(),
+    ).toBeVisible();
 
     const chat = page.getByRole("complementary", { name: "질문과 Run 기록" });
     const [chatBox, workspaceBox] = await Promise.all([
@@ -153,8 +165,15 @@ test("저장된 Run을 새로고침 뒤 열고 JSON과 Markdown을 다운로드�
   expect(jsonPath).not.toBeNull();
   const artifact = JSON.parse(await readFile(jsonPath!, "utf8")) as {
     request: { question: string };
+    plan_history: unknown[];
+    facts: unknown[];
+    notes: Array<{ next_action: string }>;
   };
   expect(artifact.request.question).toBe(NEGATIVE_TOPIC_QUESTION);
+  expect(artifact.plan_history.length).toBeGreaterThanOrEqual(1);
+  expect(artifact.facts.length).toBeGreaterThanOrEqual(1);
+  expect(artifact.notes.length).toBeGreaterThanOrEqual(1);
+  expect(artifact.notes.every((note) => note.next_action.length > 0)).toBe(true);
 
   const [markdownDownload] = await Promise.all([
     page.waitForEvent("download"),
@@ -163,9 +182,12 @@ test("저장된 Run을 새로고침 뒤 열고 JSON과 Markdown을 다운로드�
   expect(markdownDownload.suggestedFilename()).toMatch(/^[0-9a-f-]+\.md$/);
   const markdownPath = await markdownDownload.path();
   expect(markdownPath).not.toBeNull();
-  await expect(
-    readFile(markdownPath!, "utf8"),
-  ).resolves.toContain(NEGATIVE_TOPIC_QUESTION);
+  const markdown = await readFile(markdownPath!, "utf8");
+  expect(markdown).toContain(NEGATIVE_TOPIC_QUESTION);
+  expect(markdown).toContain("## 분석 계획");
+  expect(markdown).toContain("revision 0");
+  expect(markdown).toContain("## 공개 Facts");
+  expect(markdown).toContain("- Next action:");
 });
 
 test("확인 답변 뒤 같은 Run에서 분석을 계속한다", async ({ page }) => {

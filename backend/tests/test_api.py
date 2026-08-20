@@ -208,6 +208,46 @@ def _create_blocked_app(database_path: Path):
     )
 
 
+def _create_routing_probe_app(database_path: Path):
+    module = importlib.import_module("customer_signal.api")
+    analytics = AnalyticsService(DuckDBRepository(database_path))
+    mcp_server = create_mcp_server(analytics)
+    store = RunStore()
+
+    class RoutingProbeCoordinator:
+        def __init__(self) -> None:
+            self.generic_values: list[bool] = []
+
+        def create_run(self, request, *, generic=False, mode=None):
+            del request, mode
+            self.generic_values.append(generic)
+
+            class Snapshot:
+                run_id = "routing-probe-run"
+
+            return Snapshot()
+
+        async def close(self) -> None:
+            return None
+
+    coordinator = RoutingProbeCoordinator()
+    dependencies = module.ApiDependencies(
+        store=store,
+        coordinator=coordinator,
+        mcp_server=mcp_server,
+    )
+    app = module.create_app(
+        Settings(
+            agent_mode="fixture",
+            database_path=database_path,
+            artifact_directory=database_path.parent / "run-artifacts",
+            frontend_origin="http://frontend.test",
+        ),
+        dependencies=dependencies,
+    )
+    return app, coordinator
+
+
 def test_health_uses_factory_without_requiring_an_api_key(tmp_path: Path) -> None:
     database_path = tmp_path / "generated" / "customer-signal.duckdb"
 
@@ -455,10 +495,44 @@ def test_unsupported_question_fails_with_one_error_then_done(tmp_path: Path) -> 
         events = _parse_sse(client.get(accepted["events_url"]).text)
 
     assert snapshot["status"] == "failed"
+    assert snapshot["run_kind"] == "generic"
     assert snapshot["report"] is None
-    assert snapshot["error"]["code"] == "unsupported_question"
-    assert [event["event"] for event in events] == ["error", "done"]
-    assert events[-1]["data"]["payload"] == {"status": "failed"}
+    assert snapshot["error"]["code"] == "unsupported_analysis"
+    assert [event["event"] for event in events] == ["run_started", "error", "done"]
+    assert events[-1]["data"]["payload"] == {
+        "status": "failed",
+        "limitations": [],
+    }
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "부정 피드백 고객은 이후 어떤 행동을 보이고 일반 고객과 무엇이 달라?",
+        "최근 이탈 고객의 공통 행동 경로를 Source별로 비교해줘.",
+    ],
+)
+def test_freeform_analysis_questions_route_to_generic_loop(
+    tmp_path: Path,
+    question: str,
+) -> None:
+    app, coordinator = _create_routing_probe_app(tmp_path / "routing.duckdb")
+
+    with TestClient(app) as client:
+        response = client.post("/api/runs", json=_run_request(question=question))
+
+    assert response.status_code == 202
+    assert coordinator.generic_values == [True]
+
+
+def test_bounded_legacy_journey_question_keeps_legacy_route(tmp_path: Path) -> None:
+    app, coordinator = _create_routing_probe_app(tmp_path / "routing.duckdb")
+
+    with TestClient(app) as client:
+        response = client.post("/api/runs", json=_run_request())
+
+    assert response.status_code == 202
+    assert coordinator.generic_values == [False]
 
 
 def test_opposite_search_success_question_never_publishes_fixed_failure_report(
@@ -473,12 +547,11 @@ def test_opposite_search_success_question_never_publishes_fixed_failure_report(
         events = _parse_sse(client.get(accepted["events_url"]).text)
 
     assert snapshot["status"] == "failed"
+    assert snapshot["run_kind"] == "generic"
     assert snapshot["report"] is None
-    assert snapshot["error"] == {
-        "code": "unsupported_question",
-        "message": "검색 실패와 고객 문의 Journey 질문만 지원합니다.",
-    }
-    assert [event["event"] for event in events] == ["error", "done"]
+    assert snapshot["error"]["code"] == "unsupported_analysis"
+    assert snapshot["error"]["message"] == "현재 안전한 분석 범위에서 지원하지 않는 요청입니다."
+    assert [event["event"] for event in events] == ["run_started", "error", "done"]
     assert all(event["event"] != "result" for event in events)
 
 
@@ -502,12 +575,11 @@ def test_attribute_pivot_never_publishes_fixed_journey_report(
         events = _parse_sse(client.get(accepted["events_url"]).text)
 
     assert snapshot["status"] == "failed"
+    assert snapshot["run_kind"] == "generic"
     assert snapshot["report"] is None
-    assert snapshot["error"] == {
-        "code": "unsupported_question",
-        "message": "검색 실패와 고객 문의 Journey 질문만 지원합니다.",
-    }
-    assert [event["event"] for event in events] == ["error", "done"]
+    assert snapshot["error"]["code"] == "unsupported_analysis"
+    assert snapshot["error"]["message"] == "현재 안전한 분석 범위에서 지원하지 않는 요청입니다."
+    assert [event["event"] for event in events] == ["run_started", "error", "done"]
     assert all(event["event"] != "result" for event in events)
 
 
@@ -537,12 +609,11 @@ def test_semantic_bypass_never_publishes_fixed_journey_report(
         events = _parse_sse(client.get(accepted["events_url"]).text)
 
     assert snapshot["status"] == "failed"
+    assert snapshot["run_kind"] == "generic"
     assert snapshot["report"] is None
-    assert snapshot["error"] == {
-        "code": "unsupported_question",
-        "message": "검색 실패와 고객 문의 Journey 질문만 지원합니다.",
-    }
-    assert [event["event"] for event in events] == ["error", "done"]
+    assert snapshot["error"]["code"] == "unsupported_analysis"
+    assert snapshot["error"]["message"] == "현재 안전한 분석 범위에서 지원하지 않는 요청입니다."
+    assert [event["event"] for event in events] == ["run_started", "error", "done"]
     assert all(event["event"] != "result" for event in events)
 
 
