@@ -151,8 +151,10 @@ class GenericFixtureModel:
         self,
         goal: AnalysisGoal,
         manifests: list[SourceManifest],
+        *,
+        validation_feedback: str | None = None,
     ) -> AnalysisPlan:
-        del manifests
+        del manifests, validation_feedback
         scenario = goal.goal_id.removeprefix("goal-")
         steps = [_catalog_step(goal)]
         if scenario == "negative":

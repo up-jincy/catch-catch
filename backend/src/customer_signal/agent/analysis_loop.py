@@ -25,6 +25,7 @@ from customer_signal.agent.contracts import (
     StepModelContext,
 )
 from customer_signal.agent.plan_validator import (
+    PlanValidationError,
     validate_fact_against_step,
     validate_goal_against_request,
     validate_plan,
@@ -69,6 +70,8 @@ class AnalysisModel(Protocol):
         self,
         goal: AnalysisGoal,
         manifests: list[SourceManifest],
+        *,
+        validation_feedback: str | None = None,
     ) -> AnalysisPlan: ...
 
     async def create_note(self, context: StepModelContext) -> AnalysisNoteDraft: ...
@@ -182,11 +185,7 @@ class AnalysisLoop:
                 ),
             )
 
-            plan = await self._model.create_plan(goal, manifests)
-            if plan.goal_id != goal.goal_id:
-                raise ValueError("Plan goal_id does not match the validated Goal")
-            validate_plan(plan, manifests)
-            _validate_plan_scope(plan, goal)
+            plan = await _create_validated_plan(self._model, goal, manifests)
             await _emit(
                 emit,
                 AnalysisEvent(
@@ -216,6 +215,7 @@ class AnalysisLoop:
                         payload={
                             "step_id": step.step_id,
                             "primitive": step.primitive,
+                            "selection_reason": step.selection_reason,
                             "started_at": started_at.isoformat(),
                         },
                     ),
@@ -249,6 +249,54 @@ class AnalysisLoop:
                         current_fact=fact,
                     )
                 )
+                completed_with_current = completed_step_ids | {step.step_id}
+                selected_next_step_id: str | None = None
+                next_action = "계획한 분석 단계를 모두 완료했습니다."
+                revised_plan: AnalysisPlan | None = None
+
+                if _server_stop_requested(step, fact):
+                    next_action = "서버 종료 조건을 충족해 분석을 마칩니다."
+                else:
+                    remaining = [
+                        candidate
+                        for candidate in plan.steps
+                        if candidate.step_id not in completed_with_current
+                    ]
+                    if remaining:
+                        selection = await self._model.select_next(
+                            SelectionContext(
+                                goal=goal,
+                                plan=plan,
+                                completed_step_ids=frozenset(completed_with_current),
+                                facts=list(facts),
+                            )
+                        )
+                        next_action = selection.reason
+                        if isinstance(selection, ContinueSelection):
+                            _select_ready_step(
+                                plan,
+                                selection.next_step_id,
+                                completed_with_current,
+                            )
+                            selected_next_step_id = selection.next_step_id
+                        elif isinstance(selection, ReviseSelection):
+                            validate_plan_revision(
+                                previous=plan,
+                                revised=selection.revised_plan,
+                                completed_step_ids=completed_with_current,
+                                manifests=manifests,
+                            )
+                            _validate_plan_scope(selection.revised_plan, goal)
+                            _select_ready_step(
+                                selection.revised_plan,
+                                selection.next_step_id,
+                                completed_with_current,
+                            )
+                            revised_plan = selection.revised_plan
+                            selected_next_step_id = selection.next_step_id
+                        elif not isinstance(selection, StopSelection):  # pragma: no cover
+                            raise ValueError("unknown StepSelection kind")
+
                 duration_ms = min(
                     int((time.monotonic() - started) * 1_000),
                     int(step.limits.timeout_seconds * 1_000),
@@ -258,6 +306,8 @@ class AnalysisLoop:
                     draft,
                     fact,
                     duration_ms,
+                    next_step_id=selected_next_step_id,
+                    next_action=next_action,
                     plan_revision=plan.revision,
                 )
                 notes.append(note)
@@ -281,50 +331,16 @@ class AnalysisLoop:
                         },
                     ),
                 )
-
-                if _server_stop_requested(step, fact):
-                    next_step_id = None
-                    continue
-
-                remaining = [
-                    candidate
-                    for candidate in plan.steps
-                    if candidate.step_id not in completed_step_ids
-                ]
-                if not remaining:
-                    next_step_id = None
-                    continue
-                selection = await self._model.select_next(
-                    SelectionContext(
-                        goal=goal,
-                        plan=plan,
-                        completed_step_ids=frozenset(completed_step_ids),
-                        facts=list(facts),
-                    )
-                )
-                if isinstance(selection, StopSelection):
-                    next_step_id = None
-                elif isinstance(selection, ContinueSelection):
-                    next_step_id = selection.next_step_id
-                elif isinstance(selection, ReviseSelection):
-                    validate_plan_revision(
-                        previous=plan,
-                        revised=selection.revised_plan,
-                        completed_step_ids=completed_step_ids,
-                        manifests=manifests,
-                    )
-                    _validate_plan_scope(selection.revised_plan, goal)
-                    plan = selection.revised_plan
+                if revised_plan is not None:
                     await _emit(
                         emit,
                         AnalysisEvent(
                             type="plan_revised",
-                            payload={"plan": plan.model_dump(mode="json")},
+                            payload={"plan": revised_plan.model_dump(mode="json")},
                         ),
                     )
-                    next_step_id = selection.next_step_id
-                else:  # pragma: no cover - closed Pydantic union defensive branch
-                    raise ValueError("unknown StepSelection kind")
+                    plan = revised_plan
+                next_step_id = selected_next_step_id
 
             await _emit(
                 emit,
@@ -438,6 +454,35 @@ async def _emit_error(emit: AnalysisEventEmitter, error: PublicRunError) -> None
         emit,
         AnalysisEvent(type="error", payload=error.model_dump(mode="json")),
     )
+
+
+async def _create_validated_plan(
+    model: AnalysisModel,
+    goal: AnalysisGoal,
+    manifests: list[SourceManifest],
+) -> AnalysisPlan:
+    validation_feedback: str | None = None
+    for attempt in range(2):
+        if validation_feedback is None:
+            plan = await model.create_plan(goal, manifests)
+        else:
+            plan = await model.create_plan(
+                goal,
+                manifests,
+                validation_feedback=validation_feedback,
+            )
+        try:
+            if plan.goal_id != goal.goal_id:
+                raise PlanValidationError("Plan goal_id must equal the validated Goal")
+            validate_plan(plan, manifests)
+            _validate_plan_scope(plan, goal)
+            return plan
+        except ValueError as error:
+            summary = f"Plan validation failed: {' '.join(str(error).split())}"[:500]
+            if attempt == 1:
+                raise PlanValidationError(summary) from error
+            validation_feedback = summary
+    raise AssertionError("bounded Plan repair loop exhausted")
 
 
 def _validate_plan_scope(plan: AnalysisPlan, goal: AnalysisGoal) -> None:

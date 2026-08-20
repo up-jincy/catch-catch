@@ -17,7 +17,10 @@ from customer_signal.agent.generic_fixture import (
     GenericFixtureModel,
 )
 from customer_signal.domain.analysis import (
+    AnalysisPlan,
     CustomerSignalReportDraft,
+    ReviseSelection,
+    StopSelection,
 )
 from customer_signal.domain.facts import (
     AggregateEventsPayload,
@@ -237,6 +240,147 @@ class ScriptedExecutor:
         raise AssertionError(f"unexpected primitive: {step.primitive}")
 
 
+class RepairingPlanModel(GenericFixtureModel):
+    def __init__(self, *, invalid_attempts: int) -> None:
+        self.invalid_attempts = invalid_attempts
+        self.validation_feedback: list[str | None] = []
+        self.accepted_plan: AnalysisPlan | None = None
+
+    async def create_plan(
+        self,
+        goal,
+        manifests,
+        *,
+        validation_feedback: str | None = None,
+    ) -> AnalysisPlan:
+        self.validation_feedback.append(validation_feedback)
+        plan = await super().create_plan(goal, manifests)
+        self.accepted_plan = plan
+        if len(self.validation_feedback) <= self.invalid_attempts:
+            invalid_first_step = plan.steps[0].model_copy(
+                update={"source_ids": ["unknown_v2"]}
+            )
+            return plan.model_copy(update={"steps": [invalid_first_step, *plan.steps[1:]]})
+        return plan
+
+
+class CatalogFactRevisionModel(GenericFixtureModel):
+    revision_reason = (
+        "Catalog Fact에서 확인한 데이터 범위에 맞춰 새 Profile 단계를 실행합니다."
+    )
+    revised_rationale = (
+        "Catalog Fact에서 VOC Source를 확인해 새 Profile 단계를 Plan에 반영합니다."
+    )
+    stop_reason = "새 Profile Fact로 필요한 범위를 확인해 분석을 종료합니다."
+
+    def __init__(self) -> None:
+        self.initial_plan: AnalysisPlan | None = None
+
+    async def create_plan(
+        self,
+        goal,
+        manifests,
+        *,
+        validation_feedback: str | None = None,
+    ) -> AnalysisPlan:
+        del validation_feedback
+        self.initial_plan = await super().create_plan(goal, manifests)
+        return self.initial_plan
+
+    async def select_next(self, context):
+        if context.plan.revision == 0:
+            adaptive_step = context.plan.steps[1].model_copy(
+                update={
+                    "step_id": "step-catalog-profile",
+                    "selection_reason": self.revision_reason,
+                }
+            )
+            revised_plan = context.plan.model_copy(
+                update={
+                    "revision": context.plan.revision + 1,
+                    "steps": [
+                        context.plan.steps[0],
+                        adaptive_step,
+                        context.plan.steps[2],
+                    ],
+                    "rationale": self.revised_rationale,
+                }
+            )
+            return ReviseSelection(
+                revised_plan=revised_plan,
+                next_step_id=adaptive_step.step_id,
+                reason=self.revision_reason,
+            )
+        return StopSelection(reason=self.stop_reason)
+
+
+@pytest.mark.asyncio
+async def test_invalid_initial_plan_is_rewritten_once_before_execution() -> None:
+    model = RepairingPlanModel(invalid_attempts=1)
+    executor = ScriptedExecutor()
+    loop = AnalysisLoop(model=model, executor=executor, manifests=[_manifest()])
+    events = []
+
+    outcome = await loop.run(_request(NEGATIVE_TOPIC_QUESTION), emit=events.append)
+
+    assert outcome.status == "completed"
+    assert model.accepted_plan is not None
+    assert len(model.validation_feedback) == 2
+    assert model.validation_feedback[0] is None
+    feedback = model.validation_feedback[1]
+    assert feedback is not None
+    assert 1 <= len(feedback) <= 500
+    assert "unknown or disabled source" in feedback.casefold()
+    assert executor.calls == [step.step_id for step in model.accepted_plan.steps]
+    assert [event.type for event in events].count("plan_created") == 1
+
+
+@pytest.mark.asyncio
+async def test_second_invalid_plan_fails_with_goal_without_executing_a_primitive() -> None:
+    model = RepairingPlanModel(invalid_attempts=2)
+    executor = ScriptedExecutor()
+    loop = AnalysisLoop(model=model, executor=executor, manifests=[_manifest()])
+    events = []
+
+    outcome = await loop.run(_request(NEGATIVE_TOPIC_QUESTION), emit=events.append)
+
+    assert outcome.status == "failed"
+    assert outcome.goal is not None
+    assert outcome.goal.goal_id == "goal-negative"
+    assert outcome.plan is None
+    assert len(model.validation_feedback) == 2
+    assert executor.calls == []
+    assert all(event.type != "plan_created" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_catalog_fact_revises_unfinished_plan_before_publishing_next_action() -> None:
+    model = CatalogFactRevisionModel()
+    executor = ScriptedExecutor()
+    loop = AnalysisLoop(model=model, executor=executor, manifests=[_manifest()])
+    events = []
+
+    outcome = await loop.run(_request(NEGATIVE_TOPIC_QUESTION), emit=events.append)
+
+    assert outcome.status == "completed"
+    assert outcome.plan is not None
+    assert outcome.plan.revision == 1
+    assert model.initial_plan is not None
+    assert executor.calls == ["step-catalog", "step-catalog-profile"]
+    revised_events = [event for event in events if event.type == "plan_revised"]
+    assert len(revised_events) == 1
+    revised_plan = revised_events[0].payload["plan"]
+    assert revised_plan["revision"] == 1
+    assert revised_plan["rationale"] == model.revised_rationale
+    assert revised_plan["steps"][0] == model.initial_plan.steps[0].model_dump(mode="json")
+    first_note = next(event for event in events if event.type == "analysis_note_created")
+    assert first_note.payload["note"]["next_step_id"] == "step-catalog-profile"
+    assert first_note.payload["note"]["next_action"] == model.revision_reason
+    assert first_note.payload["note"]["plan_revision"] == 0
+    event_types = [event.type for event in events]
+    assert event_types.index("step_completed") < event_types.index("plan_revised")
+
+
 @pytest.mark.parametrize(
     ("question", "expected_primitive", "metric_key", "value"),
     [
@@ -293,6 +437,7 @@ async def test_loop_emits_task9_full_public_payload_envelopes() -> None:
     assert outcome.report is not None
     goal_event = next(event for event in events if event.type == "goal_created")
     plan_event = next(event for event in events if event.type == "plan_created")
+    started_event = next(event for event in events if event.type == "step_started")
     fact_event = next(event for event in events if event.type == "fact_created")
     note_event = next(event for event in events if event.type == "analysis_note_created")
     completed_event = next(event for event in events if event.type == "step_completed")
@@ -301,6 +446,10 @@ async def test_loop_emits_task9_full_public_payload_envelopes() -> None:
 
     assert goal_event.payload == {"goal": outcome.goal.model_dump(mode="json")}
     assert plan_event.payload == {"plan": outcome.plan.model_dump(mode="json")}
+    started_step = next(
+        step for step in outcome.plan.steps if step.step_id == started_event.payload["step_id"]
+    )
+    assert started_event.payload["selection_reason"] == started_step.selection_reason
     assert fact_event.payload == {
         "step_id": outcome.facts[0].step_id,
         "fact": outcome.facts[0].model_dump(mode="json"),

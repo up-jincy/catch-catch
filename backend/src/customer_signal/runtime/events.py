@@ -113,6 +113,7 @@ class PlanCreatedPayload(GenericEventContract):
 class StepStartedPayload(GenericEventContract):
     step_id: str = Field(min_length=1, max_length=128)
     primitive: GenericPrimitiveName
+    selection_reason: str = Field(min_length=1, max_length=500)
     started_at: AwareDatetime
 
 

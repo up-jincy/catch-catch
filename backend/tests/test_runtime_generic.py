@@ -9,6 +9,7 @@ from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from customer_signal.agent.generic_fixture import (
     AMBIGUOUS_QUESTION,
@@ -19,6 +20,7 @@ from customer_signal.agent.generic_fixture import (
 from customer_signal.agent.generic_gemini import GeminiAnalysisModel
 from customer_signal.api import _default_dependencies, create_app
 from customer_signal.config import Settings
+from customer_signal.runtime.events import validate_generic_event
 
 
 START_AT = "2026-07-20T00:00:00+09:00"
@@ -124,6 +126,29 @@ def _metric(report: dict[str, object], key: str) -> dict[str, object]:
     return next(metric for metric in report["metrics"] if metric["metric_key"] == key)
 
 
+def test_step_started_event_requires_a_strict_bounded_selection_reason() -> None:
+    payload = {
+        "step_id": "step-catalog",
+        "primitive": "catalog_sources",
+        "selection_reason": "Source 범위와 지원 Capability를 확인합니다.",
+        "started_at": "2026-08-20T09:00:00+00:00",
+    }
+
+    assert validate_generic_event("step_started", payload) == {
+        **payload,
+        "started_at": "2026-08-20T09:00:00Z",
+    }
+    invalid_payloads = [
+        {key: value for key, value in payload.items() if key != "selection_reason"},
+        {**payload, "selection_reason": ""},
+        {**payload, "selection_reason": "x" * 501},
+        {**payload, "selection_reason": 1},
+    ]
+    for invalid in invalid_payloads:
+        with pytest.raises(ValidationError):
+            validate_generic_event("step_started", invalid)
+
+
 @pytest.mark.parametrize(
     ("question", "metric_key", "expected_value"),
     [
@@ -161,13 +186,25 @@ def test_three_generic_fixture_questions_publish_fact_backed_lifecycle_and_artif
     fact_payload = next(
         event["envelope"]["payload"] for event in events if event["type"] == "fact_created"
     )
+    planned_reasons = {
+        step["step_id"]: step["selection_reason"]
+        for step in next(
+            event["envelope"]["payload"]["plan"]["steps"]
+            for event in events
+            if event["type"] == "plan_created"
+        )
+    }
     for event in events:
         if event["type"] == "step_started":
             assert set(event["envelope"]["payload"]) == {
                 "step_id",
                 "primitive",
+                "selection_reason",
                 "started_at",
             }
+            assert event["envelope"]["payload"]["selection_reason"] == planned_reasons[
+                event["envelope"]["payload"]["step_id"]
+            ]
     assert fact_payload["fact"]["fact_id"]
     assert fact_payload["fact"]["payload"]["provenance"]["source_ids"]
     assert artifact.status_code == 200
