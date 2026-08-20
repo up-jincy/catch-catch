@@ -264,6 +264,28 @@ class RepairingPlanModel(GenericFixtureModel):
         return plan
 
 
+class RevisionRepairingPlanModel(GenericFixtureModel):
+    def __init__(self, *, revisions: list[int]) -> None:
+        self.revisions = revisions
+        self.validation_feedback: list[str | None] = []
+        self.returned_plans: list[AnalysisPlan] = []
+
+    async def create_plan(
+        self,
+        goal,
+        manifests,
+        *,
+        validation_feedback: str | None = None,
+    ) -> AnalysisPlan:
+        self.validation_feedback.append(validation_feedback)
+        plan = await super().create_plan(goal, manifests)
+        returned_plan = plan.model_copy(
+            update={"revision": self.revisions[len(self.returned_plans)]}
+        )
+        self.returned_plans.append(returned_plan)
+        return returned_plan
+
+
 class CatalogFactRevisionModel(GenericFixtureModel):
     revision_reason = (
         "Catalog Fact에서 확인한 데이터 범위에 맞춰 새 Profile 단계를 실행합니다."
@@ -347,6 +369,45 @@ async def test_second_invalid_plan_fails_with_goal_without_executing_a_primitive
     assert outcome.status == "failed"
     assert outcome.goal is not None
     assert outcome.goal.goal_id == "goal-negative"
+    assert outcome.plan is None
+    assert len(model.validation_feedback) == 2
+    assert executor.calls == []
+    assert all(event.type != "plan_created" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_nonzero_initial_revision_is_rewritten_before_plan_is_published() -> None:
+    model = RevisionRepairingPlanModel(revisions=[1, 0])
+    executor = ScriptedExecutor()
+    loop = AnalysisLoop(model=model, executor=executor, manifests=[_manifest()])
+    events = []
+
+    outcome = await loop.run(_request(NEGATIVE_TOPIC_QUESTION), emit=events.append)
+
+    assert outcome.status == "completed"
+    assert outcome.plan is not None
+    assert outcome.plan.revision == 0
+    assert len(model.validation_feedback) == 2
+    assert model.validation_feedback[0] is None
+    assert "initial Plan revision must be 0" in (model.validation_feedback[1] or "")
+    published_plans = [
+        event.payload["plan"] for event in events if event.type == "plan_created"
+    ]
+    assert [plan["revision"] for plan in published_plans] == [0]
+    assert executor.calls == [step.step_id for step in model.returned_plans[1].steps]
+
+
+@pytest.mark.asyncio
+async def test_second_nonzero_initial_revision_fails_without_execution() -> None:
+    model = RevisionRepairingPlanModel(revisions=[1, 1])
+    executor = ScriptedExecutor()
+    loop = AnalysisLoop(model=model, executor=executor, manifests=[_manifest()])
+    events = []
+
+    outcome = await loop.run(_request(NEGATIVE_TOPIC_QUESTION), emit=events.append)
+
+    assert outcome.status == "failed"
+    assert outcome.goal is not None
     assert outcome.plan is None
     assert len(model.validation_feedback) == 2
     assert executor.calls == []

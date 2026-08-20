@@ -362,6 +362,7 @@ async def test_free_question_uses_five_flat_provider_documents() -> None:
     ]
     goal_input = prompts[0]["input"]
     plan_input = prompts[1]["input"]
+    note_input = prompts[2]["input"]
     assert goal_input["request"]["question"] == request.question
     assert goal_input["sources"][0]["description"] == "Masked support signals"
     assert plan_input["sources"] == goal_input["sources"]
@@ -385,6 +386,10 @@ async def test_free_question_uses_five_flat_provider_documents() -> None:
         == PRIMITIVE_INPUT_ADAPTER.json_schema()
     )
     assert plan_input["constraints"] == {
+        "compare_segments": (
+            "two dependencies must both publish parameters.metric_key; "
+            "required output is <metric_key>_delta"
+        ),
         "dependency_arity": {
             "catalog_sources": {"maximum": 0, "minimum": 0},
             "profile_events": {"maximum": 0, "minimum": 0},
@@ -398,6 +403,7 @@ async def test_free_question_uses_five_flat_provider_documents() -> None:
             "get_evidence": {"maximum": 1, "minimum": 1},
         },
         "first_step_should_discover_sources": True,
+        "initial_revision": 0,
         "input_step_ids": (
             "must obey dependency_arity bounds and reference prior steps only"
         ),
@@ -415,6 +421,24 @@ async def test_free_question_uses_five_flat_provider_documents() -> None:
         },
         "read_only": True,
         "step_count": "3..6",
+    }
+    assert note_input["claim_constraints"] == {
+        "fact_ref_binding": {
+            "fact_id": step_context.current_fact.fact_id,
+            "result_id": step_context.current_fact.result_id,
+            "plan_revision": step_context.plan.revision,
+        },
+        "allowed_selectors_by_claim_type": {
+            "metric": ["metric_key", "label", "unit", "dimensions"],
+            "segment": ["segment_id"],
+            "customer": ["customer_id"],
+            "source": ["source_id"],
+            "evidence": ["evidence_id"],
+        },
+        "selector_rule": (
+            "use only the listed selector fields for the Claim type; "
+            "all other selector fields must be null"
+        ),
     }
 
     public_prompts = "\n".join(call["prompt"] for call in provider.structured_calls)

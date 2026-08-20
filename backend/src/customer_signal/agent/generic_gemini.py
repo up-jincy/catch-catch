@@ -131,6 +131,7 @@ class GeminiAnalysisModel:
                 "primitive_catalog": _primitive_catalog(),
                 "validation_feedback": validation_feedback,
                 "constraints": {
+                    "initial_revision": 0,
                     "dependency_arity": {
                         "catalog_sources": {"minimum": 0, "maximum": 0},
                         "profile_events": {"minimum": 0, "maximum": 0},
@@ -147,6 +148,10 @@ class GeminiAnalysisModel:
                     "first_step_should_discover_sources": True,
                     "input_step_ids": (
                         "must obey dependency_arity bounds and reference prior steps only"
+                    ),
+                    "compare_segments": (
+                        "two dependencies must both publish parameters.metric_key; "
+                        "required output is <metric_key>_delta"
                     ),
                     "required_metric_keys": {
                         "catalog_sources": ["source_count"],
@@ -170,7 +175,27 @@ class GeminiAnalysisModel:
             output_type=AnalysisNoteDraft,
             schema_title="AnalysisNoteDraft",
             stage="note",
-            public_input={"context": context.model_dump(mode="json")},
+            public_input={
+                "context": context.model_dump(mode="json"),
+                "claim_constraints": {
+                    "fact_ref_binding": {
+                        "fact_id": context.current_fact.fact_id,
+                        "result_id": context.current_fact.result_id,
+                        "plan_revision": context.plan.revision,
+                    },
+                    "allowed_selectors_by_claim_type": {
+                        "metric": ["metric_key", "label", "unit", "dimensions"],
+                        "segment": ["segment_id"],
+                        "customer": ["customer_id"],
+                        "source": ["source_id"],
+                        "evidence": ["evidence_id"],
+                    },
+                    "selector_rule": (
+                        "use only the listed selector fields for the Claim type; "
+                        "all other selector fields must be null"
+                    ),
+                },
+            },
         )
 
     async def select_next(self, context: SelectionContext) -> StepSelection:

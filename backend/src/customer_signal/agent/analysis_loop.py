@@ -474,6 +474,8 @@ async def _create_validated_plan(
         try:
             if plan.goal_id != goal.goal_id:
                 raise PlanValidationError("Plan goal_id must equal the validated Goal")
+            if plan.revision != 0:
+                raise PlanValidationError("initial Plan revision must be 0")
             validate_plan(plan, manifests)
             _validate_plan_scope(plan, goal)
             return plan
