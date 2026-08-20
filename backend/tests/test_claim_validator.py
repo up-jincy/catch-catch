@@ -239,6 +239,21 @@ def test_claim_rejects_forged_segment_customer_source_and_evidence(claim: ClaimD
         validate_claim(claim, facts=[_fact()], plan_revision=2)
 
 
+def test_source_claim_accepts_fact_bound_source_id_as_subject() -> None:
+    claim = ClaimDraft(
+        claim_type="source",
+        subject="voc",
+        operator="eq",
+        target="voc",
+        fact_refs=[FactRef(fact_id="fact-segment", source_id="voc", plan_revision=2)],
+    )
+
+    verified = validate_claim(claim, facts=[_fact()], plan_revision=2)
+
+    assert verified.subject == "source_id"
+    assert verified.rendered_text == "source_id: voc"
+
+
 def test_claim_rejects_cross_fact_and_sensitive_operations() -> None:
     other = _fact().model_copy(update={"fact_id": "fact-other", "result_id": "result-other"})
     cross = _metric_claim(

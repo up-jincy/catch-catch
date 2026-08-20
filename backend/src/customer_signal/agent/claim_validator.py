@@ -77,9 +77,16 @@ def validate_claim(
     ]
     _validate_selector_shape(draft, canonical_refs)
     rendered = _validate_claim_semantics(draft, fact=fact, references=canonical_refs)
+    canonical_subject = {
+        "metric": draft.subject,
+        "segment": "segment_id",
+        "customer": "customer_id",
+        "source": "source_id",
+        "evidence": "evidence_id",
+    }[draft.claim_type]
     canonical = {
         "claim_type": draft.claim_type,
-        "subject": draft.subject,
+        "subject": canonical_subject,
         "operator": draft.operator,
         "target": draft.target,
         "fact_refs": [reference.model_dump(mode="json") for reference in canonical_refs],
@@ -270,13 +277,13 @@ def _validate_claim_semantics(
         "evidence": ("evidence_id", "evidence_id"),
     }
     expected_subject, selector = selector_by_type[draft.claim_type]
-    if draft.subject != expected_subject:
-        raise ClaimValidationError(f"Claim subject does not match {draft.claim_type} semantics")
     if draft.operator != "eq":
         raise ClaimValidationError(f"{draft.claim_type} Claim requires exact equality")
     if len(references) != 1:
         raise ClaimValidationError(f"{draft.claim_type} Claim requires exactly one FactRef")
     selected = getattr(references[0], selector)
+    if draft.subject not in {expected_subject, selected}:
+        raise ClaimValidationError(f"Claim subject does not match {draft.claim_type} semantics")
     if selected is None or type(draft.target) is not str or draft.target != selected:
         raise ClaimValidationError(f"Claim target does not match {draft.claim_type} Fact")
     return f"{expected_subject}: {selected}"
