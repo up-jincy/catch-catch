@@ -30,7 +30,7 @@ test("question to masked evidence working demo", async ({ page }) => {
   await expect(
     page
       .getByRole("list", { name: "공개 Agent 실행 기록" })
-      .getByText("Run 완료", { exact: true }),
+      .getByText("분석을 마쳤습니다", { exact: true }),
   ).toBeVisible();
   await expect(
     page.getByLabel("완전한 Journey 패턴 고객 수"),
@@ -75,7 +75,7 @@ test("disabling VOC returns the truthful zero result", async ({ page }) => {
   await expect(
     page
       .getByRole("list", { name: "공개 Agent 실행 기록" })
-      .getByText("Run 완료", { exact: true }),
+      .getByText("분석을 마쳤습니다", { exact: true }),
   ).toBeVisible();
   await expect(
     page.getByLabel("완전한 Journey 패턴 고객 수"),

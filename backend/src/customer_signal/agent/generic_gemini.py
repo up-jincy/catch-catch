@@ -110,6 +110,61 @@ class GeminiAnalysisModel:
                 "request": request.model_dump(mode="json"),
                 "sources": _public_manifests(manifests),
                 "primitive_catalog": _primitive_catalog(),
+                "decision_policy": {
+                    "choose_exactly_one": ["goal", "clarification", "unsupported"],
+                    "clarification_when": (
+                        "질문이 측정할 신호 자체를 담고 있지 않을 때만 clarification을 "
+                        "반환한다 (예: '분석해줘', '문제 있는 고객 알려줘' — 무엇이 "
+                        "'문제'인지, 어떤 신호인지 없음). 이때 분석을 시작할 수 있게 "
+                        "하는 구체적 질문 하나를 던진다"
+                    ),
+                    "no_clarification_when": (
+                        "질문이 신호(예: 부정 피드백, 반복 행동 뒤 상담 전환, 가입 "
+                        "미완료)와 원하는 산출물(주제, 고객 수, 여정, 이탈 단계)을 "
+                        "담고 있으면 절대 되묻지 않는다 — 집계 방식이나 분류 기준 "
+                        "같은 세부 선택은 질문에 가장 직접적인 해석 하나를 스스로 "
+                        "골라 goal로 만든다"
+                    ),
+                    "goal_when": (
+                        "질문이 측정 가능한 결과를 특정하면 goal을 반환한다. "
+                        "objective는 제공된 sources와 primitives로 계산 가능해야 하고, "
+                        "time_range는 요청의 start_at/end_at을 그대로 사용하며, "
+                        "source_ids에는 질문이 의존하는 이벤트를 가진 enabled source를 "
+                        "모두 포함한다 (질문이 특정 source로 좁히지 않는 한 임의로 "
+                        "좁히지 않는다). 행동 순서 질문이면 질문이 명시한 조건 — 같은 "
+                        "행동의 반복 여부, 시간 창, 전환 대상 이벤트 — 을 sequence에 "
+                        "빠짐없이 반영한다; 조건을 느슨하게 풀면 잘못된 고객이 "
+                        "매칭된다"
+                    ),
+                    "unsupported_when": (
+                        "PII·raw export·쓰기 요청이거나 어떤 primitive로도 측정할 수 "
+                        "없는 경우에만 unsupported를 반환한다"
+                    ),
+                    "goal_archetypes": [
+                        {
+                            "question_shape": "특정 신호가 집중된 주제/속성과 그 고객 규모",
+                            "goal": (
+                                "해당 신호 이벤트를 주제별로 집계해 고객 수를 세는 "
+                                "objective; measures는 고객 수 집계; 신호를 가진 모든 "
+                                "관련 source를 source_ids에 포함"
+                            ),
+                        },
+                        {
+                            "question_shape": "행동 A 뒤 행동 B로 이어진 고객 (전환/여정)",
+                            "goal": (
+                                "sequence에 A→B 순서와 질문의 시간·반복 조건을 그대로 "
+                                "담은 objective; A와 B 이벤트를 가진 source를 모두 포함"
+                            ),
+                        },
+                        {
+                            "question_shape": "시작했지만 완료하지 못한 고객과 이탈 지점",
+                            "goal": (
+                                "시작 이벤트 후 완료 이벤트 부재를 sequence로 정의하고 "
+                                "이탈 단계 구분을 group_by/segment로 담은 objective"
+                            ),
+                        },
+                    ],
+                },
             },
             allow_initial_fallback=True,
         )
@@ -130,6 +185,49 @@ class GeminiAnalysisModel:
                 "sources": _public_manifests(manifests),
                 "primitive_catalog": _primitive_catalog(),
                 "validation_feedback": validation_feedback,
+                "planning_policy": {
+                    "minimal_direct_plan": (
+                        "목표를 직접 측정하는 최소 단계만 계획한다. 마지막 분석 "
+                        "단계의 required metric이 사용자 질문에 답하는 숫자여야 한다"
+                    ),
+                    "primitive_selection_guide": {
+                        "aggregate_events": (
+                            "특정 이벤트·피드백 속성을 가진 고객 수/이벤트 수 집계 "
+                            "(예: 부정 피드백이 많은 Topic별 고객 수)"
+                        ),
+                        "match_sequence": (
+                            "순서가 있는 행동 패턴 매칭 (A 후 B, 시간 제한 포함 — "
+                            "예: 반복 행동 뒤 상담 전환, 가입 시작 후 미완료)"
+                        ),
+                        "segment_customers": "모집단을 명명된 cohort로 분할",
+                        "detect_repetition": "동일 행동의 반복 탐지",
+                        "compare_segments": "두 선행 단계 metric의 비교",
+                    },
+                    "source_scope": (
+                        "goal.source_ids의 source를 그대로 사용한다 — 질문이 "
+                        "명시적으로 좁히지 않는 한 source를 임의로 제외하지 않는다"
+                    ),
+                    "time_scope": "goal.time_range를 모든 단계에 그대로 적용한다",
+                    "answer_metric_last": (
+                        "profile_events·catalog_sources·get_evidence는 준비/근거 "
+                        "단계일 뿐 질문의 답이 아니다. 질문이 '몇 명/어떤 주제/어느 "
+                        "단계'를 물으면 마지막 분석 단계는 반드시 그 숫자를 내는 "
+                        "primitive여야 한다: 주제·속성별 고객 수 → aggregate_events, "
+                        "행동 순서 매칭 고객 수 → match_sequence, cohort 분할 → "
+                        "segment_customers. '시작했지만 완료하지 못한' 유형은 "
+                        "aggregate_events가 아니라 match_sequence(시작 후 완료 부재) "
+                        "+ segment_customers(이탈 단계)로 계획한다"
+                    ),
+                    "qualifier_predicates": (
+                        "질문의 한정어 — 부정적/실패한/반복된/완료하지 못한/특정 "
+                        "topic·채널 — 는 반드시 해당 단계의 predicates 또는 sequence "
+                        "조건으로 인코딩한다 (sources manifests의 "
+                        "supported_outcomes/topics/dimensions 값을 사용). 한정어를 "
+                        "빼고 전체 모집단을 세는 계획은 오답이다. '상세 집계는 후속 "
+                        "단계에서'라는 계획을 만들지 말고 이 plan 안에서 질문에 "
+                        "완전히 답한다"
+                    ),
+                },
                 "constraints": {
                     "initial_revision": 0,
                     "dependency_arity": {
@@ -431,6 +529,30 @@ def _primitive_catalog() -> dict[str, Any]:
             "get_evidence",
         ],
         "input_schema": PRIMITIVE_INPUT_ADAPTER.json_schema(),
+        # match_sequence가 실제로 해석하는 토큰 어휘 — analytics.primitives.
+        # sequences._matches_token과 동기화된 도구 문서. 임의로 지어낸 이벤트
+        # 이름은 어떤 이벤트와도 매칭되지 않는다.
+        "sequence_event_aliases": [
+            "search_failed",
+            "repeat_behavior",
+            "support_contact",
+            "negative_feedback",
+            "unresolved_voc",
+            "signup_started",
+            "signup_completed",
+        ],
+        "sequence_token_syntax": (
+            "sequence 항목은 위 alias, '<event_type>:<action|outcome|topic>' "
+            "표기, 또는 predicate 표현식(예: \"outcome == 'negative'\")만 "
+            "사용한다. '반복 행동 뒤 상담'은 [repeat_behavior, "
+            "support_contact], '가입 시작 후 미완료'는 [signup_started, "
+            "signup_completed] 매칭 뒤 미완료 segment 분리로 계획한다"
+        ),
+        "aggregate_usage": (
+            "aggregate_events로 '~한 고객 수'를 셀 때는 질문의 한정어를 "
+            "predicates로 넣는다 (예: 부정 피드백 → \"outcome == "
+            "'negative'\") — predicate 없는 집계는 전체 모집단을 세게 된다"
+        ),
     }
 
 
@@ -440,7 +562,8 @@ def _stage_prompt(stage: str, payload: dict[str, Any]) -> str:
             "stage": stage,
             "instruction": (
                 "Return one envelope whose document field is a JSON string matching "
-                "input.target_schema, with no additional prose."
+                "input.target_schema, with no additional prose. Apply every rule in "
+                "any *_policy field of input when drafting the document."
             ),
             "input": payload,
         },

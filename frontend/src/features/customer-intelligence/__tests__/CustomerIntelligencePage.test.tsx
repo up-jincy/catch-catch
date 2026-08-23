@@ -596,7 +596,9 @@ describe("CustomerIntelligencePage", () => {
       screen.getByRole("heading", { name: genericGoal.objective }),
     ).toBeInTheDocument();
     expect(screen.getByText(genericFact.result_id)).toBeInTheDocument();
-    expect(screen.getByText(genericNote.claims[0].rendered_text)).toBeInTheDocument();
+    expect(
+      screen.getAllByText(genericNote.claims[0].rendered_text).length,
+    ).toBeGreaterThan(0);
     await waitFor(() =>
       expect(client.getRunDocument).toHaveBeenCalledWith(
         "run-1",
@@ -701,7 +703,7 @@ describe("CustomerIntelligencePage", () => {
         data: { agent_mode: "fixture", report: completedReport },
       }),
     );
-    expect((await screen.findAllByText("검증된 Insight 구성")).length).toBeGreaterThan(
+    expect((await screen.findAllByText("결론을 정리했습니다")).length).toBeGreaterThan(
       0,
     );
 

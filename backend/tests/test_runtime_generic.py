@@ -417,7 +417,9 @@ def test_sources_history_documents_and_downloads_survive_restart(tmp_path: Path)
     assert download_markdown.headers["content-disposition"] == (
         f'attachment; filename="{run_id}.md"'
     )
-    assert "단계별 분석 기록" in download_markdown.text
+    assert "한눈에 보기" in download_markdown.text
+    assert "탐색 과정 — 단계별 진행 기록" in download_markdown.text
+    assert "권장 액션 — 무엇을 해야 하나" in download_markdown.text
 
     with TestClient(create_app(settings)) as restarted:
         restored_snapshot = restarted.get(f"/api/runs/{run_id}")

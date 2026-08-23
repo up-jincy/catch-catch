@@ -33,8 +33,12 @@ describe("AnalysisWorkspace", () => {
       within(workspace).getByText("부정 피드백이 많은 Topic별 고객 신호를 비교한다."),
     ).toBeInTheDocument();
     expect(
-      within(workspace).getByRole("heading", { name: "aggregate_events" }),
-    ).toBeInTheDocument();
+      within(workspace).getAllByRole("heading", { name: "이벤트 집계" }).length,
+    ).toBeGreaterThan(0);
+    expect(within(workspace).getAllByText("입력 (Tool Input)").length).toBeGreaterThan(0);
+    expect(
+      within(workspace).getAllByText(/출력 \(Tool Output\)/).length,
+    ).toBeGreaterThan(0);
     expect(
       within(workspace).getByText(
         "집계 Fact를 반영해 고객 정렬 단계를 구체화했습니다.",
@@ -48,13 +52,17 @@ describe("AnalysisWorkspace", () => {
       within(workspace).getByText(/"group_by":\["topic"\]/),
     ).toBeInTheDocument();
     expect(within(workspace).getAllByText("support_chat_v2").length).toBeGreaterThan(0);
-    expect(within(workspace).getByText("부정 피드백 수")).toBeInTheDocument();
+    expect(within(workspace).getAllByText("부정 피드백 수").length).toBeGreaterThan(0);
     expect(within(workspace).getByText("12건")).toBeInTheDocument();
-    expect(within(workspace).getByText(/스캔 100/)).toBeInTheDocument();
+    expect(within(workspace).getByText(/이벤트 100건 스캔/)).toBeInTheDocument();
     expect(within(workspace).getByText("관찰 Fact")).toBeInTheDocument();
     expect(
-      within(workspace).getByText("로밍 Topic의 부정 피드백은 12건입니다."),
+      within(workspace).getAllByText("로밍 Topic의 부정 피드백은 12건입니다.").length,
+    ).toBeGreaterThan(0);
+    expect(
+      within(workspace).getByText("무엇을 알게 됐나 — 검증된 발견"),
     ).toBeInTheDocument();
+    expect(within(workspace).getByText("핵심 지표")).toBeInTheDocument();
     expect(within(workspace).getByText("다음 행동")).toBeInTheDocument();
     expect(
       within(workspace).getByText(

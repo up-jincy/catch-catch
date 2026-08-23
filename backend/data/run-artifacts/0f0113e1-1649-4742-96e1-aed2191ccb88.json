@@ -1,0 +1,464 @@
+{
+  "schema_version": 1,
+  "run_id": "0f0113e1-1649-4742-96e1-aed2191ccb88",
+  "status": "completed",
+  "created_at": "2026-08-22T09:06:03.946704Z",
+  "updated_at": "2026-08-22T09:06:04.262002Z",
+  "completed_at": "2026-08-22T09:06:04.262002Z",
+  "request": {
+    "question": "AI 검색에서 해결하지 못하고 고객센터에 문의한 고객이 몇 명이야?",
+    "start_at": "2026-07-20T00:00:00+09:00",
+    "end_at": "2026-08-19T00:00:00+09:00",
+    "enabled_sources": [
+      "search_history",
+      "search_feedback",
+      "voc"
+    ]
+  },
+  "goal": null,
+  "clarification": null,
+  "plan": null,
+  "plan_history": [],
+  "facts": [],
+  "notes": [],
+  "report": {
+    "report_kind": "legacy_journey",
+    "analysis_type": "journey",
+    "scope": {
+      "start_at": "2026-07-20T00:00:00+09:00",
+      "end_at": "2026-08-19T00:00:00+09:00",
+      "enabled_sources": [
+        "search_history",
+        "search_feedback",
+        "voc"
+      ],
+      "population_description": "검색 실패 후 같은 Topic의 후속 문의 Journey"
+    },
+    "headline": "검색 실패 후 문의로 이어진 고객 6명",
+    "executive_summary": "요청 기간에 완전한 Journey 패턴이 확인됐습니다. 주요 집계 Topic은 '인터넷 장애'입니다.",
+    "metrics": [
+      {
+        "label": "완전한 Journey 패턴 고객 수",
+        "value": 6,
+        "unit": "명",
+        "result_id": "match_journey_pattern:5d25b5dd0d73c6cf"
+      }
+    ],
+    "findings": [
+      {
+        "title": "완전한 Journey 패턴 확인",
+        "description": "검색 실패와 후속 문의 조건을 모두 충족한 고객은 6명입니다.",
+        "confidence": "high",
+        "evidence_ids": [
+          "EVD-20260819-003-06"
+        ]
+      }
+    ],
+    "signal_contributions": [
+      {
+        "source_id": "search_history",
+        "score": 50.0,
+        "signals": [
+          {
+            "code": "failed_search",
+            "label": "Failed search",
+            "score": 25.0,
+            "evidence_ids": [
+              "EVD-20260819-003-01"
+            ]
+          },
+          {
+            "code": "repeated_failed_search",
+            "label": "Same-topic failed repeat within 24 hours",
+            "score": 25.0,
+            "evidence_ids": [
+              "EVD-20260819-003-02"
+            ]
+          }
+        ]
+      },
+      {
+        "source_id": "search_feedback",
+        "score": 20.0,
+        "signals": [
+          {
+            "code": "negative_feedback",
+            "label": "Negative feedback on the same topic",
+            "score": 20.0,
+            "evidence_ids": [
+              "EVD-20260819-003-03"
+            ]
+          }
+        ]
+      },
+      {
+        "source_id": "voc",
+        "score": 30.0,
+        "signals": [
+          {
+            "code": "unresolved_voc",
+            "label": "Same-topic unresolved VOC within 72 hours",
+            "score": 30.0,
+            "evidence_ids": [
+              "EVD-20260819-003-06"
+            ]
+          }
+        ]
+      }
+    ],
+    "ranked_customers": [
+      {
+        "customer_id": "CUST-003",
+        "risk_score": 100.0,
+        "risk_level": "high",
+        "signals": [
+          {
+            "code": "failed_search",
+            "label": "Failed search",
+            "score": 25.0,
+            "evidence_ids": [
+              "EVD-20260819-003-01"
+            ]
+          },
+          {
+            "code": "repeated_failed_search",
+            "label": "Same-topic failed repeat within 24 hours",
+            "score": 25.0,
+            "evidence_ids": [
+              "EVD-20260819-003-02"
+            ]
+          },
+          {
+            "code": "negative_feedback",
+            "label": "Negative feedback on the same topic",
+            "score": 20.0,
+            "evidence_ids": [
+              "EVD-20260819-003-03"
+            ]
+          },
+          {
+            "code": "unresolved_voc",
+            "label": "Same-topic unresolved VOC within 72 hours",
+            "score": 30.0,
+            "evidence_ids": [
+              "EVD-20260819-003-06"
+            ]
+          }
+        ],
+        "evidence_ids": [
+          "EVD-20260819-003-01",
+          "EVD-20260819-003-02",
+          "EVD-20260819-003-03",
+          "EVD-20260819-003-06"
+        ],
+        "last_event_at": "2026-07-22T01:50:00Z"
+      },
+      {
+        "customer_id": "CUST-007",
+        "risk_score": 100.0,
+        "risk_level": "high",
+        "signals": [
+          {
+            "code": "failed_search",
+            "label": "Failed search",
+            "score": 25.0,
+            "evidence_ids": [
+              "EVD-20260819-007-01"
+            ]
+          },
+          {
+            "code": "repeated_failed_search",
+            "label": "Same-topic failed repeat within 24 hours",
+            "score": 25.0,
+            "evidence_ids": [
+              "EVD-20260819-007-02"
+            ]
+          },
+          {
+            "code": "negative_feedback",
+            "label": "Negative feedback on the same topic",
+            "score": 20.0,
+            "evidence_ids": [
+              "EVD-20260819-007-03"
+            ]
+          },
+          {
+            "code": "unresolved_voc",
+            "label": "Same-topic unresolved VOC within 72 hours",
+            "score": 30.0,
+            "evidence_ids": [
+              "EVD-20260819-007-06"
+            ]
+          }
+        ],
+        "evidence_ids": [
+          "EVD-20260819-007-01",
+          "EVD-20260819-007-02",
+          "EVD-20260819-007-03",
+          "EVD-20260819-007-06"
+        ],
+        "last_event_at": "2026-07-30T04:40:00Z"
+      },
+      {
+        "customer_id": "CUST-011",
+        "risk_score": 100.0,
+        "risk_level": "high",
+        "signals": [
+          {
+            "code": "failed_search",
+            "label": "Failed search",
+            "score": 25.0,
+            "evidence_ids": [
+              "EVD-20260819-011-01"
+            ]
+          },
+          {
+            "code": "repeated_failed_search",
+            "label": "Same-topic failed repeat within 24 hours",
+            "score": 25.0,
+            "evidence_ids": [
+              "EVD-20260819-011-02"
+            ]
+          },
+          {
+            "code": "negative_feedback",
+            "label": "Negative feedback on the same topic",
+            "score": 20.0,
+            "evidence_ids": [
+              "EVD-20260819-011-03"
+            ]
+          },
+          {
+            "code": "unresolved_voc",
+            "label": "Same-topic unresolved VOC within 72 hours",
+            "score": 30.0,
+            "evidence_ids": [
+              "EVD-20260819-011-06"
+            ]
+          }
+        ],
+        "evidence_ids": [
+          "EVD-20260819-011-01",
+          "EVD-20260819-011-02",
+          "EVD-20260819-011-03",
+          "EVD-20260819-011-06"
+        ],
+        "last_event_at": "2026-08-03T11:50:00Z"
+      },
+      {
+        "customer_id": "CUST-016",
+        "risk_score": 100.0,
+        "risk_level": "high",
+        "signals": [
+          {
+            "code": "failed_search",
+            "label": "Failed search",
+            "score": 25.0,
+            "evidence_ids": [
+              "EVD-20260819-016-01"
+            ]
+          },
+          {
+            "code": "repeated_failed_search",
+            "label": "Same-topic failed repeat within 24 hours",
+            "score": 25.0,
+            "evidence_ids": [
+              "EVD-20260819-016-02"
+            ]
+          },
+          {
+            "code": "negative_feedback",
+            "label": "Negative feedback on the same topic",
+            "score": 20.0,
+            "evidence_ids": [
+              "EVD-20260819-016-03"
+            ]
+          },
+          {
+            "code": "unresolved_voc",
+            "label": "Same-topic unresolved VOC within 72 hours",
+            "score": 30.0,
+            "evidence_ids": [
+              "EVD-20260819-016-06"
+            ]
+          }
+        ],
+        "evidence_ids": [
+          "EVD-20260819-016-01",
+          "EVD-20260819-016-02",
+          "EVD-20260819-016-03",
+          "EVD-20260819-016-06"
+        ],
+        "last_event_at": "2026-08-15T18:00:00Z"
+      },
+      {
+        "customer_id": "CUST-022",
+        "risk_score": 100.0,
+        "risk_level": "high",
+        "signals": [
+          {
+            "code": "failed_search",
+            "label": "Failed search",
+            "score": 25.0,
+            "evidence_ids": [
+              "EVD-20260819-022-01"
+            ]
+          },
+          {
+            "code": "repeated_failed_search",
+            "label": "Same-topic failed repeat within 24 hours",
+            "score": 25.0,
+            "evidence_ids": [
+              "EVD-20260819-022-02"
+            ]
+          },
+          {
+            "code": "negative_feedback",
+            "label": "Negative feedback on the same topic",
+            "score": 20.0,
+            "evidence_ids": [
+              "EVD-20260819-022-03"
+            ]
+          },
+          {
+            "code": "unresolved_voc",
+            "label": "Same-topic unresolved VOC within 72 hours",
+            "score": 30.0,
+            "evidence_ids": [
+              "EVD-20260819-022-06"
+            ]
+          }
+        ],
+        "evidence_ids": [
+          "EVD-20260819-022-01",
+          "EVD-20260819-022-02",
+          "EVD-20260819-022-03",
+          "EVD-20260819-022-06"
+        ],
+        "last_event_at": "2026-08-10T00:20:00Z"
+      },
+      {
+        "customer_id": "CUST-028",
+        "risk_score": 100.0,
+        "risk_level": "high",
+        "signals": [
+          {
+            "code": "failed_search",
+            "label": "Failed search",
+            "score": 25.0,
+            "evidence_ids": [
+              "EVD-20260819-028-01"
+            ]
+          },
+          {
+            "code": "repeated_failed_search",
+            "label": "Same-topic failed repeat within 24 hours",
+            "score": 25.0,
+            "evidence_ids": [
+              "EVD-20260819-028-02"
+            ]
+          },
+          {
+            "code": "negative_feedback",
+            "label": "Negative feedback on the same topic",
+            "score": 20.0,
+            "evidence_ids": [
+              "EVD-20260819-028-03"
+            ]
+          },
+          {
+            "code": "unresolved_voc",
+            "label": "Same-topic unresolved VOC within 72 hours",
+            "score": 30.0,
+            "evidence_ids": [
+              "EVD-20260819-028-06"
+            ]
+          }
+        ],
+        "evidence_ids": [
+          "EVD-20260819-028-01",
+          "EVD-20260819-028-02",
+          "EVD-20260819-028-03",
+          "EVD-20260819-028-06"
+        ],
+        "last_event_at": "2026-08-15T19:50:00Z"
+      }
+    ],
+    "representative_journeys": [
+      {
+        "event_id": "EVT-20260819-003-01",
+        "evidence_id": "EVD-20260819-003-01",
+        "source_id": "search_history",
+        "occurred_at": "2026-07-20T00:50:00Z",
+        "event_type": "search",
+        "action": "search",
+        "topic": "인터넷 장애",
+        "outcome": "failed",
+        "text": "인터넷 연결 문제의 해결 방법을 찾지 못했습니다."
+      },
+      {
+        "event_id": "EVT-20260819-003-02",
+        "evidence_id": "EVD-20260819-003-02",
+        "source_id": "search_history",
+        "occurred_at": "2026-07-20T08:50:00Z",
+        "event_type": "search",
+        "action": "repeat_search",
+        "topic": "인터넷 장애",
+        "outcome": "failed",
+        "text": "같은 인터넷 연결 문제를 다시 검색했지만 해결하지 못했습니다."
+      },
+      {
+        "event_id": "EVT-20260819-003-03",
+        "evidence_id": "EVD-20260819-003-03",
+        "source_id": "search_feedback",
+        "occurred_at": "2026-07-20T11:50:00Z",
+        "event_type": "feedback",
+        "action": "submit_feedback",
+        "topic": "인터넷 장애",
+        "outcome": "negative",
+        "text": "안내 내용으로 문제가 해결되지 않았습니다."
+      },
+      {
+        "event_id": "EVT-20260819-003-06",
+        "evidence_id": "EVD-20260819-003-06",
+        "source_id": "voc",
+        "occurred_at": "2026-07-22T01:50:00Z",
+        "event_type": "voc",
+        "action": "contact_customer_service",
+        "topic": "인터넷 장애",
+        "outcome": "unresolved",
+        "text": "인터넷 장애가 지속되어 고객센터에 문의했습니다."
+      }
+    ],
+    "representative_journey_ids": [
+      "get_customer_journey:033dc32c18406293"
+    ],
+    "recommendations": [
+      {
+        "action_id": "care_call",
+        "title": "대표 고위험 고객 후속 확인",
+        "reason": "반복 검색과 미해결 문의가 연결된 대표 Journey가 확인됐습니다.",
+        "evidence_ids": [
+          "EVD-20260819-003-06"
+        ]
+      }
+    ],
+    "sources_used": [
+      "search_history",
+      "search_feedback",
+      "voc"
+    ],
+    "limitations": []
+  },
+  "last_event_id": 17,
+  "versions": {
+    "dataset_versions": [],
+    "adapter_versions": {},
+    "manifest_versions": {},
+    "prompt_version": "legacy-v1",
+    "model_version": "fixture"
+  },
+  "failed_step_id": null,
+  "limitations": [],
+  "error": null
+}

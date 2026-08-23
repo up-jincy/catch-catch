@@ -1,4 +1,5 @@
 import type { AnalysisFact } from "./contracts";
+import { payloadHighlights, primitiveLabel } from "./primitive-catalog";
 import { sourceLabel } from "./source-catalog";
 
 interface FactDetailProps {
@@ -13,11 +14,12 @@ function metricValue(value: number, unit: string): string {
 export function FactDetail({ fact, onOpenEvidence }: FactDetailProps) {
   const processing = fact.payload.processing;
   const provenance = fact.payload.provenance;
+  const highlights = payloadHighlights(fact.payload);
   return (
     <details className="fact-detail" open>
       <summary>
-        <span>검증 Fact</span>
-        <strong>{fact.primitive}</strong>
+        <span>출력 (Tool Output) · 검증 Fact</span>
+        <strong>{primitiveLabel(fact.primitive)}</strong>
       </summary>
       <div className="fact-body">
         <div className="fact-metrics">
@@ -29,8 +31,15 @@ export function FactDetail({ fact, onOpenEvidence }: FactDetailProps) {
           ))}
         </div>
         <p className="processing-stats">
-          스캔 {processing.scanned_events.toLocaleString("ko-KR")} · 매칭 {processing.matched_events.toLocaleString("ko-KR")} · 반환 {processing.returned_rows.toLocaleString("ko-KR")}
+          이벤트 {processing.scanned_events.toLocaleString("ko-KR")}건 스캔 → {processing.matched_events.toLocaleString("ko-KR")}건 조건 일치 → {processing.returned_rows.toLocaleString("ko-KR")}행 반환
         </p>
+        {highlights.length ? (
+          <ul className="fact-highlights" aria-label="분석 결과">
+            {highlights.map((highlight, index) => (
+              <li key={`${index}-${highlight}`}>{highlight}</li>
+            ))}
+          </ul>
+        ) : null}
         <dl className="fact-refs">
           <div><dt>Source</dt><dd>{fact.source_ids.map(sourceLabel).join(" · ")}</dd></div>
           <div><dt>result_id</dt><dd><code>{fact.result_id}</code></dd></div>

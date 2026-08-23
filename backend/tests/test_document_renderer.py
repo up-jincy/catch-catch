@@ -294,6 +294,44 @@ def test_document_and_markdown_render_only_artifact_owned_facts() -> None:
     assert render_markdown_bytes(replayed) == f"{markdown}\n".encode()
 
 
+def test_markdown_leads_with_goal_conclusion_and_actions_before_appendices() -> None:
+    artifact = _artifact()
+
+    markdown = render_markdown(artifact)
+
+    overview = markdown.index("## 한눈에 보기")
+    goal = markdown.index("## 분석 목표 — 무엇을 확인하려 했나")
+    process = markdown.index("## 탐색 과정 — 단계별 진행 기록")
+    conclusion = markdown.index("## 결론 — 무엇을 알게 됐나")
+    actions = markdown.index("## 권장 액션 — 무엇을 해야 하나")
+    appendix = markdown.index("## 부록 A")
+    assert overview < goal < process < conclusion < actions < appendix
+    assert "- 분석 목표: 반복 불만 고객 규모를 확인한다" in markdown
+    assert "- 결론: 반복 불만 고객 2명" in markdown
+    assert "- 선택 이유:" in markdown
+    assert "- 확인한 사실:" in markdown
+    assert "- 다음 행동:" in markdown
+    assert "제안된 후속 조치가 없습니다." in markdown
+    assert "실행 궤적 요약:" in markdown
+    assert "| 단계 | 실행 내용 | 입력 | 핵심 출력 |" in markdown
+    assert "- 입력: 대상 Source voc · 집계 방식 count · 시간 단위 day" in markdown
+    assert "- 출력: 이벤트 10건을 스캔해 2건이 조건과 일치, 2행을 반환했습니다." in markdown
+    assert "Segment 고객 2명" in markdown
+    assert "조건 'repeated_complaint' 충족: 2건" in markdown
+
+
+def test_markdown_overview_explains_missing_conclusion_while_running() -> None:
+    base = _artifact()
+    artifact = base.model_copy(
+        update={"status": "running", "completed_at": None, "report": None}
+    )
+
+    markdown = render_markdown(artifact)
+
+    assert "- 결론: 분석이 진행 중이라 아직 결론이 없습니다." in markdown
+    assert "완료된 보고서가 아직 없습니다" in markdown
+
+
 def test_schema_v1_without_plan_history_projects_current_plan_and_public_facts() -> None:
     payload = json.loads(artifact_json_bytes(_artifact()))
     payload.pop("plan_history", None)

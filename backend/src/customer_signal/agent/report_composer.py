@@ -402,13 +402,16 @@ def compose_customer_signal_report(
     metrics = _collect_metrics(facts)
     limitations = _stable_unique(limitation for note in notes for limitation in note.limitations)
     provenance = _build_generic_provenance(facts)
+    executive_summary = (
+        f"목표 '{goal.objective}'에 대해 {len(facts)}개의 검증 Fact를 수집하고 "
+        f"{len(selected_claims)}개의 Claim을 검증했습니다."
+    )
+    if selected_claims:
+        executive_summary += f" 핵심 확인 사실: {selected_claims[-1].rendered_text}."
     return CustomerSignalReport(
         goal=goal,
         headline=_generic_headline(goal.objective, selected_claims, facts),
-        executive_summary=(
-            f"{len(facts)}개 검증 Fact와 {len(selected_claims)}개 검증 Claim으로 "
-            "분석 결과를 구성했습니다."
-        ),
+        executive_summary=executive_summary,
         metrics=metrics,
         signals=[
             signal

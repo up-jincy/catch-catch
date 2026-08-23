@@ -64,7 +64,7 @@ async function runQuestion(page: Page, question: string) {
   await expect(
     page
       .getByRole("list", { name: "공개 Agent 실행 기록" })
-      .getByText("Run 완료", { exact: true }),
+      .getByText("분석을 마쳤습니다", { exact: true }),
   ).toBeVisible();
   return page.getByRole("region", { name: "분석 Workspace" });
 }
@@ -107,7 +107,7 @@ for (const analysisCase of cases) {
       workspace.getByText("선택 근거", { exact: true }).first(),
     ).toBeVisible();
     await expect(
-      workspace.getByText("검증 Fact", { exact: true }).first(),
+      workspace.getByText("출력 (Tool Output) · 검증 Fact", { exact: true }).first(),
     ).toBeVisible();
     await expect(
       workspace.getByRole("region", { name: "관찰 Fact" }).first(),
@@ -223,7 +223,7 @@ test("확인 답변 뒤 같은 Run에서 분석을 계속한다", async ({ page 
   await expect(
     page
       .getByRole("list", { name: "공개 Agent 실행 기록" })
-      .getByText("Run 완료", { exact: true }),
+      .getByText("분석을 마쳤습니다", { exact: true }),
   ).toBeVisible();
   await expect(
     page.getByText("6customers", { exact: true }).first(),

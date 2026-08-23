@@ -26,7 +26,7 @@ test("자유 질문을 동적 Plan으로 분석하고 공개 기록을 남긴다
   };
 
   const trace = page.getByRole("list", { name: "공개 Agent 실행 기록" });
-  await expect(trace.getByText("Run 완료", { exact: true })).toBeVisible({
+  await expect(trace.getByText("분석을 마쳤습니다", { exact: true })).toBeVisible({
     timeout: 150_000,
   });
 
@@ -38,7 +38,7 @@ test("자유 질문을 동적 Plan으로 분석하고 공개 기록을 남긴다
     workspace.getByText("선택 근거", { exact: true }).first(),
   ).toBeVisible();
   await expect(
-    workspace.getByText("검증 Fact", { exact: true }).first(),
+    workspace.getByText("출력 (Tool Output) · 검증 Fact", { exact: true }).first(),
   ).toBeVisible();
   await expect(
     workspace.getByRole("region", { name: "관찰 Fact" }).first(),

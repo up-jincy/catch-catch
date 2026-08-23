@@ -4,6 +4,7 @@ import type {
   SourceId,
   ToolName,
 } from "./contracts";
+import { primitiveLabel } from "./primitive-catalog";
 import { selectVisibleRunEvents } from "./run-selectors";
 import { sourceLabel } from "./source-catalog";
 
@@ -49,49 +50,76 @@ function sources(values: SourceId[]) {
 function eventView(event: AnyRunStreamEvent) {
   switch (event.type) {
     case "run_started":
-      return { title: "Run 시작", detail: "분석 범위를 확인했습니다.", state: "active" };
+      return {
+        title: "분석을 시작합니다",
+        detail: "질문과 분석 범위를 확인하고 있습니다.",
+        state: "active",
+      };
     case "goal_created":
-      return { title: "분석 목표 구성", detail: event.data.goal.objective, state: "done" };
+      return {
+        title: "분석 목표를 세웠습니다",
+        detail: event.data.goal.objective,
+        state: "done",
+      };
     case "clarification_required":
-      return { title: "확인 답변 대기", detail: event.data.question, state: "warning" };
+      return {
+        title: "먼저 확인이 필요합니다",
+        detail: event.data.question,
+        state: "warning",
+      };
     case "plan_created":
+      return {
+        title: `계획을 세웠습니다 — ${event.data.plan.steps.length}개 단계로 진행하겠습니다`,
+        detail: event.data.plan.rationale,
+        state: "done",
+      };
     case "plan_revised":
       return {
-        title: event.type === "plan_created" ? "실행 계획 수립" : "실행 계획 갱신",
-        detail: `${event.data.plan.steps.length}개 공개 Step · revision ${event.data.plan.revision}`,
+        title: `확인된 결과에 맞춰 계획을 수정했습니다 (revision ${event.data.plan.revision})`,
+        detail: event.data.plan.rationale,
         state: "done",
       };
     case "step_started":
       return {
-        title: event.data.primitive,
+        title: `이제 ${primitiveLabel(event.data.primitive)} 단계를 실행합니다`,
         detail:
           event.data.selection_reason ??
           event.data.objective ??
           `${event.data.step_id} 실행 중`,
         state: "active",
       };
-    case "fact_created":
+    case "fact_created": {
+      const metric = event.data.fact.metrics[0];
       return {
-        title: `${event.data.fact.primitive} Fact 공개`,
-        detail: `${event.data.fact.metrics.length}개 검증 Metric`,
+        title: `${primitiveLabel(event.data.fact.primitive)} 결과를 받았습니다`,
+        detail: metric
+          ? `${metric.label} = ${metric.value}${metric.unit ? ` ${metric.unit}` : ""} — 결과를 검증해 Fact로 고정했습니다.`
+          : `${event.data.fact.metrics.length}개 검증 Metric을 고정했습니다.`,
         state: "done",
       };
-    case "analysis_note_created":
+    }
+    case "analysis_note_created": {
+      const claim = event.data.note.claims[0];
+      const observed = claim ? `확인: ${claim.rendered_text}` : event.data.note.objective;
       return {
-        title: "Analysis Note 검증",
-        detail: event.data.note.objective,
+        title: "단계 결과를 검증했습니다",
+        detail: `${observed} → 다음으로 ${event.data.note.next_action}`,
         state: "done",
       };
+    }
     case "step_completed":
       return {
-        title: `${event.data.step_id} ${event.data.status === "completed" ? "완료" : "종료"}`,
-        detail: `${Math.round(event.data.duration_ms)}ms · Result ${event.data.result_ids.length}개`,
+        title:
+          event.data.status === "completed"
+            ? "단계를 마쳤습니다"
+            : "단계를 종료했습니다",
+        detail: `${event.data.step_id} · ${Math.round(event.data.duration_ms)}ms · Result ${event.data.result_ids.length}개`,
         state: event.data.status === "failed" ? "error" : "done",
       };
     case "report_validating":
       return {
-        title: "최종 보고서 검증",
-        detail: `${event.data.result_ids.length || event.data.fact_ids.length}개 실행 근거 대조`,
+        title: "최종 보고서를 검증하고 있습니다",
+        detail: `${event.data.result_ids.length || event.data.fact_ids.length}개 실행 근거와 결론을 대조합니다.`,
         state: "active",
       };
     case "plan":
@@ -129,26 +157,23 @@ function eventView(event: AnyRunStreamEvent) {
       };
     case "result":
       return {
-        title:
-          event.data.report.report_kind === "customer_signal"
-            ? "검증된 보고서 구성"
-            : "검증된 Insight 구성",
+        title: "결론을 정리했습니다",
         detail: event.data.report.headline,
         state: "done",
       };
     case "error":
-      return { title: "분석 중단", detail: event.data.message, state: "error" };
+      return { title: "분석을 중단했습니다", detail: event.data.message, state: "error" };
     case "done":
       return {
         title:
           event.data.status === "completed"
-            ? "Run 완료"
+            ? "분석을 마쳤습니다"
             : event.data.status === "degraded"
-              ? "제한 조건으로 기록 완료"
-              : "Run 실패",
+              ? "제한 조건으로 기록을 마쳤습니다"
+              : "분석에 실패했습니다",
         detail:
           event.data.status === "completed"
-            ? "공개 가능한 결과만 화면에 전달했습니다."
+            ? "검증된 결과만 화면과 문서에 공개했습니다."
             : "결과를 만들지 못했습니다.",
         state: event.data.status === "completed" ? "done" : "error",
       };

@@ -1,6 +1,7 @@
 import type { AnalysisFact, AnalysisPlan } from "./contracts";
 import type { StepExecutionState } from "./run-reducer";
 import { FactDetail } from "./FactDetail";
+import { describeParameters, primitiveLabel } from "./primitive-catalog";
 
 interface AnalysisPlanViewProps {
   plan: AnalysisPlan;
@@ -49,8 +50,8 @@ export function AnalysisPlanView({
               <div className="step-heading">
                 <span>{String(index + 1).padStart(2, "0")}</span>
                 <div>
-                  <h3>{step.primitive}</h3>
-                  <p>{step.source_ids.join(" · ")}</p>
+                  <h3>{primitiveLabel(step.primitive)}</h3>
+                  <p>{step.primitive} · {step.source_ids.join(" · ")}</p>
                 </div>
                 <strong>{statusLabels[execution?.status ?? "pending"]}</strong>
               </div>
@@ -60,11 +61,11 @@ export function AnalysisPlanView({
                 </p>
                 <dl className="fact-refs">
                   <div>
-                    <dt>Source IDs</dt>
-                    <dd>{step.source_ids.join(" · ")}</dd>
+                    <dt>입력 (Tool Input)</dt>
+                    <dd>{describeParameters(step.parameters, step.source_ids)}</dd>
                   </div>
                   <div>
-                    <dt>Parameters</dt>
+                    <dt>원본 Parameters</dt>
                     <dd><code>{JSON.stringify(step.parameters)}</code></dd>
                   </div>
                 </dl>
@@ -76,6 +77,9 @@ export function AnalysisPlanView({
                   onOpenEvidence={onOpenEvidence}
                 />
               ))}
+              {!stepFacts.length && (execution?.status ?? "pending") === "pending" ? (
+                <p className="step-pending-note">아직 실행 전 단계입니다 — 출력이 생기면 여기에 표시됩니다.</p>
+              ) : null}
             </li>
           );
         })}
