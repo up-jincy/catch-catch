@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
-import sys
 import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Any, Iterator, Literal
 
 
@@ -20,6 +20,7 @@ _SENSITIVE_KEY_PARTS = (
     "apikey",
     "authorization",
     "password",
+    "public_key",
     "secret",
     "token",
 )
@@ -36,6 +37,18 @@ class LangfuseRunContext:
     run_kind: Literal["generic", "legacy"]
     question: str
     source_ids: tuple[str, ...]
+    trace_id: str = field(init=False)
+    parent_observation_id: str | None = None
+
+    def __post_init__(self) -> None:
+        compact_run_id = self.run_id.replace("-", "").lower()
+        if len(compact_run_id) == 32 and all(
+            character in "0123456789abcdef" for character in compact_run_id
+        ):
+            trace_id = compact_run_id
+        else:
+            trace_id = hashlib.sha256(self.run_id.encode()).hexdigest()[:32]
+        object.__setattr__(self, "trace_id", trace_id)
 
 
 _CURRENT_RUN: ContextVar[LangfuseRunContext | None] = ContextVar(
@@ -43,17 +56,35 @@ _CURRENT_RUN: ContextVar[LangfuseRunContext | None] = ContextVar(
 )
 _CLIENT: Any | None = None
 _CLIENT_LOCK = threading.Lock()
+_CURRENT_WORKFLOW: ContextVar[Any | None] = ContextVar(
+    "langfuse_workflow_observation", default=None
+)
 
 
 @contextmanager
 def bind_langfuse_run(context: LangfuseRunContext) -> Iterator[LangfuseRunContext]:
-    """Bind public trace metadata to the current async execution context."""
+    """Open one parent workflow observation and bind all child work to its trace."""
 
-    token = _CURRENT_RUN.set(context)
+    workflow = _start_workflow_observation(context)
+    bound_context = (
+        replace(context, parent_observation_id=workflow.id)
+        if workflow is not None
+        else context
+    )
+    run_token = _CURRENT_RUN.set(bound_context)
+    workflow_token = _CURRENT_WORKFLOW.set(workflow)
     try:
-        yield context
+        yield bound_context
+    except BaseException as error:
+        _update_observation(
+            workflow,
+            output={"status": "failed", "error_type": type(error).__name__},
+        )
+        raise
     finally:
-        _CURRENT_RUN.reset(token)
+        _CURRENT_WORKFLOW.reset(workflow_token)
+        _CURRENT_RUN.reset(run_token)
+        _end_observation(workflow)
 
 
 def _new_callback_handler() -> Any | None:
@@ -72,7 +103,36 @@ def _new_callback_handler() -> Any | None:
 
         if _get_client() is None:
             return None
-        return CallbackHandler(public_key=required[0])
+        context = _CURRENT_RUN.get()
+
+        class WorkflowCallbackHandler(CallbackHandler):
+            def _parse_langfuse_trace_attributes(
+                self,
+                *,
+                metadata: dict[str, Any] | None,
+                tags: list[str] | None,
+            ) -> dict[str, Any]:
+                merged_metadata = dict(metadata or {})
+                if context is not None:
+                    merged_metadata.setdefault(
+                        "langfuse_session_id", context.run_id
+                    )
+                    merged_metadata.setdefault(
+                        "langfuse_trace_name", "customer_signal.turn"
+                    )
+                    merged_metadata.setdefault(
+                        "langfuse_tags",
+                        ["customer-signal", context.run_kind],
+                    )
+                return super()._parse_langfuse_trace_attributes(
+                    metadata=merged_metadata,
+                    tags=tags,
+                )
+
+        return WorkflowCallbackHandler(
+            public_key=required[0],
+            trace_context=_trace_context(context) if context is not None else None,
+        )
     except Exception:
         # Observability must never make the customer analysis fail.
         return None
@@ -91,6 +151,7 @@ def build_langfuse_config(*, run_name: str, provider: str, stage: str) -> dict[s
                 "enabled_sources": ",".join(context.source_ids),
                 "langfuse_session_id": context.run_id,
                 "langfuse_tags": tags,
+                "langfuse_trace_name": "customer_signal.turn",
             }
         )
 
@@ -119,6 +180,12 @@ class _SafeObservation:
             return
 
 
+def update_langfuse_workflow(*, output: Any) -> None:
+    """Attach a public terminal summary to the current workflow observation."""
+
+    _update_observation(_CURRENT_WORKFLOW.get(), output=output)
+
+
 @contextmanager
 def public_observation(
     *,
@@ -144,31 +211,76 @@ def public_observation(
         "langfuse_tags": ["customer-signal", "server", stage, context.run_kind],
     }
     try:
-        manager = client.start_as_current_observation(
+        observation = client.start_observation(
             name=name,
             as_type="tool",
+            trace_context=_trace_context(context),
             input=sanitize_trace_value(input),
             metadata=metadata,
         )
-        observation = manager.__enter__()
     except Exception:
         yield _NoOpObservation()
         return
 
     try:
         yield _SafeObservation(observation)
-    except BaseException:
-        error = sys.exc_info()
-        try:
-            manager.__exit__(*error)
-        except Exception:
-            pass
-        raise
-    else:
-        try:
-            manager.__exit__(None, None, None)
-        except Exception:
-            pass
+    finally:
+        _end_observation(observation)
+
+
+def _start_workflow_observation(context: LangfuseRunContext) -> Any | None:
+    client = _get_client()
+    if client is None:
+        return None
+    metadata = {
+        "provider": "gemini",
+        "stage": "turn",
+        "run_id": context.run_id,
+        "run_kind": context.run_kind,
+        "enabled_sources": ",".join(context.source_ids),
+        "langfuse_session_id": context.run_id,
+        "langfuse_tags": ["customer-signal", "turn", context.run_kind],
+    }
+    try:
+        return client.start_observation(
+            name="customer_signal.turn",
+            as_type="agent",
+            trace_context={"trace_id": context.trace_id},
+            input=sanitize_trace_value(
+                {
+                    "question": context.question,
+                    "enabled_sources": list(context.source_ids),
+                }
+            ),
+            metadata=metadata,
+        )
+    except Exception:
+        return None
+
+
+def _trace_context(context: LangfuseRunContext) -> dict[str, str]:
+    trace_context = {"trace_id": context.trace_id}
+    if context.parent_observation_id:
+        trace_context["parent_span_id"] = context.parent_observation_id
+    return trace_context
+
+
+def _update_observation(observation: Any | None, *, output: Any) -> None:
+    if observation is None:
+        return
+    try:
+        observation.update(output=sanitize_trace_value(output))
+    except Exception:
+        return
+
+
+def _end_observation(observation: Any | None) -> None:
+    if observation is None:
+        return
+    try:
+        observation.end()
+    except Exception:
+        return
 
 
 def flush_langfuse() -> None:
@@ -217,6 +329,7 @@ def _mask_otel_spans(params: Any) -> Any:
             key: _sanitize_otel_attribute(key, value)
             for key, value in span.attributes.items()
         }
+        attributes["langfuse.trace.name"] = "customer_signal.turn"
         patches[identifier] = OtelSpanPatch(set_attributes=attributes)
     return MaskOtelSpansResult(span_patches=patches)
 

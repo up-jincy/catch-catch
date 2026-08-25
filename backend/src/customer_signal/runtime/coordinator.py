@@ -25,6 +25,7 @@ from customer_signal.observability.langfuse import (
     LangfuseRunContext,
     bind_langfuse_run,
     flush_langfuse,
+    update_langfuse_workflow,
 )
 from customer_signal.runtime.artifact_store import ArtifactStore, ArtifactWriteError
 from customer_signal.runtime.artifacts import RunArtifact, RunVersions
@@ -289,6 +290,13 @@ class RunCoordinator:
         try:
             with bind_langfuse_run(context):
                 outcome = await self._run_selected(request, emit=emit)
+                update_langfuse_workflow(
+                    output={
+                        "status": outcome.status,
+                        "agent_mode": outcome.agent_mode,
+                        "outcome_kind": outcome.outcome_kind,
+                    }
+                )
         except asyncio.CancelledError:
             public_error = reported_error or RunError(
                 code="run_cancelled",
@@ -358,6 +366,15 @@ class RunCoordinator:
             with bind_langfuse_run(context):
                 async with asyncio.timeout(130):
                     outcome = await loop.run(request, emit=emit)
+                update_langfuse_workflow(
+                    output={
+                        "status": outcome.status,
+                        "agent_mode": outcome.agent_mode,
+                        "outcome_kind": outcome.outcome_kind,
+                        "fact_count": len(outcome.facts),
+                        "note_count": len(outcome.notes),
+                    }
+                )
         except asyncio.CancelledError:
             public_error = PublicRunError(
                 code="run_cancelled",
