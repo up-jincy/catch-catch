@@ -22,7 +22,7 @@ help:
 	@echo "make test         Backend/Frontend 전체 자동 검증"
 	@echo "make e2e          fixture 기반 실제 브라우저 E2E"
 	@echo "make e2e-generic  범용 분석 Desktop/Mobile E2E"
-	@echo "make e2e-legacy   기존 Journey 회귀 E2E"
+	@echo "make e2e-legacy   기존 Journey 문구의 단일 Agent 호환 E2E"
 
 setup:
 	uv sync --project backend --python $(PYTHON_VERSION)

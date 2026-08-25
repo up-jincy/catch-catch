@@ -31,8 +31,8 @@ Fact, Note, 보고서를 복원하며 JSON과 Markdown 파일을 내려받을 �
 - 질문: `AI 검색 실패 후 고객센터까지 문의한 고객이 얼마나 돼?`
 - 패턴: 검색 실패 → 24시간 안에 같은 Topic 재검색 → 첫 실패 후 72시간 안에 VOC
 - 전체 Source 결과: 정확히 `6명`
-- VOC를 끈 결과: 완전한 패턴 `0명`과 Source 제한 안내
-- 상세 탐색: 고객 Journey와 마스킹 Evidence
+- VOC를 끈 결과: 검증된 `0명` 보고서에서 후속 Journey와 Evidence 조회 중단
+- 근거 확인: Analysis Workspace의 Journey Fact와 마스킹 Evidence
 
 ### 기본 분석 범위
 
@@ -49,11 +49,9 @@ flowchart LR
   UI["Next.js Chat과 Analysis Workspace"] --> API["FastAPI Run API와 SSE"]
   API --> COORD["Run Coordinator"]
   COORD --> LOOP["Goal, Plan, Fact, Note Analysis Loop"]
-  COORD --> LEGACY["Legacy Journey Runner"]
   LOOP --> GEMINI["Gemini Planner"]
   LOOP --> FIXTURE["Fixture Planner"]
   LOOP --> ANALYTICS["결정론적 Analytics Primitive"]
-  LEGACY --> ANALYTICS
   ANALYTICS --> DB[("Synthetic DuckDB")]
   COORD --> ARTIFACT["Run Artifact JSON과 Markdown"]
 ```
@@ -141,9 +139,9 @@ Gemini 기본 모델은 `gemini-3.7-flash`입니다. 기본 모델이 Tool 호�
 
 ## Langfuse에서 Agent 동작 보기
 
-`make dev-gemini`로 실행하면 Gemini와 DeepAgent의 LangChain 호출 config에 Langfuse
-callback을 직접 전달합니다. 설정이 없거나 Langfuse가 일시적으로 실패해도 분석은
-계속됩니다.
+`make dev-gemini`로 실행하면 Gemini Analysis Agent의 LangChain 호출 config에
+Langfuse callback을 직접 전달합니다. 설정이 없거나 Langfuse가 일시적으로 실패해도
+분석은 계속됩니다.
 
 분석을 실행한 뒤 화면이나 API에서 확인한 공개 `run_id`를 Langfuse의 Session ID로
 검색합니다. 한 API Run은 이름이 `customer_signal.turn`인 Trace 하나가 되며, 아래
@@ -157,7 +155,6 @@ callback을 직접 전달합니다. 설정이 없거나 Langfuse가 일시적으
 | `customer_signal.note` | 방금 확인한 Fact를 어떤 공개 관찰로 정리했는지 |
 | `customer_signal.selection` | 남은 후보 단계 중 다음에 무엇을 실행하거나 왜 멈췄는지 |
 | `customer_signal.report` | 검증된 Fact와 Note를 어떤 최종 보고서로 만들었는지 |
-| `customer_signal.agent` | 기존 Journey DeepAgent의 Todo 계획, MCP Tool 호출 흐름, 구조화 응답 |
 
 사용자 발화의 이메일·전화번호, secret 계열 값, Provider의 비공개 Agent message는
 export 전에 마스킹합니다. 화면과 Trace에는 내부 chain-of-thought 대신 공개 Plan 선택
@@ -175,7 +172,7 @@ export 전에 마스킹합니다. 화면과 Trace에는 내부 chain-of-thought 
 | `make test` | Backend pytest와 Ruff, Frontend Vitest와 typecheck, production build |
 | `make e2e` | 전체 Fixture Desktop/Mobile 브라우저 E2E |
 | `make e2e-generic` | 세 범용 질문, History, 다운로드, clarification, mobile 계약 E2E |
-| `make e2e-legacy` | 기존 Journey와 Evidence 회귀 E2E |
+| `make e2e-legacy` | 기존 Journey 문구의 단일 Analysis Agent 호환 E2E |
 
 ## E2E 격리
 

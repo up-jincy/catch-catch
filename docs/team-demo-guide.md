@@ -210,10 +210,11 @@ Gemini 데모를 한 번 실행하고 화면에 표시된 Run ID를 복사합니
 4. `note`와 `selection`: “현재 Fact를 요약한 뒤 다음 Tool을 고르거나 종료했습니다.”
 5. `report`: “검증된 Fact만 모아 최종 문서를 만들었습니다.”
 
-기존 Journey 질문은 `customer_signal.agent`에서 DeepAgent의 공개 Todo와 MCP Tool
-호출 흐름을 함께 확인합니다. 내부 chain-of-thought나 Provider 원문 대신 공개 계획,
-Tool 이름, 마스킹된 입력, 검증 출력만 보여준다고 설명하면 됩니다. Langfuse가 꺼져
-있거나 적재에 실패해도 실제 분석 결과는 계속 반환됩니다.
+기존 Journey 문구를 포함한 모든 질문은 동일한 Analysis Agent 경로를 사용합니다.
+`customer_signal.turn` 아래에서 `goal`, `plan`, `tool.*`, `note`, `selection`, `report`를
+순서대로 확인합니다. 내부 chain-of-thought나 Provider 원문 대신 공개 계획, Tool 이름,
+마스킹된 입력, 검증 출력만 보여준다고 설명하면 됩니다. Langfuse가 꺼져 있거나 적재에
+실패해도 실제 분석 결과는 계속 반환됩니다.
 
 ## 실제 서버 실행
 
