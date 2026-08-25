@@ -18,7 +18,6 @@ from customer_signal.agent.fixture import FixtureRunner
 from customer_signal.agent.gemini import GeminiRunner
 from customer_signal.agent.generic_fixture import GenericFixtureModel
 from customer_signal.agent.generic_gemini import GeminiAnalysisModel
-from customer_signal.agent.intent import is_supported_target_journey_question
 from customer_signal.analytics.executor import PrimitiveExecutor
 from customer_signal.analytics.models import CustomerJourneyResult, EvidenceResult
 from customer_signal.analytics.service import AnalyticsService
@@ -310,11 +309,10 @@ def create_app(
                     status_code=422,
                     detail="enabled_sources contains an unknown source",
                 ) from error
-        generic = mode is not None or _is_generic_question(request.question)
         selected_mode = mode or resolved.generic_default_mode
         snapshot = resolved.coordinator.create_run(
             request,
-            generic=generic,
+            generic=True,
             mode=selected_mode,
         )
         status_url = f"/api/runs/{snapshot.run_id}"
@@ -427,10 +425,5 @@ def create_app(
 
     app.mount("/mcp", mcp_http_app)
     return app
-
-
-def _is_generic_question(question: str) -> bool:
-    return not is_supported_target_journey_question(question)
-
 
 __all__ = ["ApiDependencies", "RunAccepted", "create_app"]

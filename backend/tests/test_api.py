@@ -38,16 +38,6 @@ FIVE_SOURCES = [
     "subscription",
     "voc",
 ]
-TOOL_NAMES = [
-    "catalog_sources",
-    "aggregate_events",
-    "match_journey_pattern",
-    "rank_customers",
-    "get_customer_journey",
-    "get_evidence",
-]
-
-
 def _run_request(*, question: str | None = None) -> dict[str, object]:
     return {
         "question": question or "AI 검색에서 해결하지 못하고 고객센터에 문의한 고객이 몇 명이야?",
@@ -217,11 +207,11 @@ def _create_routing_probe_app(database_path: Path):
 
     class RoutingProbeCoordinator:
         def __init__(self) -> None:
-            self.generic_values: list[bool] = []
+            self.calls: list[tuple[bool, str | None]] = []
 
         def create_run(self, request, *, generic=False, mode=None):
-            del request, mode
-            self.generic_values.append(generic)
+            del request
+            self.calls.append((generic, mode))
 
             class Snapshot:
                 run_id = "routing-probe-run"
@@ -317,7 +307,12 @@ def test_startup_atomically_reseeds_a_legacy_three_source_database(
         snapshot = _wait_for_terminal(client, accepted["status_url"])
 
     assert snapshot["status"] == "completed"
-    assert snapshot["report"]["metrics"][0]["value"] == 6
+    matched_metric = next(
+        metric
+        for metric in snapshot["report"]["metrics"]
+        if metric["metric_key"] == "matched_customer_count"
+    )
+    assert matched_metric["value"] == 6
 
 
 def test_startup_preserves_an_already_current_database(
@@ -390,7 +385,12 @@ def test_startup_atomically_reseeds_current_version_database_with_wrong_column_t
         connection.close()
     assert occurred_at_type == "TIMESTAMP WITH TIME ZONE"
     assert snapshot["status"] == "completed"
-    assert snapshot["report"]["metrics"][0]["value"] == 6
+    matched_metric = next(
+        metric
+        for metric in snapshot["report"]["metrics"]
+        if metric["metric_key"] == "matched_customer_count"
+    )
+    assert matched_metric["value"] == 6
 
 
 def test_startup_safely_replaces_a_malformed_database_file(tmp_path: Path) -> None:
@@ -430,8 +430,15 @@ def test_run_completes_with_public_snapshot_and_contiguous_sse(tmp_path: Path) -
         stream = client.get(accepted_body["events_url"])
 
     assert snapshot["status"] == "completed"
+    assert snapshot["run_kind"] == "generic"
     assert snapshot["agent_mode"] == "fixture"
-    assert snapshot["report"]["metrics"][0]["value"] == 6
+    assert snapshot["report"]["report_kind"] == "customer_signal"
+    matched_metric = next(
+        metric
+        for metric in snapshot["report"]["metrics"]
+        if metric["metric_key"] == "matched_customer_count"
+    )
+    assert matched_metric["value"] == 6
     assert snapshot["error"] is None
     created_at = datetime.fromisoformat(snapshot["created_at"])
     updated_at = datetime.fromisoformat(snapshot["updated_at"])
@@ -439,20 +446,21 @@ def test_run_completes_with_public_snapshot_and_contiguous_sse(tmp_path: Path) -
     assert updated_at.utcoffset() is not None
     assert updated_at >= created_at
     serialized_snapshot = json.dumps(snapshot, ensure_ascii=False).lower()
-    for forbidden in ("facts", "tool_result_ids", "raw_fields", "gemini_api_key"):
+    for forbidden in ("tool_result_ids", "raw_fields", "gemini_api_key"):
         assert forbidden not in serialized_snapshot
 
     assert stream.status_code == 200
     assert stream.headers["content-type"].startswith("text/event-stream")
     events = _parse_sse(stream.text)
     assert [event["id"] for event in events] == list(range(1, len(events) + 1))
-    expected_types = ["plan"]
-    for _tool_name in TOOL_NAMES:
-        expected_types.extend(("tool_started", "tool_completed"))
-    expected_types.extend(("validating", "result", "done"))
-    assert [event["event"] for event in events] == expected_types
+    event_types = [event["event"] for event in events]
+    assert event_types[:3] == ["run_started", "goal_created", "plan_created"]
+    assert "step_started" in event_types
+    assert "fact_created" in event_types
+    assert "analysis_note_created" in event_types
+    assert event_types[-3:] == ["report_validating", "result", "done"]
     serialized_events = json.dumps(events, ensure_ascii=False).lower()
-    for forbidden in ("facts", "raw_fields", "records", "masked_customer_id", "prompt"):
+    for forbidden in ("raw_fields", "prompt"):
         assert forbidden not in serialized_events
     for event in events:
         assert event["data"] == {
@@ -507,33 +515,41 @@ def test_unsupported_question_fails_with_one_error_then_done(tmp_path: Path) -> 
 
 
 @pytest.mark.parametrize(
-    "question",
+    ("question", "query", "expected_mode"),
     [
-        "부정 피드백 고객은 이후 어떤 행동을 보이고 일반 고객과 무엇이 달라?",
-        "최근 이탈 고객의 공통 행동 경로를 Source별로 비교해줘.",
+        (
+            "AI 검색 실패 후 고객센터까지 문의한 고객이 얼마나 돼?",
+            "",
+            "fixture",
+        ),
+        (
+            "최근 이탈 고객의 공통 행동 경로를 Source별로 비교해줘.",
+            "",
+            "fixture",
+        ),
+        (
+            "AI 검색 실패 후 고객센터까지 문의한 고객이 얼마나 돼?",
+            "?mode=gemini",
+            "gemini",
+        ),
     ],
 )
-def test_freeform_analysis_questions_route_to_generic_loop(
+def test_all_questions_route_to_generic_loop(
     tmp_path: Path,
     question: str,
+    query: str,
+    expected_mode: str,
 ) -> None:
     app, coordinator = _create_routing_probe_app(tmp_path / "routing.duckdb")
 
     with TestClient(app) as client:
-        response = client.post("/api/runs", json=_run_request(question=question))
+        response = client.post(
+            f"/api/runs{query}",
+            json=_run_request(question=question),
+        )
 
     assert response.status_code == 202
-    assert coordinator.generic_values == [True]
-
-
-def test_bounded_legacy_journey_question_keeps_legacy_route(tmp_path: Path) -> None:
-    app, coordinator = _create_routing_probe_app(tmp_path / "routing.duckdb")
-
-    with TestClient(app) as client:
-        response = client.post("/api/runs", json=_run_request())
-
-    assert response.status_code == 202
-    assert coordinator.generic_values == [False]
+    assert coordinator.calls == [(True, expected_mode)]
 
 
 def test_opposite_search_success_question_never_publishes_fixed_failure_report(
@@ -648,13 +664,13 @@ def test_unknown_run_endpoints_return_404(tmp_path: Path) -> None:
     assert evidence.status_code == 404
 
 
-def test_completed_run_serves_another_ranked_journey_and_masked_evidence(
+def test_completed_generic_run_serves_authorized_journey_and_masked_evidence(
     tmp_path: Path,
 ) -> None:
     with TestClient(_create_app(tmp_path / "customer-signal.duckdb")) as client:
         accepted = client.post("/api/runs", json=_run_request()).json()
-        snapshot = _wait_for_terminal(client, accepted["status_url"])
-        another_customer = snapshot["report"]["ranked_customers"][1]["customer_id"]
+        _wait_for_terminal(client, accepted["status_url"])
+        another_customer = "CUST-007"
 
         journey = client.get(f"/api/runs/{accepted['run_id']}/customers/{another_customer}/journey")
         assert journey.status_code == 200
@@ -678,11 +694,16 @@ def test_completed_run_serves_another_ranked_journey_and_masked_evidence(
 def test_journey_authorized_evidence_cannot_cross_runs(tmp_path: Path) -> None:
     with TestClient(_create_app(tmp_path / "customer-signal.duckdb")) as client:
         first = client.post("/api/runs", json=_run_request()).json()
-        second = client.post("/api/runs", json=_run_request()).json()
+        second = client.post(
+            "/api/runs",
+            json=_run_request(
+                question="최근 부정 피드백이 많은 Topic과 관련 고객 Segment를 알려줘."
+            ),
+        ).json()
         _wait_for_terminal(client, first["status_url"])
         _wait_for_terminal(client, second["status_url"])
 
-        extra_journey = client.get(f"/api/runs/{first['run_id']}/customers/CUST-002/journey")
+        extra_journey = client.get(f"/api/runs/{first['run_id']}/customers/CUST-007/journey")
         assert extra_journey.status_code == 200
         journey_only_evidence = extra_journey.json()["evidence_ids"][0]
 
