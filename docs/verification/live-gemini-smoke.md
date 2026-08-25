@@ -75,23 +75,28 @@ Fixture E2E는 desktop과 mobile에서 세 질문의 `6/6/5`, 단계 표시, His
 
 ## Langfuse 단일 Turn Trace 검증
 
-2026-08-25에는 Compass의 Turn 관측 패턴처럼 API Run 하나를 Trace 하나로 묶는 구성을
-실제 Langfuse에서 확인했습니다.
+2026-08-25 단일 Analysis Agent로 통일한 뒤 아래 합성 발화를 실제 Gemini 서버에
+전달했습니다.
 
-| 실행 경로 | Run ID | API 상태 | Langfuse 결과 |
+> AI 검색 실패 후 고객센터까지 문의한 고객이 얼마나 돼?
+
+| Run ID | API 상태 | 실행 흐름 | Langfuse 결과 |
 | --- | --- | --- | --- |
-| 범용 단계형 Gemini | `b7c8f271-bb92-40fd-bacf-158149522ad2` | `completed`, Fact 3개, Note 3개 | Trace 1개, `customer_signal.turn` |
-| 기존 Journey DeepAgent | `a6fe3792-f1f6-4117-a68a-ae8780ffec62` | `completed`, 보고서 생성 | Trace 1개, `customer_signal.turn` |
+| `d05e43ed-3d35-48c1-bb07-6e501ee00dc6` | `completed`, Plan 3개, Fact 3개, Note 3개, 보고서 생성 | `catalog_sources` → `profile_events` → `match_sequence` | Trace 1개, `customer_signal.turn`, 관측 28개 |
 
-범용 Trace의 부모 Turn 아래에는 `goal`, `plan`, `catalog_sources`,
-`match_sequence`, `get_customer_journey`, `note`, `selection`, `report`가 같은 트리로
-연결됐습니다. DeepAgent Trace에서는 `customer_signal.agent`가 Turn의 직접 자식이고,
-그 아래 Todo, 모델, Tool 관측 61개가 연결됐습니다. 부모 Turn과 Agent 관측에는 모두
-입력과 출력이 있었습니다.
+`customer_signal.turn` 안에서 `goal`, `plan`, `tool.catalog_sources`,
+`tool.profile_events`, `tool.match_sequence`, `note`, `selection`, `report`가 같은 실행
+트리로 연결됐습니다. 모든 관측에 공개 가능한 입력과 출력이 기록됐고, 통일 전
+DeepAgent 전용 `customer_signal.agent` 관측은 생성되지 않았습니다.
 
-Gemini Key, Langfuse Secret Key, 테스트 이메일, `private reasoning`,
+이번 검증의 합격 기준은 Gemini가 발화를 받아 Goal과 Plan을 만들고, 허용된 Tool을
+선택·실행한 뒤 Fact, Note, 보고서를 완성하는 동작입니다. 합성 데이터의 기대 집계값과
+실제 집계값이 일치하는지는 검증 범위에 포함하지 않았습니다.
+
+Gemini Key, Langfuse Secret Key, LangSmith API Key, `private reasoning`,
 `provider transcript` 문자열이 Trace payload에 없는 것도 확인했습니다. Langfuse
-적재 실패가 분석 결과를 실패시키지 않는 fail-open 테스트도 통과했습니다.
+Public Key는 SDK 식별 정보로 기록될 수 있으며 Secret은 아닙니다. Langfuse 적재
+실패가 분석 결과를 실패시키지 않는 fail-open 테스트도 통과했습니다.
 
 ## 판정
 
@@ -103,7 +108,9 @@ Gemini Key, Langfuse Secret Key, 테스트 이메일, `private reasoning`,
 | 단계별 공개 기록 | 통과 |
 | JSON/Markdown 영속 기록 | 통과 |
 | LangSmith Trace | 통과 |
-| Langfuse 단일 Turn Trace | Generic·DeepAgent 모두 Trace 1개로 통과 |
+| 단일 Analysis Agent 실동작 | Gemini Goal·Plan·Tool 3개·보고서 생성으로 통과 |
+| 데이터 정합성 | 이번 동작 검증 범위에서 제외 |
+| Langfuse 단일 Turn Trace | Generic Trace 1개로 통과, DeepAgent 전용 관측 없음 |
 | Langfuse 입력·출력과 Tool 흐름 | 통과 |
 | Secret·비공개 message 미기록 | 통과 |
 | Blocker | 없음 |
