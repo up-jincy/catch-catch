@@ -89,6 +89,9 @@ make dev-fixture
 `make dev-fixture`는 Backend와 Frontend를 함께 시작합니다. `Ctrl-C`, `INT`,
 `TERM`을 받으면 스크립트가 자신이 시작한 두 프로세스만 종료합니다.
 
+팀원에게 기능, 합성 데이터 생성 방식, 에이전트 역할을 설명하며 시연할 때는
+[팀 데모 가이드](docs/team-demo-guide.md)를 사용합니다.
+
 ## 환경 파일 선택
 
 `scripts/dev.sh`와 E2E Backend target은 다음 순서로 환경 파일 경로를 선택합니다.
