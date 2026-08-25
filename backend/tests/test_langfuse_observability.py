@@ -1,0 +1,96 @@
+from __future__ import annotations
+
+from customer_signal.observability.langfuse import (
+    LangfuseRunContext,
+    bind_langfuse_run,
+    build_langfuse_config,
+    sanitize_trace_value,
+)
+
+
+def test_callback_config_is_empty_without_credentials(monkeypatch) -> None:
+    for name in (
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_SECRET_KEY",
+        "LANGFUSE_BASE_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    with bind_langfuse_run(
+        LangfuseRunContext(
+            run_id="run-public-1",
+            run_kind="generic",
+            question="합성 고객 Journey를 분석해줘.",
+            source_ids=("search_history", "voc"),
+        )
+    ):
+        config = build_langfuse_config(
+            run_name="customer_signal.goal",
+            provider="gemini",
+            stage="goal",
+        )
+
+    assert config["callbacks"] == []
+    assert config["metadata"]["langfuse_session_id"] == "run-public-1"
+    assert config["metadata"]["run_kind"] == "generic"
+    assert config["metadata"]["enabled_sources"] == "search_history,voc"
+
+
+def test_nested_run_contexts_keep_separate_session_ids(monkeypatch) -> None:
+    sentinel_handler = object()
+    monkeypatch.setattr(
+        "customer_signal.observability.langfuse._new_callback_handler",
+        lambda: sentinel_handler,
+    )
+    first = LangfuseRunContext("run-1", "generic", "질문 1", ("voc",))
+    second = LangfuseRunContext("run-2", "legacy", "질문 2", ("voc",))
+
+    with bind_langfuse_run(first):
+        first_config = build_langfuse_config(
+            run_name="customer_signal.goal",
+            provider="gemini",
+            stage="goal",
+        )
+        with bind_langfuse_run(second):
+            second_config = build_langfuse_config(
+                run_name="customer_signal.agent",
+                provider="gemini",
+                stage="agent",
+            )
+
+    assert first_config["callbacks"] == [sentinel_handler]
+    assert second_config["callbacks"] == [sentinel_handler]
+    assert first_config["metadata"]["langfuse_session_id"] == "run-1"
+    assert second_config["metadata"]["langfuse_session_id"] == "run-2"
+
+
+def test_sanitizer_keeps_public_flow_and_redacts_sensitive_values() -> None:
+    value = {
+        "question": "문의 고객 test@example.com을 찾아줘",
+        "api_key": "private-key",
+        "messages": [
+            {"role": "user", "content": "Journey를 보여줘"},
+            {"role": "assistant", "content": "private reasoning"},
+        ],
+        "plan": {"steps": [{"primitive": "match_sequence"}]},
+    }
+
+    masked = sanitize_trace_value(value)
+
+    assert masked["api_key"] == "[REDACTED]"
+    assert "test@example.com" not in masked["question"]
+    assert masked["messages"][0]["content"] == "Journey를 보여줘"
+    assert masked["messages"][1]["content"] == "[PRIVATE_AGENT_MESSAGE_REDACTED]"
+    assert masked["plan"]["steps"][0]["primitive"] == "match_sequence"
+
+
+def test_sanitizer_parses_and_masks_serialized_json() -> None:
+    serialized = (
+        '{"document":{"plan":{"steps":[{"primitive":"aggregate_events"}]},'
+        '"secret_key":"must-not-leak"}}'
+    )
+
+    masked = sanitize_trace_value(serialized)
+
+    assert "must-not-leak" not in masked
+    assert "aggregate_events" in masked
