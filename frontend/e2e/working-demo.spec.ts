@@ -14,7 +14,7 @@ async function expectNoHorizontalPageScroll(page: Page) {
     .toBe(true);
 }
 
-test("question to masked evidence working demo", async ({ page }) => {
+test("기존 Journey 문구도 단일 Analysis Agent로 분석한다", async ({ page }) => {
   await page.goto("/");
 
   const question = page.getByRole("textbox", {
@@ -32,30 +32,33 @@ test("question to masked evidence working demo", async ({ page }) => {
       .getByRole("list", { name: "공개 Agent 실행 기록" })
       .getByText("분석을 마쳤습니다", { exact: true }),
   ).toBeVisible();
+  const workspace = page.getByRole("region", { name: "분석 Workspace" });
   await expect(
-    page.getByLabel("완전한 Journey 패턴 고객 수"),
-  ).toContainText("6명");
+    workspace.getByRole("heading", {
+      name: "반복 행동 뒤 상담으로 이어진 고객 Journey를 확인합니다.",
+    }),
+  ).toBeVisible();
+  await expect(
+    workspace
+      .getByRole("heading", { name: "행동 순서 매칭", exact: true })
+      .first(),
+  ).toBeVisible();
+  await expect(
+    workspace.getByText("Matched Customer Count", { exact: true }).first(),
+  ).toBeVisible();
+  await expect(
+    workspace.getByText("6customers", { exact: true }).first(),
+  ).toBeVisible();
+  await expect(
+    workspace.getByRole("heading", { name: "Analysis Note" }),
+  ).toBeVisible();
+  await expect(
+    workspace.getByText("출력 (Tool Output) · 검증 Fact", { exact: true }).first(),
+  ).toBeVisible();
   await expectNoHorizontalPageScroll(page);
-
-  await page
-    .getByRole("button", { name: "CUST-003 Journey 보기" })
-    .click();
-  await expect(page.getByRole("heading", { name: "고객 Journey" })).toBeVisible();
-  await expect(page.getByRole("list", { name: "CUST-003 고객 Journey" })).toBeVisible();
-
-  const evidenceButton = page.getByRole("button", { name: /근거 보기/ }).first();
-  await evidenceButton.click();
-  const dialog = page.getByRole("dialog", { name: /Evidence ·/ });
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("heading", { name: "원본 필드" })).toBeVisible();
-  await expect(dialog.getByText("민감정보 마스킹 적용")).toBeVisible();
-
-  await page.keyboard.press("Escape");
-  await expect(dialog).toBeHidden();
-  await expect(evidenceButton).toBeFocused();
 });
 
-test("disabling VOC returns the truthful zero result", async ({ page }) => {
+test("VOC를 끄면 검증된 0명 결과에서 후속 조회를 멈춘다", async ({ page }) => {
   const sourceCatalogLoaded = page.waitForResponse(
     (response) => response.url().endsWith("/api/sources") && response.ok(),
   );
@@ -77,14 +80,15 @@ test("disabling VOC returns the truthful zero result", async ({ page }) => {
       .getByRole("list", { name: "공개 Agent 실행 기록" })
       .getByText("분석을 마쳤습니다", { exact: true }),
   ).toBeVisible();
+  const workspace = page.getByRole("region", { name: "분석 Workspace" });
   await expect(
-    page.getByLabel("완전한 Journey 패턴 고객 수"),
-  ).toContainText("0명");
-  await expect(
-    page.getByText("완전한 패턴 일치 고객이 없습니다."),
+    workspace.getByText("Matched Customer Count", { exact: true }).first(),
   ).toBeVisible();
   await expect(
-    page.getByText(/VOC Source를 켜고 다시 분석하면/),
+    workspace.getByText("0customers", { exact: true }).first(),
   ).toBeVisible();
+  await expect(
+    workspace.getByRole("heading", { name: "get_customer_journey", exact: true }),
+  ).toHaveCount(0);
   await expectNoHorizontalPageScroll(page);
 });

@@ -26,6 +26,7 @@ from customer_signal.domain.analysis import (
     RecommendedActionDraft,
     SequenceSpec,
     StepLimits,
+    StopOnEmpty,
     StopSelection,
     UnsupportedAnalysis,
 )
@@ -201,6 +202,7 @@ class GenericFixtureModel:
                         ),
                         source_ids=goal.source_ids,
                         required_metrics=["matched_customer_count"],
+                        stop_condition=StopOnEmpty(),
                         selection_reason=(
                             "반복 행동 뒤 상담으로 이어지는 Sequence 일치 고객을 찾습니다."
                         ),
@@ -367,6 +369,7 @@ def _step(
     required_metrics,
     selection_reason,
     input_step_ids=None,
+    stop_condition=None,
 ) -> AnalysisStep:
     return AnalysisStep(
         step_id=step_id,
@@ -378,7 +381,7 @@ def _step(
             payload_kind=primitive,
             required_metric_keys=list(required_metrics),
         ),
-        stop_condition=ContinueAfterStep(),
+        stop_condition=stop_condition or ContinueAfterStep(),
         limits=_LIMITS,
         selection_reason=selection_reason,
     )

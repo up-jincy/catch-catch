@@ -131,6 +131,14 @@ class _FunctionalFixtureModel(GenericFixtureModel):
         steps = []
         for step in plan.steps:
             parameters = step.parameters
+            configured_sources = scopes.get(step.step_id)
+            source_ids = step.source_ids
+            if configured_sources is not None:
+                source_ids = [
+                    source_id
+                    for source_id in configured_sources
+                    if source_id in goal.source_ids
+                ] or step.source_ids
             if step.step_id == "step-negative-topic":
                 parameters = parameters.model_copy(
                     update={
@@ -143,7 +151,7 @@ class _FunctionalFixtureModel(GenericFixtureModel):
             steps.append(
                 step.model_copy(
                     update={
-                        "source_ids": scopes.get(step.step_id, step.source_ids),
+                        "source_ids": source_ids,
                         "parameters": parameters,
                     }
                 )

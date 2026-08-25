@@ -552,6 +552,29 @@ def test_all_questions_route_to_generic_loop(
     assert coordinator.calls == [(True, expected_mode)]
 
 
+def test_journey_question_without_voc_publishes_a_verified_zero_result(
+    tmp_path: Path,
+) -> None:
+    request = _run_request()
+    request["enabled_sources"] = ["search_history", "search_feedback"]
+
+    with TestClient(_create_app(tmp_path / "customer-signal.duckdb")) as client:
+        accepted = client.post("/api/runs", json=request).json()
+        snapshot = _wait_for_terminal(client, accepted["status_url"])
+        events = _parse_sse(client.get(accepted["events_url"]).text)
+
+    assert snapshot["run_kind"] == "generic"
+    assert snapshot["status"] == "completed"
+    matched_metric = next(
+        metric
+        for metric in snapshot["report"]["metrics"]
+        if metric["metric_key"] == "matched_customer_count"
+    )
+    assert matched_metric["value"] == 0
+    assert events[-1]["event"] == "done"
+    assert events[-1]["data"]["payload"]["status"] == "completed"
+
+
 def test_opposite_search_success_question_never_publishes_fixed_failure_report(
     tmp_path: Path,
 ) -> None:
