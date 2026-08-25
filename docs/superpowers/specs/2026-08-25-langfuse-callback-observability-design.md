@@ -34,8 +34,10 @@ Fixture 모드는 외부 모델을 호출하지 않으므로 Langfuse LLM Trace�
 | DeepAgent | 사용자 발화와 공개 실행 범위 | Todo 계획, MCP Tool 흐름, 검증된 보고서 |
 
 각 관측에는 `run_id`, `run_kind`, `provider`, `stage`, 모델명, 선택 Source를 공개
-metadata로 기록합니다. 범용 분석의 여러 모델 호출과 Primitive span은
-`langfuse_session_id=run_id`로 묶습니다.
+metadata로 기록합니다. 공개 Run ID에서 결정적인 32자 Trace ID를 만들고
+`customer_signal.turn` 부모 Agent observation을 엽니다. 범용 모델 호출, Primitive
+span, DeepAgent callback은 같은 Trace ID와 부모 observation ID를 사용합니다.
+`langfuse_session_id=run_id`도 함께 기록해 Run ID 검색을 지원합니다.
 
 ## 구현 방식
 
@@ -45,7 +47,7 @@ Backend에 `langfuse` SDK를 고정 버전으로 추가합니다. 환경변수
 
 공통 Helper는 다음 기능만 제공합니다.
 
-- 요청별 공개 `run_id`와 Run 종류 보관
+- 요청별 공개 `run_id`, 고정 Trace ID와 부모 Turn observation 보관
 - `CallbackHandler` 생성
 - 기존 `run_name`, tags, metadata에 Langfuse callback과 session metadata 추가
 - 공개 Primitive span 생성
@@ -54,8 +56,10 @@ Backend에 `langfuse` SDK를 고정 버전으로 추가합니다. 환경변수
 
 범용 Gemini는 기존 `chain.ainvoke(prompt, config=config)`의 config에 callback을
 추가합니다. DeepAgent는 기존 `agent.ainvoke(state)`를
-`agent.ainvoke(state, config=config)`로 바꿉니다. Analysis Loop는
-`PrimitiveExecutor.execute_async` 호출을 공개 span으로 감쌉니다.
+`agent.ainvoke(state, config=config)`로 바꿉니다. 두 callback 모두 Turn의
+`trace_id`와 `parent_span_id`를 받습니다. Analysis Loop의 공개 Primitive span도 같은
+부모 아래에 둡니다. 자식 Tool 이름이 Trace 제목을 덮지 않도록 export 시 Trace 이름은
+`customer_signal.turn`으로 고정합니다.
 
 ## 데이터 보호
 

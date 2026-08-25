@@ -193,9 +193,27 @@ Run에 남깁니다.
 Fixture 모드는 API Key와 외부 네트워크가 필요 없습니다. Gemini 모드에서도 숫자와
 고객 매칭은 Analytics Primitive가 계산하고 서버가 검증합니다.
 
-Gemini와 LangSmith 설정을 사용하는 경우 `.env`를 shell에서 `source`하지 않습니다.
-반드시 저장소의 실행 명령에 `ENV_FILE`을 전달합니다. API Key와 LangSmith 값은
-Backend에만 전달되며 로그, 문서, Artifact에 원문을 남기면 안 됩니다.
+Gemini, LangSmith, Langfuse 설정을 사용하는 경우 `.env`를 shell에서 `source`하지
+않습니다. 반드시 저장소의 실행 명령에 `ENV_FILE`을 전달합니다. API Key와 관측
+설정은 Backend에만 전달되며 로그, 문서, Artifact에 원문을 남기면 안 됩니다.
+
+### Langfuse로 Agent 안쪽까지 보여주기
+
+Gemini 데모를 한 번 실행하고 화면에 표시된 Run ID를 복사합니다. Langfuse에서 같은
+값의 Session을 엽니다. API Run 하나가 `customer_signal.turn` Trace 하나로 보이고,
+그 아래 단계를 펼치면서 팀원에게 다음처럼 설명할 수 있습니다.
+
+1. `goal`: “이 발화를 받아 분석 목표와 범위를 정했습니다.”
+2. `plan`: “사용 가능한 읽기 전용 Primitive 중 이 단계들을 골랐습니다.”
+3. `tool.*`: “실제로 이 Tool에 이 Source와 조건을 넣었고, 서버가 이 Fact를
+   검증했습니다.”
+4. `note`와 `selection`: “현재 Fact를 요약한 뒤 다음 Tool을 고르거나 종료했습니다.”
+5. `report`: “검증된 Fact만 모아 최종 문서를 만들었습니다.”
+
+기존 Journey 질문은 `customer_signal.agent`에서 DeepAgent의 공개 Todo와 MCP Tool
+호출 흐름을 함께 확인합니다. 내부 chain-of-thought나 Provider 원문 대신 공개 계획,
+Tool 이름, 마스킹된 입력, 검증 출력만 보여준다고 설명하면 됩니다. Langfuse가 꺼져
+있거나 적재에 실패해도 실제 분석 결과는 계속 반환됩니다.
 
 ## 실제 서버 실행
 

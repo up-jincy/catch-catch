@@ -104,9 +104,9 @@ make dev-fixture
 세 위치에 파일이 없어도 Fixture 모드는 실행됩니다. 선택한 파일은 복사하거나
 shell에 `source`하지 않습니다. `uv run --env-file`로 Backend Python 프로세스가
 시작되기 전에 값을 전달하므로 LangSmith가 tracing 설정을 import 시점에 읽습니다.
-선택한 환경 파일의 LangSmith 설정은 기존 shell의 `LANGSMITH_*`, `LANGCHAIN_*`
-설정보다 우선합니다. Frontend 프로세스에는 Gemini나 LangSmith 값을 전달하지
-않습니다.
+선택한 환경 파일의 LangSmith와 Langfuse 설정은 기존 shell의 `LANGSMITH_*`,
+`LANGCHAIN_*`, `LANGFUSE_*` 설정보다 우선합니다. Frontend 프로세스에는 Gemini,
+LangSmith, Langfuse 값을 전달하지 않습니다.
 
 명시적 파일을 사용하려면 절대 경로나 현재 checkout 기준 상대 경로를 지정합니다.
 
@@ -122,6 +122,10 @@ AGENT_MODE=auto
 GEMINI_API_KEY=your_key_here
 GEMINI_MODEL=gemini-3.7-flash
 GEMINI_FALLBACK_MODEL=gemini-3.6-flash
+LANGFUSE_SECRET_KEY=your_secret_key
+LANGFUSE_PUBLIC_KEY=your_public_key
+LANGFUSE_BASE_URL=http://localhost:3100
+LANGFUSE_TRACING_ENVIRONMENT=development
 ```
 
 ## Agent 모드
@@ -134,6 +138,30 @@ GEMINI_FALLBACK_MODEL=gemini-3.6-flash
 
 Gemini 기본 모델은 `gemini-3.7-flash`입니다. 기본 모델이 Tool 호출 전에
 `NOT_FOUND`를 반환할 때만 대체 모델 `gemini-3.6-flash`를 시도합니다.
+
+## Langfuse에서 Agent 동작 보기
+
+`make dev-gemini`로 실행하면 Gemini와 DeepAgent의 LangChain 호출 config에 Langfuse
+callback을 직접 전달합니다. 설정이 없거나 Langfuse가 일시적으로 실패해도 분석은
+계속됩니다.
+
+분석을 실행한 뒤 화면이나 API에서 확인한 공개 `run_id`를 Langfuse의 Session ID로
+검색합니다. 한 API Run은 이름이 `customer_signal.turn`인 Trace 하나가 되며, 아래
+단계가 부모 턴의 자식으로 펼쳐집니다.
+
+| 관측 이름 | 팀원에게 설명할 내용 |
+| --- | --- |
+| `customer_signal.goal` | 어떤 사용자 발화와 Source 범위를 받았는지, 무엇을 분석 목표로 바꿨는지 |
+| `customer_signal.plan` | 사용 가능한 Primitive 중 어떤 단계를 골랐고 선택 이유가 무엇인지 |
+| `customer_signal.tool.<primitive>` | 실제 선택한 Tool의 공개 입력과 서버가 검증한 Fact 출력 |
+| `customer_signal.note` | 방금 확인한 Fact를 어떤 공개 관찰로 정리했는지 |
+| `customer_signal.selection` | 남은 후보 단계 중 다음에 무엇을 실행하거나 왜 멈췄는지 |
+| `customer_signal.report` | 검증된 Fact와 Note를 어떤 최종 보고서로 만들었는지 |
+| `customer_signal.agent` | 기존 Journey DeepAgent의 Todo 계획, MCP Tool 호출 흐름, 구조화 응답 |
+
+사용자 발화의 이메일·전화번호, secret 계열 값, Provider의 비공개 Agent message는
+export 전에 마스킹합니다. 화면과 Trace에는 내부 chain-of-thought 대신 공개 Plan 선택
+근거, Tool 계약, 검증된 Fact만 남깁니다.
 
 ## 명령
 
@@ -180,8 +208,8 @@ RUN_LIVE_GEMINI=1 PLAYWRIGHT_REUSE_SERVER=1 \
   live-gemini-planner.spec.ts --project desktop-chromium
 ```
 
-`RUN_LIVE_GEMINI`를 지정하지 않으면 이 smoke는 skip합니다. API Key와 LangSmith
-설정은 Backend 프로세스에만 전달합니다.
+`RUN_LIVE_GEMINI`를 지정하지 않으면 이 smoke는 skip합니다. API Key와 LangSmith,
+Langfuse 설정은 Backend 프로세스에만 전달합니다.
 
 ## 포트와 Endpoint
 
@@ -223,6 +251,9 @@ Frontend origin과 맞아야 합니다.
 - 화면에 서버 연결 오류가 남음: Backend `/health`, `NEXT_PUBLIC_API_BASE_URL`,
   `FRONTEND_ORIGIN` 순서로 확인합니다.
 - Gemini 키가 없거나 호출이 실패함: `make dev-fixture`로 전체 데모를 검증합니다.
+- Langfuse에 Trace가 없음: Backend를 다시 시작한 뒤 `.env`의 세 필수
+  `LANGFUSE_*` 값과 `LANGFUSE_BASE_URL` 접근 가능 여부를 확인합니다. Frontend
+  재시작만으로는 Backend callback 설정이 갱신되지 않습니다.
 - 데이터가 예상과 다름: `make seed`로 고정 Seed DuckDB를 다시 만듭니다.
 
 Evidence API는 현재 Run이 허용한 ID만 반환하고 고객 식별자는 마스킹합니다. Run

@@ -1,7 +1,7 @@
 # Gemini 실호출 검증 기록
 
 - 문서 상태: 완료
-- 최근 실행일: 2026-08-21
+- 최근 실행일: 2026-08-25
 - 실행 환경: 로컬 합성 데이터
 - Agent 모드: `gemini`
 - 기본 모델: `gemini-3.7-flash`
@@ -18,6 +18,8 @@ LangSmith와 Gemini 환경을 적용했습니다. API Key, Provider 원문, 내�
 - `LANGSMITH_TRACING`: 활성화 확인
 - `LANGSMITH_PROJECT`: 설정 확인
 - `LANGSMITH_ENDPOINT`: 설정 확인
+- `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`: 설정 확인
+- Langfuse SDK 인증: 성공
 - LangSmith 최근 단계 Trace: `customer_signal.goal`, `plan`, `note`,
   `selection`, `report` 모두 완료, 오류 없음
 
@@ -71,6 +73,26 @@ Fixture E2E는 desktop과 mobile에서 세 질문의 `6/6/5`, 단계 표시, His
 실제 Gemini E2E는 자유 질문의 동적 Plan, 선택 근거, Fact, Analysis Note,
 최종 문서와 History 복원을 확인했습니다.
 
+## Langfuse 단일 Turn Trace 검증
+
+2026-08-25에는 Compass의 Turn 관측 패턴처럼 API Run 하나를 Trace 하나로 묶는 구성을
+실제 Langfuse에서 확인했습니다.
+
+| 실행 경로 | Run ID | API 상태 | Langfuse 결과 |
+| --- | --- | --- | --- |
+| 범용 단계형 Gemini | `b7c8f271-bb92-40fd-bacf-158149522ad2` | `completed`, Fact 3개, Note 3개 | Trace 1개, `customer_signal.turn` |
+| 기존 Journey DeepAgent | `a6fe3792-f1f6-4117-a68a-ae8780ffec62` | `completed`, 보고서 생성 | Trace 1개, `customer_signal.turn` |
+
+범용 Trace의 부모 Turn 아래에는 `goal`, `plan`, `catalog_sources`,
+`match_sequence`, `get_customer_journey`, `note`, `selection`, `report`가 같은 트리로
+연결됐습니다. DeepAgent Trace에서는 `customer_signal.agent`가 Turn의 직접 자식이고,
+그 아래 Todo, 모델, Tool 관측 61개가 연결됐습니다. 부모 Turn과 Agent 관측에는 모두
+입력과 출력이 있었습니다.
+
+Gemini Key, Langfuse Secret Key, 테스트 이메일, `private reasoning`,
+`provider transcript` 문자열이 Trace payload에 없는 것도 확인했습니다. Langfuse
+적재 실패가 분석 결과를 실패시키지 않는 fail-open 테스트도 통과했습니다.
+
 ## 판정
 
 | 항목 | 결과 |
@@ -81,4 +103,7 @@ Fixture E2E는 desktop과 mobile에서 세 질문의 `6/6/5`, 단계 표시, His
 | 단계별 공개 기록 | 통과 |
 | JSON/Markdown 영속 기록 | 통과 |
 | LangSmith Trace | 통과 |
+| Langfuse 단일 Turn Trace | Generic·DeepAgent 모두 Trace 1개로 통과 |
+| Langfuse 입력·출력과 Tool 흐름 | 통과 |
+| Secret·비공개 message 미기록 | 통과 |
 | Blocker | 없음 |
