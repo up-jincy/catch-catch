@@ -317,8 +317,14 @@ class _ReplayAgent:
         self._report = report
         self._fail_before_tools = fail_before_tools
         self._fail_after_tools = fail_after_tools
+        self.invoke_configs: list[dict[str, Any] | None] = []
 
-    async def ainvoke(self, state: dict[str, Any]) -> dict[str, Any]:
+    async def ainvoke(
+        self,
+        state: dict[str, Any],
+        config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.invoke_configs.append(config)
         assert state["messages"][0]["role"] == "user"
         if self._fail_before_tools is not None:
             raise self._fail_before_tools
@@ -359,18 +365,21 @@ class _FakeAgentFactory:
         self._primary_error = primary_error
         self._fail_after_tools = fail_after_tools
         self.calls: list[dict[str, Any]] = []
+        self.agents: list[_ReplayAgent] = []
 
     def __call__(self, **kwargs: Any) -> _ReplayAgent:
         self.calls.append(kwargs)
         model = kwargs["model"]
         assert isinstance(model, _FakeModel)
-        return _ReplayAgent(
+        agent = _ReplayAgent(
             interceptor=self._mcp_factory.interceptors[0],
             calls=self._prepared.calls,
             report=self._prepared.report,
             fail_before_tools=(self._primary_error if model.name == PRIMARY_MODEL else None),
             fail_after_tools=(self._fail_after_tools if model.name == PRIMARY_MODEL else None),
         )
+        self.agents.append(agent)
+        return agent
 
 
 def _runner(
@@ -481,6 +490,34 @@ async def test_gemini_runner_lazily_builds_one_structured_agent_and_captures_fac
     ).lower()
     for forbidden in ("reasoning", "messages", "provider transcript", "test-gemini-key"):
         assert forbidden not in public_trace
+
+
+async def test_gemini_runner_passes_langfuse_callback_config(
+    prepared_analysis: _PreparedAnalysis,
+    monkeypatch,
+) -> None:
+    sentinel_handler = object()
+    monkeypatch.setattr(
+        "customer_signal.observability.langfuse._new_callback_handler",
+        lambda: sentinel_handler,
+    )
+    runner, _mcp_factory, _model_factory, agent_factory = _runner(prepared_analysis)
+
+    await runner.run(_request(), emit=lambda _event: None)
+
+    assert len(agent_factory.agents) == 1
+    assert agent_factory.agents[0].invoke_configs == [
+        {
+            "callbacks": [sentinel_handler],
+            "run_name": "customer_signal.agent",
+            "tags": ["customer-signal", "gemini", "agent"],
+            "metadata": {
+                "provider": "gemini",
+                "stage": "agent",
+                "model": PRIMARY_MODEL,
+            },
+        }
+    ]
 
 
 class _CapturingGoogleModel(BaseChatModel):

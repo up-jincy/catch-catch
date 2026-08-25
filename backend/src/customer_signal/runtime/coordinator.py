@@ -21,6 +21,11 @@ from customer_signal.analytics.service import AnalyticsService
 from customer_signal.data.repository import EntityNotFoundError
 from customer_signal.domain.analysis import PublicRunError
 from customer_signal.domain.facts import AnalysisFact
+from customer_signal.observability.langfuse import (
+    LangfuseRunContext,
+    bind_langfuse_run,
+    flush_langfuse,
+)
 from customer_signal.runtime.artifact_store import ArtifactStore, ArtifactWriteError
 from customer_signal.runtime.artifacts import RunArtifact, RunVersions
 from customer_signal.runtime.events import GenericRunnerEventType, RunnerEvent
@@ -197,6 +202,7 @@ class RunCoordinator:
             await self._store.mark_failed(run_id, public_error)
             await self._store.append_event(run_id, "done", {"status": "failed"})
             self._checkpoint(run_id)
+        await asyncio.to_thread(flush_langfuse)
 
     def get_journey(self, run_id: str, customer_id: str) -> CustomerJourneyResult:
         snapshot = self._completed_snapshot(run_id)
@@ -274,8 +280,15 @@ class RunCoordinator:
             await self._store.append_event(run_id, "done", {"status": "failed"})
             self._checkpoint(run_id)
 
+        context = LangfuseRunContext(
+            run_id=run_id,
+            run_kind="legacy",
+            question=request.question,
+            source_ids=tuple(request.enabled_sources),
+        )
         try:
-            outcome = await self._run_selected(request, emit=emit)
+            with bind_langfuse_run(context):
+                outcome = await self._run_selected(request, emit=emit)
         except asyncio.CancelledError:
             public_error = reported_error or RunError(
                 code="run_cancelled",
@@ -334,10 +347,17 @@ class RunCoordinator:
             )
             self._checkpoint(run_id)
 
+        context = LangfuseRunContext(
+            run_id=run_id,
+            run_kind="generic",
+            question=request.question,
+            source_ids=tuple(request.enabled_sources),
+        )
         try:
             loop = self._generic_loop_for(self._store.get_requested_mode(run_id))
-            async with asyncio.timeout(130):
-                outcome = await loop.run(request, emit=emit)
+            with bind_langfuse_run(context):
+                async with asyncio.timeout(130):
+                    outcome = await loop.run(request, emit=emit)
         except asyncio.CancelledError:
             public_error = PublicRunError(
                 code="run_cancelled",

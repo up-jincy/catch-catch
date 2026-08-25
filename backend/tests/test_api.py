@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import json
 import time
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from uuid import UUID
@@ -851,6 +852,51 @@ async def test_runner_reported_error_wins_over_returned_outcome(database_path: P
     assert terminal.error.code == "tool_execution_failed"
     assert [event.type for event in events] == ["error", "done"]
     assert events[-1].payload == {"status": "failed"}
+
+
+async def test_legacy_run_binds_langfuse_context_and_shutdown_flushes(
+    database_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    coordinator_module = importlib.import_module("customer_signal.runtime.coordinator")
+    captured = []
+    flush_calls: list[bool] = []
+
+    @contextmanager
+    def capture_context(context):
+        captured.append(context)
+        yield context
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "bind_langfuse_run",
+        capture_context,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        coordinator_module,
+        "flush_langfuse",
+        lambda: flush_calls.append(True),
+        raising=False,
+    )
+    analytics = AnalyticsService(DuckDBRepository(database_path))
+    runner = FixtureRunner(create_mcp_server(analytics))
+    store = RunStore()
+    coordinator = RunCoordinator(runner=runner, analytics=analytics, store=store)
+    request = RunRequest.model_validate(_run_request())
+
+    created = coordinator.create_run(request)
+    terminal = await coordinator.wait_for_run(created.run_id)
+    await coordinator.close()
+
+    assert terminal.status == "completed"
+    assert len(captured) == 1
+    context = captured[0]
+    assert context.run_id == created.run_id
+    assert context.run_kind == "legacy"
+    assert context.question == request.question
+    assert context.source_ids == tuple(request.enabled_sources)
+    assert flush_calls == [True]
 
 
 async def test_immediate_shutdown_finalizes_queued_run(database_path: Path) -> None:

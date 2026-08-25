@@ -52,6 +52,7 @@ from customer_signal.analytics.models import (
 )
 from customer_signal.domain.models import SourceId
 from customer_signal.domain.reports import InsightReport
+from customer_signal.observability.langfuse import build_langfuse_config
 from customer_signal.runtime.events import RunnerEvent
 
 
@@ -166,7 +167,11 @@ class GeminiRunnerError(RuntimeError):
 
 
 class _Agent(Protocol):
-    async def ainvoke(self, state: dict[str, Any]) -> dict[str, Any]: ...
+    async def ainvoke(
+        self,
+        state: dict[str, Any],
+        config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
 
 
 @dataclass(slots=True)
@@ -529,7 +534,13 @@ class GeminiRunner:
 
     async def _invoke(self, model_name: str, state: dict[str, Any]) -> dict[str, Any]:
         agent = await self._get_agent(model_name)
-        result = await agent.ainvoke(state)
+        config = build_langfuse_config(
+            run_name="customer_signal.agent",
+            provider="gemini",
+            stage="agent",
+        )
+        config["metadata"]["model"] = model_name
+        result = await agent.ainvoke(state, config=config)
         if not isinstance(result, dict):
             raise GeminiRunnerError(
                 "gemini_validation_failed",

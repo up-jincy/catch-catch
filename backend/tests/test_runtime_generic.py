@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from uuid import UUID
 
@@ -35,6 +36,7 @@ from customer_signal.domain.primitives import (
 )
 from customer_signal.runtime.events import validate_generic_event
 from customer_signal.runtime.run_store import RunStore
+import customer_signal.runtime.coordinator as coordinator_module
 
 
 START_AT = "2026-07-20T00:00:00+09:00"
@@ -313,6 +315,38 @@ def test_three_generic_fixture_questions_publish_fact_backed_lifecycle_and_artif
     assert artifact.json()["facts"]
     assert artifact.json()["notes"]
     assert [plan["revision"] for plan in artifact.json()["plan_history"]] == [0]
+
+
+def test_generic_api_run_binds_public_langfuse_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = []
+
+    @contextmanager
+    def capture_context(context):
+        captured.append(context)
+        yield context
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "bind_langfuse_run",
+        capture_context,
+        raising=False,
+    )
+
+    with TestClient(create_app(_settings(tmp_path))) as client:
+        accepted = client.post(
+            "/api/runs", json=_request(REPEAT_JOURNEY_QUESTION)
+        ).json()
+        _wait_for_status(client, accepted["status_url"], {"completed"})
+
+    assert len(captured) == 1
+    context = captured[0]
+    assert context.run_id == accepted["run_id"]
+    assert context.run_kind == "generic"
+    assert context.question == REPEAT_JOURNEY_QUESTION
+    assert context.source_ids == tuple(SOURCES)
 
 
 def test_clarification_resumes_same_run_without_an_intermediate_done(tmp_path: Path) -> None:
