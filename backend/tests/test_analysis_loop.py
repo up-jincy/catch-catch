@@ -135,7 +135,6 @@ class ScriptedExecutor:
             scope=scope,
             created_at=NOW,
         )
-
     def _common(self, scope: EventScope, *, returned_rows: int, input_facts: list) -> dict:
         return {
             "input_fact_ids": [fact.fact_id for fact in input_facts],
@@ -239,6 +238,23 @@ class ScriptedExecutor:
                 **self._common(scope, returned_rows=0, input_facts=input_facts),
             )
         raise AssertionError(f"unexpected primitive: {step.primitive}")
+
+
+class _RecordedObservation:
+    def __init__(self, *, name: str, stage: str, input: dict[str, Any]) -> None:
+        self.name = name
+        self.stage = stage
+        self.input = input
+        self.output: dict[str, Any] | None = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args) -> None:
+        return None
+
+    def update(self, *, output: dict[str, Any]) -> None:
+        self.output = output
 
 
 class RepairingPlanModel(GenericFixtureModel):
@@ -475,6 +491,43 @@ async def test_loop_executes_three_distinct_fact_backed_demo_questions(
     assert "fact_created" in event_types
     assert "analysis_note_created" in event_types
     assert event_types[-2:] == ["report_validating", "result"]
+
+
+@pytest.mark.asyncio
+async def test_loop_records_selected_primitive_input_and_verified_fact(monkeypatch) -> None:
+    observations: list[_RecordedObservation] = []
+
+    def record_observation(**kwargs):
+        observation = _RecordedObservation(**kwargs)
+        observations.append(observation)
+        return observation
+
+    monkeypatch.setattr(
+        analysis_loop_module,
+        "public_observation",
+        record_observation,
+        raising=False,
+    )
+    loop = AnalysisLoop(
+        model=GenericFixtureModel(),
+        executor=ScriptedExecutor(),
+        manifests=[_manifest()],
+    )
+
+    outcome = await loop.run(_request(REPEAT_JOURNEY_QUESTION), emit=lambda _event: None)
+
+    assert outcome.status == "completed"
+    observation = next(
+        item for item in observations if item.name == "customer_signal.tool.match_sequence"
+    )
+    assert observation.stage == "tool"
+    assert observation.input["primitive"] == "match_sequence"
+    assert observation.input["source_ids"] == ["voc"]
+    assert observation.output is not None
+    assert observation.output["fact_id"].startswith("fact-")
+    assert observation.output["payload"]["metrics"][0]["metric_key"] == (
+        "matched_customer_count"
+    )
 
 
 @pytest.mark.asyncio

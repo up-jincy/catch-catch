@@ -264,7 +264,12 @@ async def _staged_values(*, question: str = FREE_QUESTION):
 
 
 @pytest.mark.asyncio
-async def test_free_question_uses_five_flat_provider_documents() -> None:
+async def test_free_question_uses_five_flat_provider_documents(monkeypatch) -> None:
+    sentinel_handler = object()
+    monkeypatch.setattr(
+        "customer_signal.observability.langfuse._new_callback_handler",
+        lambda: sentinel_handler,
+    )
     (
         request,
         manifests,
@@ -344,6 +349,7 @@ async def test_free_question_uses_five_flat_provider_documents() -> None:
     ]
     assert [call["invoke_config"] for call in provider.structured_calls] == [
         {
+            "callbacks": [sentinel_handler],
             "run_name": f"customer_signal.{stage}",
             "tags": ["customer-signal", "gemini", stage],
             "metadata": {

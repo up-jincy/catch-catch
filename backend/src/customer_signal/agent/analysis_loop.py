@@ -52,6 +52,7 @@ from customer_signal.domain.analysis import (
 )
 from customer_signal.domain.facts import AnalysisFact
 from customer_signal.domain.sources import EventScope, SourceManifest
+from customer_signal.observability.langfuse import public_observation
 
 
 class AnalysisModel(Protocol):
@@ -220,12 +221,25 @@ class AnalysisLoop:
                         },
                     ),
                 )
-                fact = await self._executor.execute_async(
-                    step,
-                    scope=scope.model_copy(update={"source_ids": list(step.source_ids)}),
-                    prior_facts=facts,
-                    budget=budget,
-                )
+                with public_observation(
+                    name=f"customer_signal.tool.{step.primitive}",
+                    stage="tool",
+                    input={
+                        "step_id": step.step_id,
+                        "primitive": step.primitive,
+                        "source_ids": list(step.source_ids),
+                        "parameters": step.parameters.model_dump(mode="json"),
+                    },
+                ) as observation:
+                    fact = await self._executor.execute_async(
+                        step,
+                        scope=scope.model_copy(
+                            update={"source_ids": list(step.source_ids)}
+                        ),
+                        prior_facts=facts,
+                        budget=budget,
+                    )
+                    observation.update(output=fact.model_dump(mode="json"))
                 validate_fact_against_step(step, fact)
                 _validate_fact_dependencies(step, fact, facts)
                 facts.append(fact)

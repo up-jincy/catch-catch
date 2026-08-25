@@ -29,6 +29,7 @@ from customer_signal.domain.analysis import (
 )
 from customer_signal.domain.primitives import PRIMITIVE_INPUT_ADAPTER
 from customer_signal.domain.sources import PublicSourceManifest, SourceManifest
+from customer_signal.observability.langfuse import build_langfuse_config
 
 
 T = TypeVar("T")
@@ -458,15 +459,12 @@ class GeminiAnalysisModel:
         schema = adapter.json_schema()
         schema["title"] = schema_title
         chain = model.with_structured_output(schema, method="json_schema")
-        config = {
-            "run_name": f"customer_signal.{stage}",
-            "tags": ["customer-signal", "gemini", stage],
-            "metadata": {
-                "provider": "gemini",
-                "stage": stage,
-                "schema_title": schema_title,
-            },
-        }
+        config = build_langfuse_config(
+            run_name=f"customer_signal.{stage}",
+            provider="gemini",
+            stage=stage,
+        )
+        config["metadata"]["schema_title"] = schema_title
         try:
             async with asyncio.timeout(self._timeout_seconds):
                 raw = await chain.ainvoke(prompt, config=config)
