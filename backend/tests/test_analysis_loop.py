@@ -457,10 +457,16 @@ async def test_catalog_fact_revises_unfinished_plan_before_publishing_next_actio
         (NEGATIVE_TOPIC_QUESTION, "aggregate_events", "negative_feedback_customer_count", 6),
         (REPEAT_JOURNEY_QUESTION, "match_sequence", "matched_customer_count", 6),
         (SIGNUP_ABANDONMENT_QUESTION, "match_sequence", "abandoned_customer_count", 5),
+        (
+            "AI 검색 실패 후 고객센터까지 문의한 고객이 얼마나 돼?",
+            "match_sequence",
+            "matched_customer_count",
+            6,
+        ),
     ],
 )
 @pytest.mark.asyncio
-async def test_loop_executes_three_distinct_fact_backed_demo_questions(
+async def test_loop_executes_supported_fact_backed_demo_questions(
     question: str,
     expected_primitive: str,
     metric_key: str,

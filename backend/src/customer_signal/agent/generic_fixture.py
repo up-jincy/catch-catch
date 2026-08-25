@@ -8,6 +8,7 @@ from customer_signal.agent.contracts import (
     SelectionContext,
     StepModelContext,
 )
+from customer_signal.agent.intent import is_supported_target_journey_question
 from customer_signal.domain.analysis import (
     AnalysisGoal,
     AnalysisNoteDraft,
@@ -401,6 +402,8 @@ def _scenario(question: str) -> str:
         )
     ):
         return "unsafe"
+    if is_supported_target_journey_question(question):
+        return "repeat"
     if "부정" in normalized and "피드백" in normalized:
         return "negative"
     if "반복" in normalized and ("상담" in normalized or "journey" in normalized):
