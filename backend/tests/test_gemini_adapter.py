@@ -1475,7 +1475,9 @@ def _sse_event_types(body: str) -> list[str]:
     ]
 
 
-def test_api_auto_mode_without_a_key_emits_fallback_then_runs_fixture(tmp_path) -> None:
+def test_api_auto_mode_without_a_key_selects_generic_fixture_without_fallback(
+    tmp_path,
+) -> None:
     settings = Settings(
         agent_mode="auto",
         gemini_api_key="",
@@ -1489,9 +1491,12 @@ def test_api_auto_mode_without_a_key_emits_fallback_then_runs_fixture(tmp_path) 
         events = client.get(accepted["events_url"])
 
     assert terminal["status"] == "completed"
+    assert terminal["run_kind"] == "generic"
     assert terminal["agent_mode"] == "fixture"
-    assert _sse_event_types(events.text)[0] == "fallback"
-    assert "error" not in _sse_event_types(events.text)
+    event_types = _sse_event_types(events.text)
+    assert event_types[0] == "run_started"
+    assert "fallback" not in event_types
+    assert "error" not in event_types
 
 
 def test_api_forced_gemini_without_a_key_fails_without_running_fixture(tmp_path) -> None:
@@ -1508,6 +1513,7 @@ def test_api_forced_gemini_without_a_key_fails_without_running_fixture(tmp_path)
         events = client.get(accepted["events_url"])
 
     assert terminal["status"] == "failed"
+    assert terminal["run_kind"] == "generic"
     assert terminal["agent_mode"] is None
-    assert terminal["error"]["code"] == "gemini_not_configured"
-    assert _sse_event_types(events.text) == ["error", "done"]
+    assert terminal["error"]["code"] == "generic_run_failed"
+    assert _sse_event_types(events.text) == ["run_started", "error", "done"]

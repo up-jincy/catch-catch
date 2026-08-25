@@ -467,15 +467,17 @@ def test_sources_history_documents_and_downloads_survive_restart(tmp_path: Path)
     assert str(UUID(run_id)) == run_id
 
 
-def test_legacy_journey_question_keeps_legacy_runner_and_event_smoke(tmp_path: Path) -> None:
-    legacy_question = "AI 검색에서 해결하지 못하고 고객센터에 문의한 고객이 몇 명이야?"
+def test_existing_journey_question_uses_generic_runner_and_event_smoke(tmp_path: Path) -> None:
+    journey_question = "AI 검색에서 해결하지 못하고 고객센터에 문의한 고객이 몇 명이야?"
     with TestClient(create_app(_settings(tmp_path))) as client:
-        accepted = client.post("/api/runs", json=_request(legacy_question)).json()
+        accepted = client.post("/api/runs", json=_request(journey_question)).json()
         snapshot = _wait_for_status(client, accepted["status_url"], {"completed"})
         events = _events(client, accepted["events_url"])
 
-    assert snapshot["report"]["report_kind"] == "legacy_journey"
-    assert events[0]["type"] == "plan"
+    assert snapshot["run_kind"] == "generic"
+    assert snapshot["report"]["report_kind"] == "customer_signal"
+    assert events[0]["type"] == "run_started"
+    assert [event["type"] for event in events[1:3]] == ["goal_created", "plan_created"]
     assert events[-2]["type"] == "result"
     assert events[-1]["type"] == "done"
 
