@@ -40,6 +40,28 @@ def test_frontend_launchers_strip_provider_and_tracing_settings() -> None:
     assert '-u LANGCHAIN_API_KEY' in launcher
     assert '-u LANGSMITH_API_KEY' in makefile
     assert '-u LANGCHAIN_API_KEY' in makefile
+    assert '-u LANGFUSE_SECRET_KEY' in launcher
+    assert '-u LANGFUSE_PUBLIC_KEY' in launcher
+    assert '-u LANGFUSE_BASE_URL' in launcher
+    assert '-u LANGFUSE_SECRET_KEY' in makefile
+    assert '-u LANGFUSE_PUBLIC_KEY' in makefile
+    assert '-u LANGFUSE_BASE_URL' in makefile
+
+
+def test_backend_launchers_prefer_selected_langfuse_env_file() -> None:
+    launcher = _normalized(REPOSITORY_ROOT / "scripts" / "dev.sh")
+    makefile = _normalized(REPOSITORY_ROOT / "Makefile")
+
+    for variable in (
+        "LANGFUSE_SECRET_KEY",
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_BASE_URL",
+        "LANGFUSE_DEBUG",
+        "LANGFUSE_TRACING_ENVIRONMENT",
+        "LANGFUSE_RELEASE",
+    ):
+        assert f"-u {variable}" in launcher
+        assert f"-u {variable}" in makefile
 
 
 def test_uv_env_file_enables_langsmith_in_a_clean_subprocess(tmp_path: Path) -> None:

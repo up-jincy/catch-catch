@@ -77,6 +77,12 @@ serve-backend-fixture: seed
 				-u LANGCHAIN_API_KEY \
 				-u LANGCHAIN_ENDPOINT \
 				-u LANGCHAIN_TRACING_SAMPLING_RATE \
+				-u LANGFUSE_SECRET_KEY \
+				-u LANGFUSE_PUBLIC_KEY \
+				-u LANGFUSE_BASE_URL \
+				-u LANGFUSE_DEBUG \
+				-u LANGFUSE_TRACING_ENVIRONMENT \
+				-u LANGFUSE_RELEASE \
 			); \
 			printf 'Starting fixture Uvicorn: uv run --env-file %s ... --host %s --port %s\n' \
 				"$$env_file" "$(BACKEND_HOST)" "$(BACKEND_PORT)"; \
@@ -110,6 +116,12 @@ serve-frontend:
 			-u LANGCHAIN_API_KEY \
 			-u LANGCHAIN_ENDPOINT \
 			-u LANGCHAIN_TRACING_SAMPLING_RATE \
+			-u LANGFUSE_SECRET_KEY \
+			-u LANGFUSE_PUBLIC_KEY \
+			-u LANGFUSE_BASE_URL \
+			-u LANGFUSE_DEBUG \
+			-u LANGFUSE_TRACING_ENVIRONMENT \
+			-u LANGFUSE_RELEASE \
 			npm --prefix frontend run dev -- --port "$(FRONTEND_PORT)"
 
 test:
