@@ -1,5 +1,18 @@
 # 저장소 작업 원칙
 
+## Backend API 엔드포인트와 Swagger
+
+- Backend 에 HTTP 엔드포인트를 추가하거나 변경할 때는 Swagger 문서(`/docs`)에
+  올바르게 노출되도록 만들어야 합니다. `include_in_schema=False`는 의도적으로
+  숨겨야 하는 경우에만, 이유를 코드에 남기고 사용합니다.
+- 모든 엔드포인트에는 `tags`와 한국어 `summary`를 지정해야 합니다. 태그는
+  `api.py`의 `_OPENAPI_TAGS`에 정의된 것을 사용하고, 새 영역이 필요하면
+  `_OPENAPI_TAGS`에 먼저 추가합니다.
+- 요청과 응답은 Pydantic 모델 또는 반환 타입 힌트로 선언해 스키마가 Swagger 에
+  드러나야 합니다. 타입 없는 `dict` 반환으로 스키마를 비워두면 안 됩니다.
+- 엔드포인트를 추가, 변경, 삭제하면 `docs/api-endpoints.md`를 같은 변경에서
+  함께 갱신해야 합니다.
+
 ## LangSmith 환경 초기화
 
 - `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`,
