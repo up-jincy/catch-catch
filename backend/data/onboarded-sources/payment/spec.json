@@ -1,0 +1,85 @@
+{
+  "source_id": "payment",
+  "label": "Payment history",
+  "description": "월 구독 상품 결제 시도 이력. status는 S=성공, F=실패 코드다. 시각은 한국시간.",
+  "timestamp_column": "paid_at",
+  "timezone": "Asia/Seoul",
+  "event_type": {
+    "column": null,
+    "const": "payment_attempt",
+    "value_map": null,
+    "default": null
+  },
+  "action": {
+    "column": null,
+    "const": "pay",
+    "value_map": null,
+    "default": null
+  },
+  "topic": {
+    "column": "product",
+    "const": null,
+    "value_map": null,
+    "default": null
+  },
+  "outcome": {
+    "column": "status",
+    "const": null,
+    "value_map": {
+      "S": "success",
+      "F": "failure"
+    },
+    "default": "unknown"
+  },
+  "text": {
+    "column": null,
+    "const": "",
+    "value_map": null,
+    "default": null
+  },
+  "identity": {
+    "namespace": "customer_no",
+    "customer_column": "customer_no",
+    "link_method": "exact",
+    "confidence": 1.0
+  },
+  "dimensions": {
+    "pay_method": {
+      "column": "pay_method",
+      "semantic_type": "category",
+      "description": "결제 수단",
+      "pii_classification": "none",
+      "masking": null
+    },
+    "product": {
+      "column": "product",
+      "semantic_type": "category",
+      "description": "구독 상품 유형",
+      "pii_classification": "none",
+      "masking": null
+    },
+    "auto_renew": {
+      "column": "auto_renew",
+      "semantic_type": "boolean",
+      "description": "자동 갱신 여부",
+      "pii_classification": "none",
+      "masking": null
+    },
+    "email": {
+      "column": "email",
+      "semantic_type": "identifier",
+      "description": "고객 이메일 주소",
+      "pii_classification": "direct_identifier",
+      "masking": "hash"
+    }
+  },
+  "measures": {
+    "amount": {
+      "column": "amount",
+      "semantic_type": "integer",
+      "description": "결제 금액",
+      "unit": "KRW"
+    }
+  },
+  "status": "approved"
+}
