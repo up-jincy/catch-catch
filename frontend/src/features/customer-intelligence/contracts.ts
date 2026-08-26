@@ -370,12 +370,8 @@ export interface RankedCustomer {
   last_event_at: string | null;
 }
 
-export type EventType =
-  | "search"
-  | "feedback"
-  | "digital_behavior"
-  | "subscription"
-  | "voc";
+// Open vocabulary: per-source membership is enforced by the backend source manifest.
+export type EventType = string;
 
 export interface JourneyEvent {
   event_id: string;

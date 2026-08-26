@@ -2,13 +2,22 @@
 
 from typing import Annotated, Literal, Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, FiniteFloat, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    FiniteFloat,
+    StringConstraints,
+    model_validator,
+)
 
 from customer_signal.domain.types import DimensionValue, MeasureValue, SourceId
 
 
 type Scalar = str | int | float | bool | None
-type EventType = Literal["search", "feedback", "digital_behavior", "subscription", "voc"]
+# Open vocabulary: per-source membership is enforced by SourceManifest.validate_event.
+type EventType = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{1,63}$")]
 type IdentityLinkType = Literal["EXACT", "DECLARED", "SYNTHETIC"]
 type IdentityConfidence = Annotated[FiniteFloat, Field(ge=0, le=1)]
 
