@@ -32,6 +32,7 @@ from customer_signal.data.source_registry import SourceRegistry
 from customer_signal.domain.models import EvidenceRecord
 from customer_signal.domain.sources import PublicSourceList, PublicSourceManifest
 from customer_signal.mcp_server import create_mcp_server
+from customer_signal.onboarding.adapter import CompositeEvidenceProvider, load_onboarded_adapters
 from customer_signal.runtime.coordinator import (
     RunCoordinator,
     RunNotCompletedError,
@@ -170,9 +171,11 @@ def _default_dependencies(settings: Settings) -> ApiDependencies:
         synthetic_source_manifest(source_id, dataset.events) for source_id in _BUILT_IN_SOURCE_IDS
     ]
     adapters = [SyntheticDuckDBAdapter(repository, manifest) for manifest in manifests]
+    onboarded = load_onboarded_adapters(settings.onboarded_sources_dir)
+    evidence = _RepositoryEvidenceProvider(repository)
     registry = SourceRegistry(
-        adapters,
-        evidence=_RepositoryEvidenceProvider(repository),
+        [*adapters, *onboarded],
+        evidence=CompositeEvidenceProvider(evidence, onboarded) if onboarded else evidence,
     )
     executor = PrimitiveExecutor(
         registry=registry,
@@ -221,9 +224,20 @@ def _default_dependencies(settings: Settings) -> ApiDependencies:
         mcp_server=mcp_server,
         registry=registry,
         artifact_store=artifact_store,
-        source_ids=_BUILT_IN_SOURCE_IDS,
+        source_ids=(
+            *_BUILT_IN_SOURCE_IDS,
+            *(adapter.describe().source_id for adapter in onboarded),
+        ),
         generic_default_mode=settings.resolved_agent_mode,
     )
+
+
+_OPENAPI_TAGS = [
+    {"name": "system", "description": "서비스 상태 확인"},
+    {"name": "sources", "description": "분석에 사용할 수 있는 공개 Source 목록"},
+    {"name": "runs", "description": "분석 Run 생성, 상태 조회, SSE 이벤트, 후속 조회"},
+    {"name": "run-artifacts", "description": "완료된 Run Artifact 조회와 다운로드"},
+]
 
 
 def create_app(
@@ -243,7 +257,17 @@ def create_app(
         finally:
             await resolved.coordinator.close()
 
-    app = FastAPI(lifespan=combine_lifespans(mcp_http_app.lifespan, api_lifespan))
+    app = FastAPI(
+        title="Customer Signal API",
+        version="0.1.0",
+        description=(
+            "합성 고객 신호 분석 데모의 Run API입니다. "
+            "전체 엔드포인트 정리는 docs/api-endpoints.md 를 참고합니다. "
+            "`/mcp` 경로에는 별도 MCP 서버가 mount 되어 있어 이 문서에는 나타나지 않습니다."
+        ),
+        openapi_tags=_OPENAPI_TAGS,
+        lifespan=combine_lifespans(mcp_http_app.lifespan, api_lifespan),
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[resolved_settings.frontend_origin],
@@ -291,11 +315,11 @@ def create_app(
             ) from error
         return cursor
 
-    @app.get("/health")
+    @app.get("/health", tags=["system"], summary="서비스 상태 확인")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/api/sources")
+    @app.get("/api/sources", tags=["sources"], summary="공개 Source 목록 조회")
     async def list_sources() -> PublicSourceList:
         if resolved.registry is None:
             return PublicSourceList(items=[])
@@ -304,7 +328,12 @@ def create_app(
             items=[PublicSourceManifest.from_internal(item) for item in manifests]
         )
 
-    @app.post("/api/runs", status_code=status.HTTP_202_ACCEPTED)
+    @app.post(
+        "/api/runs",
+        status_code=status.HTTP_202_ACCEPTED,
+        tags=["runs"],
+        summary="분석 Run 생성",
+    )
     async def create_run(
         request: RunRequest,
         mode: RequestedAgentMode | None = Query(default=None),
@@ -333,6 +362,8 @@ def create_app(
     @app.post(
         "/api/runs/{run_id}/clarification",
         status_code=status.HTTP_202_ACCEPTED,
+        tags=["runs"],
+        summary="Clarification 답변 제출",
     )
     async def answer_clarification(
         run_id: str,
@@ -357,11 +388,16 @@ def create_app(
             events_url=f"{status_url}/events",
         )
 
-    @app.get("/api/runs/{run_id}")
+    @app.get("/api/runs/{run_id}", tags=["runs"], summary="Run 상태 조회")
     async def get_run(run_id: str) -> RunSnapshot:
         return snapshot_or_404(run_id)
 
-    @app.get("/api/runs/{run_id}/events", response_class=EventSourceResponse)
+    @app.get(
+        "/api/runs/{run_id}/events",
+        response_class=EventSourceResponse,
+        tags=["runs"],
+        summary="Run 이벤트 SSE 스트림",
+    )
     async def stream_run_events(
         run_id: str,
         cursor: int = Depends(event_cursor),
@@ -377,7 +413,11 @@ def create_app(
                 },
             )
 
-    @app.get("/api/runs/{run_id}/customers/{customer_id}/journey")
+    @app.get(
+        "/api/runs/{run_id}/customers/{customer_id}/journey",
+        tags=["runs"],
+        summary="고객 Journey 조회",
+    )
     async def get_journey(run_id: str, customer_id: str) -> CustomerJourneyResult:
         try:
             return resolved.coordinator.get_journey(run_id, customer_id)
@@ -388,7 +428,11 @@ def create_app(
         except RunNotCompletedError as error:
             raise HTTPException(status_code=409, detail="Run is not completed") from error
 
-    @app.get("/api/runs/{run_id}/evidence/{evidence_id}")
+    @app.get(
+        "/api/runs/{run_id}/evidence/{evidence_id}",
+        tags=["runs"],
+        summary="마스킹 Evidence 조회",
+    )
     async def get_evidence(run_id: str, evidence_id: str) -> EvidenceResult:
         try:
             return resolved.coordinator.get_evidence(run_id, evidence_id)
@@ -399,21 +443,38 @@ def create_app(
         except RunNotCompletedError as error:
             raise HTTPException(status_code=409, detail="Run is not completed") from error
 
-    @app.get("/api/run-artifacts", response_model=ArtifactListResponse)
+    @app.get(
+        "/api/run-artifacts",
+        response_model=ArtifactListResponse,
+        tags=["run-artifacts"],
+        summary="Run Artifact 목록 조회",
+    )
     async def list_run_artifacts() -> ArtifactListResponse:
         if resolved.artifact_store is None:
             return ArtifactListResponse(artifacts=[])
         return ArtifactListResponse(artifacts=resolved.artifact_store.list_summaries())
 
-    @app.get("/api/run-artifacts/{run_id}")
+    @app.get(
+        "/api/run-artifacts/{run_id}",
+        tags=["run-artifacts"],
+        summary="Run Artifact 단건 조회",
+    )
     async def get_run_artifact(run_id: str):
         return artifact_or_404(run_id)
 
-    @app.get("/api/run-artifacts/{run_id}/document")
+    @app.get(
+        "/api/run-artifacts/{run_id}/document",
+        tags=["run-artifacts"],
+        summary="Run 문서 렌더링 조회",
+    )
     async def get_run_document(run_id: str):
         return render_document(artifact_or_404(run_id))
 
-    @app.get("/api/run-artifacts/{run_id}/download.json")
+    @app.get(
+        "/api/run-artifacts/{run_id}/download.json",
+        tags=["run-artifacts"],
+        summary="Run Artifact JSON 다운로드",
+    )
     async def download_run_json(run_id: str) -> Response:
         artifact = artifact_or_404(run_id)
         return Response(
@@ -422,7 +483,11 @@ def create_app(
             headers={"Content-Disposition": f'attachment; filename="{artifact.run_id}.json"'},
         )
 
-    @app.get("/api/run-artifacts/{run_id}/download.md")
+    @app.get(
+        "/api/run-artifacts/{run_id}/download.md",
+        tags=["run-artifacts"],
+        summary="Run 보고서 Markdown 다운로드",
+    )
     async def download_run_markdown(run_id: str) -> Response:
         artifact = artifact_or_404(run_id)
         return Response(

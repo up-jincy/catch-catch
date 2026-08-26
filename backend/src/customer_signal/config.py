@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     gemini_fallback_model: str = "gemini-3.6-flash"
     database_path: Path = Path("data/generated/customer_signal.duckdb")
     artifact_directory: Path = Path("data/run-artifacts")
+    onboarded_sources_dir: Path = Path("data/onboarded-sources")
     api_host: str = "127.0.0.1"
     api_port: int = 8000
     frontend_origin: str = "http://127.0.0.1:3000"

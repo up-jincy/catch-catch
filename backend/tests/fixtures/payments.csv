@@ -1,0 +1,9 @@
+paid_at,customer_no,pay_method,status,product,auto_renew,amount,email
+2026-07-01T09:30:00,CU-1001,card,S,mobile_plan,true,45000,kim@example.com
+2026-07-01T10:15:00,CU-1002,bank,S,internet,false,38000,lee@example.com
+2026-07-02T11:00:00,CU-1001,card,F,mobile_plan,true,45000,kim@example.com
+2026-07-02T11:05:00,CU-1001,card,S,mobile_plan,true,45000,kim@example.com
+2026-07-03T14:20:00,CU-1003,mobile,F,iptv,false,22000,park@example.com
+2026-07-04T09:00:00,CU-1003,mobile,F,iptv,false,22000,park@example.com
+2026-07-05T16:45:00,CU-1002,bank,S,internet,false,38000,lee@example.com
+2026-07-06T08:30:00,CU-1004,card,S,mobile_plan,true,55000,choi@example.com
