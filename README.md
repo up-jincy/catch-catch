@@ -130,7 +130,8 @@ LANGFUSE_TRACING_ENVIRONMENT=development
 
 | 실행 | 동작 |
 | --- | --- |
-| `make dev` | 키가 있으면 Gemini를 사용하고 Provider 또는 검증 실패 시 공개 전환 이벤트를 남긴 뒤 Fixture로 전환하는 `auto` 모드 |
+| `make dev` | 키 누락과 Provider 실패를 명시적 Run 오류로 표시하는 Gemini 전용 모드 (기본, `make dev-gemini`와 동일) |
+| `make dev-auto` | 키가 있으면 Gemini를 사용하고 Provider 또는 검증 실패 시 공개 전환 이벤트를 남긴 뒤 Fixture로 전환하는 `auto` 모드 |
 | `make dev-fixture` | API 키와 외부 네트워크가 필요 없는 결정론적 Fixture 모드 |
 | `make dev-gemini` | 키 누락과 Provider 실패를 명시적 Run 오류로 표시하는 Gemini 전용 모드 |
 
@@ -166,7 +167,8 @@ export 전에 마스킹합니다. 화면과 Trace에는 내부 chain-of-thought 
 | --- | --- |
 | `make setup` | `uv sync`, `npm ci`, Playwright Chromium 설치 |
 | `make seed` | `seed=20260819` 데이터로 DuckDB 원자적 재생성 |
-| `make dev` | Auto Backend `8000`, Frontend `3000` 실행 |
+| `make dev` | Gemini Backend `8000`, Frontend `3000` 실행 (기본) |
+| `make dev-auto` | Auto Backend `8000`, Frontend `3000` 실행 |
 | `make dev-fixture` | Fixture Backend `8000`, Frontend `3000` 실행 |
 | `make dev-gemini` | Gemini Backend `8000`, Frontend `3000` 실행 |
 | `make test` | Backend pytest와 Ruff, Frontend Vitest와 typecheck, production build |

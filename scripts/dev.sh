@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-mode="${1:-auto}"
+mode="${1:-gemini}"
 case "$mode" in
   auto|fixture|gemini) ;;
   *)
@@ -29,17 +29,23 @@ if [[ -n "$env_file" ]]; then
   fi
 elif [[ -f "$repository_dir/.env" ]]; then
   env_file="$repository_dir/.env"
+elif [[ -f "$repository_dir/backend/.env" ]]; then
+  env_file="$repository_dir/backend/.env"
 else
   common_dir="$(git -C "$repository_dir" rev-parse --git-common-dir)"
   [[ "$common_dir" = /* ]] || common_dir="$repository_dir/$common_dir"
   main_checkout="$(cd "$(dirname "$common_dir")" && pwd -P)"
   if [[ -f "$main_checkout/.env" ]]; then
     env_file="$main_checkout/.env"
+  elif [[ -f "$main_checkout/backend/.env" ]]; then
+    env_file="$main_checkout/backend/.env"
   fi
 fi
 
-env_args=()
-env_isolation=()
+# macOS bash 3.2 treats empty-array expansion as unbound under `set -u`,
+# so both arrays always hold at least one harmless element.
+env_args=(--no-env-file)
+env_isolation=(env)
 if [[ -n "$env_file" ]]; then
   env_args=(--env-file "$env_file")
   env_isolation=(

@@ -11,14 +11,15 @@ API_BASE_URL := http://$(BACKEND_HOST):$(BACKEND_PORT)
 ARTIFACT_DIRECTORY := data/run-artifacts
 
 .DEFAULT_GOAL := help
-.PHONY: help setup seed dev dev-fixture dev-gemini serve-backend-fixture serve-frontend test e2e e2e-generic e2e-legacy
+.PHONY: help setup seed dev dev-auto dev-fixture dev-gemini serve-backend-fixture serve-frontend test e2e e2e-generic e2e-legacy
 
 help:
 	@echo "make setup        의존성과 Playwright Chromium 설치"
 	@echo "make seed         seed=$(SEED) 합성 DuckDB 생성"
-	@echo "make dev          auto 모드로 Backend와 Frontend 실행"
+	@echo "make dev          Gemini 모드로 Backend와 Frontend 실행 (기본)"
+	@echo "make dev-auto     API Key 유무로 모드를 고르는 auto 모드로 실행"
 	@echo "make dev-fixture  결정론적 fixture 모드로 실행"
-	@echo "make dev-gemini   Gemini 전용 모드로 실행"
+	@echo "make dev-gemini   Gemini 전용 모드로 실행 (make dev와 동일)"
 	@echo "make test         Backend/Frontend 전체 자동 검증"
 	@echo "make e2e          fixture 기반 실제 브라우저 E2E"
 	@echo "make e2e-generic  범용 분석 Desktop/Mobile E2E"
@@ -34,6 +35,9 @@ seed:
 		--database "$(DATABASE_PATH)" --seed "$(SEED)"
 
 dev:
+	bash scripts/dev.sh gemini
+
+dev-auto:
 	bash scripts/dev.sh auto
 
 dev-fixture:
@@ -54,14 +58,20 @@ serve-backend-fixture: seed
 			fi; \
 		elif [[ -f "$$repository_dir/.env" ]]; then \
 			env_file="$$repository_dir/.env"; \
+		elif [[ -f "$$repository_dir/backend/.env" ]]; then \
+			env_file="$$repository_dir/backend/.env"; \
 		else \
 			common_dir="$$(git -C "$$repository_dir" rev-parse --git-common-dir)"; \
 			[[ "$$common_dir" = /* ]] || common_dir="$$repository_dir/$$common_dir"; \
 			main_checkout="$$(cd "$$(dirname "$$common_dir")" && pwd -P)"; \
-			[[ ! -f "$$main_checkout/.env" ]] || env_file="$$main_checkout/.env"; \
+			if [[ -f "$$main_checkout/.env" ]]; then \
+				env_file="$$main_checkout/.env"; \
+			elif [[ -f "$$main_checkout/backend/.env" ]]; then \
+				env_file="$$main_checkout/backend/.env"; \
+			fi; \
 		fi; \
-		env_args=(); \
-		env_isolation=(); \
+		env_args=(--no-env-file); \
+		env_isolation=(env); \
 		if [[ -n "$$env_file" ]]; then \
 			env_args=(--env-file "$$env_file"); \
 			env_isolation=( \
