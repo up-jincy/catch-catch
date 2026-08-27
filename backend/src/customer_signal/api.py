@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from uuid import UUID
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.sse import EventSourceResponse, ServerSentEvent
@@ -32,11 +33,15 @@ from customer_signal.data.source_registry import SourceRegistry
 from customer_signal.domain.models import EvidenceRecord
 from customer_signal.domain.sources import PublicSourceList, PublicSourceManifest
 from customer_signal.journal.journal import EventJournal
+from customer_signal.journal.journal import UnknownRunError as UnknownJournalRunError
 from customer_signal.journal.sqlite import SQLiteEventJournal
 from customer_signal.mcp_server import create_mcp_server
 from customer_signal.packs.customer_signal import CustomerSignalPack
 from customer_signal.packs.kernel import PackKernel
 from customer_signal.packs.registry import AnalysisPackRegistry
+from customer_signal.presentation.generic import GenericRunProjector
+from customer_signal.presentation.intents import PresentationIntent
+from customer_signal.presentation.projector import fold_intents
 from customer_signal.onboarding.adapter import CompositeEvidenceProvider, load_onboarded_adapters
 from customer_signal.runtime.coordinator import (
     RunCoordinator,
@@ -78,6 +83,16 @@ class ClarificationAnswer(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     answer: str = Field(min_length=1, max_length=1_000)
+
+
+class PresentationReplay(BaseModel):
+    """Presentation Intents recomputed from a Run's Canonical Run Events."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    run_id: str
+    pack_id: str | None
+    intents: list[PresentationIntent]
 
 
 _BUILT_IN_SOURCE_IDS = (
@@ -440,6 +455,34 @@ def create_app(
                     "payload": event.payload,
                 },
             )
+
+    @app.get(
+        "/api/runs/{run_id}/presentation",
+        tags=["runs"],
+        summary="Run Presentation Intent 재생",
+    )
+    async def get_run_presentation(run_id: str) -> PresentationReplay:
+        if resolved.journal is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        try:
+            parsed_run_id = UUID(run_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail="Run not found") from error
+        try:
+            events = [event async for event in resolved.journal.read(parsed_run_id)]
+        except UnknownJournalRunError as error:
+            raise HTTPException(status_code=404, detail="Run not found") from error
+        pack_id: str | None = events[0].pack.pack_id if events else None
+        projector = GenericRunProjector()
+        if pack_id is not None and resolved.packs is not None and pack_id in resolved.packs:
+            pack_projector = getattr(resolved.packs.get(pack_id), "projector", None)
+            if pack_projector is not None:
+                projector = pack_projector
+        return PresentationReplay(
+            run_id=run_id,
+            pack_id=pack_id,
+            intents=fold_intents(projector, events),
+        )
 
     @app.get(
         "/api/runs/{run_id}/customers/{customer_id}/journey",

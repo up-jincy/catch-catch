@@ -36,6 +36,7 @@ Backend 를 실행하면 FastAPI 가 다음 경로를 자동으로 제공합니�
 | POST | `/api/runs/{run_id}/clarification` | Clarification 대기 중인 Run 에 답변 제출 | `202` + `RunAccepted` |
 | GET | `/api/runs/{run_id}` | Run 상태 스냅샷 조회 | `RunSnapshot` |
 | GET | `/api/runs/{run_id}/events` | Run 이벤트 SSE 스트림. `Last-Event-ID` 헤더로 재접속 커서 지정 | SSE |
+| GET | `/api/runs/{run_id}/presentation` | Canonical Run Event 에서 재계산한 Presentation Intent 목록 조회 | `PresentationReplay` |
 | GET | `/api/runs/{run_id}/customers/{customer_id}/journey` | 완료된 Run 의 고객 Journey 조회 | `CustomerJourneyResult` |
 | GET | `/api/runs/{run_id}/evidence/{evidence_id}` | 완료된 Run 의 마스킹 Evidence 조회 | `EvidenceResult` |
 
