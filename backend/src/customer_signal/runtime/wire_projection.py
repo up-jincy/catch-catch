@@ -11,8 +11,9 @@ from __future__ import annotations
 
 from typing import cast
 
-from pydantic import JsonValue
+from pydantic import JsonValue, ValidationError
 
+from customer_signal.agent.contracts import RunRequest
 from customer_signal.journal.events import CanonicalRunEvent
 from customer_signal.journal.journal import EventJournal
 from customer_signal.runtime.events import GenericRunnerEventType, validate_generic_event
@@ -115,21 +116,46 @@ async def restore_wire_events(journal: EventJournal, store: RunStore) -> int:
 
     restored = 0
     for run_id in await journal.list_run_ids():
+        run_key = str(run_id)
         try:
-            store.get_snapshot(str(run_id))
+            events = [event async for event in journal.read(run_id)]
         except UnknownRunError:
             continue
+        if not events:
+            continue
+        try:
+            store.get_snapshot(run_key)
+        except UnknownRunError:
+            if not _register_from_journal(store, run_key, events[0]):
+                continue
         wire_history = []
         try:
-            async for event in journal.read(run_id):
+            for event in events:
                 for wire_type, payload in wire_events_for(event):
                     canonical_payload = validate_generic_event(wire_type, payload)
                     wire_history.append((wire_type, canonical_payload, event.occurred_at))
-            store.restore_events(str(run_id), wire_history)
+            store.restore_events(run_key, wire_history)
         except (UnknownRunError, ValueError):
             continue
         restored += 1
     return restored
+
+
+def _register_from_journal(
+    store: RunStore,
+    run_key: str,
+    opened: CanonicalRunEvent,
+) -> bool:
+    """Recover a journal Run whose snapshot Artifact never made it to disk."""
+
+    if opened.kind != "run.opened":
+        return False
+    try:
+        request = RunRequest.model_validate(opened.payload.get("input"))
+        store.register_restored_run(run_key, request, created_at=opened.occurred_at)
+    except (ValidationError, ValueError):
+        return False
+    return True
 
 
 __all__ = ["WireEvent", "restore_wire_events", "wire_events_for"]

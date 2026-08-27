@@ -221,6 +221,15 @@ async def test_pack_degraded_maps_to_run_degraded() -> None:
     assert committed[-1].payload["limitations"] == [limitation]
 
 
+async def test_pack_degraded_without_limitations_still_terminates_safely() -> None:
+    kernel = PackKernel(InMemoryEventJournal())
+    pack = ScriptedPack([GoalDraft(value={"title": "목표"}), PackDegraded(())])
+    result, committed = await run_pack(pack, kernel)
+    assert result.status == "degraded"
+    assert result.limitations
+    assert committed[-1].kind == "run.degraded"
+
+
 async def test_pack_domain_error_keeps_declared_public_code() -> None:
     kernel = PackKernel(InMemoryEventJournal())
     pack = ScriptedPack(

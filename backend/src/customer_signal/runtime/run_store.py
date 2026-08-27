@@ -7,7 +7,7 @@ import json
 from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Literal, cast
 from uuid import UUID, uuid4
 
 from pydantic import (
@@ -235,6 +235,30 @@ class RunStore:
         )
         return self.get_snapshot(run_id)
 
+    def register_restored_run(
+        self,
+        run_id: str,
+        request: RunRequest,
+        *,
+        requested_mode: RequestedAgentMode = "fixture",
+        created_at: datetime | None = None,
+    ) -> None:
+        """Register a journal-known Run that has no snapshot Artifact."""
+
+        UUID(run_id)
+        if run_id in self._runs:
+            raise ValueError("Run is already registered")
+        now = created_at or _utc_now()
+        self._runs[run_id] = _RunState(
+            run_id=run_id,
+            request=request.model_copy(deep=True),
+            run_kind="generic",
+            requested_mode=requested_mode,
+            status="queued",
+            created_at=now,
+            updated_at=now,
+        )
+
     def restore_events(
         self,
         run_id: str,
@@ -244,7 +268,9 @@ class RunStore:
 
         Snapshot Artifacts restore state without events; the EventJournal is
         the source of truth for history, so replayed wire events supersede the
-        artifact's ``last_event_id`` offset.
+        artifact's ``last_event_id`` offset.  A Run whose snapshot never saw
+        its terminal state (crash or shutdown mid-run) is reconciled from the
+        journal instead of staying a zombie in ``running``.
         """
 
         state = self._require(run_id)
@@ -261,6 +287,47 @@ class RunStore:
         ]
         state.events = restored
         state.event_id_offset = 0
+        if state.status in {"queued", "running"}:
+            self._refold_restored_state(state)
+
+    def _refold_restored_state(self, state: _RunState) -> None:
+        state.goal = None
+        state.clarification = None
+        state.plan = None
+        state.plan_history = []
+        state.facts = []
+        state.notes = []
+        state.report = None
+        state.limitations = []
+        state.error = None
+        error_payload: dict[str, JsonValue] | None = None
+        done_payload: dict[str, JsonValue] | None = None
+        for event in state.events:
+            if event.type == "error":
+                error_payload = event.payload
+                continue
+            if event.type == "done":
+                done_payload = event.payload
+                continue
+            try:
+                self._apply_generic_event(state, event)
+            except (KeyError, ValueError):
+                continue
+        if done_payload is not None:
+            status = done_payload.get("status")
+            if status in {"completed", "degraded", "failed"}:
+                state.status = cast(RunStatus, status)
+            limitations = done_payload.get("limitations", [])
+            if isinstance(limitations, list):
+                state.limitations = [str(item) for item in limitations]
+            if state.status == "failed":
+                state.error = _restored_error(error_payload)
+        elif state.events and state.events[-1].type == "clarification_required":
+            state.status = "awaiting_clarification"
+        else:
+            state.status = "failed"
+            state.error = _restored_error(error_payload)
+        state.updated_at = state.events[-1].created_at if state.events else state.updated_at
 
     def get_snapshot(self, run_id: str) -> RunSnapshot:
         return self._snapshot(self._require(run_id))
@@ -519,6 +586,18 @@ class RunStore:
 
 def _json(value: JsonValue) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _restored_error(payload: dict[str, JsonValue] | None) -> PublicRunError:
+    if payload is not None:
+        try:
+            return PublicRunError.model_validate_json(_json(payload))
+        except ValueError:
+            pass
+    return PublicRunError(
+        code="run_interrupted",
+        message="서버 재시작으로 분석이 중단됐습니다.",
+    )
 
 
 __all__ = [

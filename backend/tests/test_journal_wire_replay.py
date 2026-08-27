@@ -166,6 +166,94 @@ def test_wire_projection_maps_every_canonical_kind() -> None:
     ]
 
 
+async def test_restore_reconciles_journal_runs_without_artifacts() -> None:
+    from uuid import uuid4 as new_uuid
+
+    from customer_signal.journal.events import EventDraft
+    from customer_signal.journal.memory import InMemoryEventJournal
+    from customer_signal.runtime.run_store import RunStore
+    from customer_signal.runtime.wire_projection import restore_wire_events
+
+    journal = InMemoryEventJournal()
+    request_input = {
+        "question": "요금제 문의 분석",
+        "start_at": START_AT,
+        "end_at": END_AT,
+        "enabled_sources": SOURCES,
+    }
+
+    failed_run = new_uuid()
+    await journal.create(
+        failed_run,
+        EventDraft(
+            kind="run.opened",
+            pack=PACK,
+            payload={"status": "running", "input": request_input},
+        ),
+        idempotency_key="cmd-1",
+    )
+    await journal.append(
+        failed_run,
+        1,
+        [
+            EventDraft(
+                kind="run.failed",
+                pack=PACK,
+                payload={
+                    "status": "failed",
+                    "limitations": [],
+                    "error": {"code": "analysis_failed", "message": "분석 실패"},
+                },
+            )
+        ],
+    )
+
+    interrupted_run = new_uuid()
+    await journal.create(
+        interrupted_run,
+        EventDraft(
+            kind="run.opened",
+            pack=PACK,
+            payload={"status": "running", "input": request_input},
+        ),
+        idempotency_key="cmd-2",
+    )
+    await journal.append(
+        interrupted_run,
+        1,
+        [
+            EventDraft(
+                kind="activity.changed",
+                pack=PACK,
+                payload={
+                    "activity": "step",
+                    "phase": "started",
+                    "step_id": "step-1",
+                    "primitive": "catalog_sources",
+                    "selection_reason": "확인",
+                    "started_at": "2026-08-20T01:00:00Z",
+                },
+            )
+        ],
+    )
+
+    store = RunStore()
+    restored = await restore_wire_events(journal, store)
+    assert restored == 2
+
+    failed_snapshot = store.get_snapshot(str(failed_run))
+    assert failed_snapshot.status == "failed"
+    assert failed_snapshot.error is not None
+    assert failed_snapshot.error.code == "analysis_failed"
+    replayed = [event async for event in store.stream_events(str(failed_run))]
+    assert [event.type for event in replayed] == ["run_started", "error", "done"]
+
+    interrupted_snapshot = store.get_snapshot(str(interrupted_run))
+    assert interrupted_snapshot.status == "failed"
+    assert interrupted_snapshot.error is not None
+    assert interrupted_snapshot.error.code == "run_interrupted"
+
+
 def _settings(tmp_path: Path) -> Settings:
     return Settings(
         agent_mode="fixture",

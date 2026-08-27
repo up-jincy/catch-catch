@@ -389,6 +389,7 @@ class RunCoordinator:
                 message="분석 실행이 취소됐습니다.",
             )
             await self._finalize_generic_failure(run_id, public_error, published_terminal)
+            self._drain_outcome(run_id)
             raise
         except Exception:
             public_error = PublicRunError(
@@ -396,6 +397,7 @@ class RunCoordinator:
                 message="분석 실행에 실패했습니다.",
             )
             await self._finalize_generic_failure(run_id, public_error, published_terminal)
+            self._drain_outcome(run_id)
             return
 
         if result.status == "awaiting_input":
@@ -442,6 +444,16 @@ class RunCoordinator:
         except InvalidRunTransitionError:
             pass
         self._checkpoint(run_id)
+
+    def _drain_outcome(self, run_id: str) -> None:
+        """Release a Pack-held outcome the failure path never consumed."""
+
+        if self._packs is None or "customer_signal" not in self._packs:
+            return
+        pack = self._packs.get("customer_signal")
+        take_outcome = getattr(pack, "take_outcome", None)
+        if take_outcome is not None:
+            take_outcome(UUID(run_id))
 
     def _customer_signal_runtime(self) -> tuple[PackKernel, CustomerSignalPack]:
         if self._kernel is None or self._packs is None:

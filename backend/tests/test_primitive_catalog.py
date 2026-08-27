@@ -98,3 +98,10 @@ def test_contract_file_matches_generated_document() -> None:
     assert document["schema_version"] == 1
     names = [primitive["name"] for primitive in document["primitives"]]
     assert names == list(PRIMITIVE_DEFINITIONS)
+
+
+def test_document_renderer_labels_cover_every_primitive() -> None:
+    from customer_signal.domain.primitive_catalog import primitive_names
+    from customer_signal.runtime.document_renderer import _PRIMITIVE_LABELS
+
+    assert set(_PRIMITIVE_LABELS) == set(primitive_names())

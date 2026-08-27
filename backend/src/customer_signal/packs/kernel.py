@@ -134,26 +134,10 @@ class PackKernel:
             )
             expected_sequence = opened.sequence
             progress.observe(opened)
-            await _notify(on_committed, (opened,))
         else:
             async for event in self._journal.read(run_id):
                 progress.observe(event)
             expected_sequence = await self._journal.last_sequence(run_id)
-            resumed_events = await self._append(
-                run_id,
-                expected_sequence,
-                [
-                    EventDraft(
-                        kind="interaction.changed",
-                        pack=pack_ref,
-                        payload={"phase": "answered", **resume_payload},
-                    ),
-                    EventDraft(kind="run.resumed", pack=pack_ref),
-                ],
-            )
-            expected_sequence = resumed_events[-1].sequence
-            progress.observe(resumed_events[0])
-            await _notify(on_committed, resumed_events)
 
         context = PackContext(
             run_id=run_id,
@@ -164,6 +148,24 @@ class PackKernel:
         iterator = pack.execute(request, context)
         try:
             try:
+                if resume_payload is None:
+                    await _notify(on_committed, (opened,))
+                else:
+                    resumed_events = await self._append(
+                        run_id,
+                        expected_sequence,
+                        [
+                            EventDraft(
+                                kind="interaction.changed",
+                                pack=pack_ref,
+                                payload={"phase": "answered", **resume_payload},
+                            ),
+                            EventDraft(kind="run.resumed", pack=pack_ref),
+                        ],
+                    )
+                    expected_sequence = resumed_events[-1].sequence
+                    progress.observe(resumed_events[0])
+                    await _notify(on_committed, resumed_events)
                 async with asyncio.timeout(self._timeout_seconds):
                     async for emission in iterator:
                         drafts, next_outcome = self._drafts_for(pack, emission, progress)
@@ -195,7 +197,11 @@ class PackKernel:
                 run_id, expected_sequence, pack_ref, error, on_committed
             )
         except PackDegraded as degraded:
-            outcome = OutcomeDraft(status="degraded", limitations=list(degraded.limitations))
+            outcome = OutcomeDraft(
+                status="degraded",
+                limitations=list(degraded.limitations)
+                or ["분석 결과가 없어 제한적으로 종료했습니다."],
+            )
         except PackDomainError as domain_error:
             outcome = OutcomeDraft(status="failed", error=domain_error.public_error)
         except (PackContractViolation, ValidationError):
@@ -220,8 +226,10 @@ class PackKernel:
             return await self._terminal_failure(
                 run_id, expected_sequence, pack_ref, error, on_committed
             )
-        return await self._commit_outcome(
-            run_id, expected_sequence, pack_ref, outcome, progress, on_committed
+        return await _finish_even_if_cancelled(
+            self._commit_outcome(
+                run_id, expected_sequence, pack_ref, outcome, progress, on_committed
+            )
         )
 
     def _validate_input(
@@ -365,7 +373,9 @@ class PackKernel:
                 pack=pack_ref,
                 payload=payload,
             )
-        committed = await self._append(run_id, expected_sequence, [draft])
+        committed = await self._append(
+            run_id, expected_sequence, [draft], reload_on_conflict=True
+        )
         await _notify(on_committed, committed)
         return PackRunResult(
             run_id=run_id,
@@ -397,6 +407,7 @@ class PackKernel:
                     },
                 )
             ],
+            reload_on_conflict=True,
         )
         await _notify(on_committed, committed)
         return PackRunResult(
@@ -411,15 +422,37 @@ class PackKernel:
         run_id: UUID,
         expected_sequence: int,
         drafts: Sequence[EventDraft],
+        *,
+        reload_on_conflict: bool = False,
     ) -> tuple[CanonicalRunEvent, ...]:
         try:
             return await self._journal.append(run_id, expected_sequence, drafts)
         except SequenceConflictError as conflict:
+            if not reload_on_conflict:
+                raise
             return await self._journal.append(run_id, conflict.latest_sequence, drafts)
 
 
 def _canonical_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+async def _finish_even_if_cancelled(coro):
+    """Complete an in-flight terminal commit even when the caller is cancelled.
+
+    A terminal event that already reached the journal must not leave the
+    kernel reporting failure: the commit finishes and the result is returned,
+    so the caller records a state consistent with the journal.
+    """
+
+    task = asyncio.ensure_future(coro)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError as cancelled:
+        try:
+            return await task
+        except BaseException:
+            raise cancelled from None
 
 
 async def _notify(

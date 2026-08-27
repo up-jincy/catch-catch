@@ -81,10 +81,7 @@ class SQLiteEventJournal:
             raise InvalidEventBatchError("the create() event must be run.opened")
         if not idempotency_key.strip():
             raise InvalidEventBatchError("idempotency_key must be nonblank")
-        async with self._lock:
-            event = await asyncio.to_thread(
-                self._create_sync, run_id, first, idempotency_key
-            )
+        event = await self._write(self._create_sync, run_id, first, idempotency_key)
         await self._notify()
         return event
 
@@ -95,12 +92,32 @@ class SQLiteEventJournal:
         drafts: Sequence[EventDraft],
     ) -> tuple[CanonicalRunEvent, ...]:
         validate_batch(drafts)
-        async with self._lock:
-            committed = await asyncio.to_thread(
-                self._append_sync, run_id, expected_sequence, list(drafts)
-            )
+        committed = await self._write(
+            self._append_sync, run_id, expected_sequence, list(drafts)
+        )
         await self._notify()
         return committed
+
+    async def _write(self, fn, *args):
+        """Run one write transaction; a cancelled caller still waits for it.
+
+        Cancelling ``asyncio.to_thread`` abandons the worker thread inside its
+        SQLite transaction while the lock would be released — a second writer
+        would then collide with the orphaned transaction and could roll back
+        its half-committed batch.  Holding the lock until the worker finishes
+        keeps every committed batch atomic and the sequence contiguous.
+        """
+
+        async with self._lock:
+            worker = asyncio.ensure_future(asyncio.to_thread(fn, *args))
+            try:
+                return await asyncio.shield(worker)
+            except asyncio.CancelledError:
+                try:
+                    await worker
+                except BaseException:
+                    pass
+                raise
 
     async def last_sequence(self, run_id: UUID) -> int:
         async with self._lock:
@@ -143,6 +160,12 @@ class SQLiteEventJournal:
                         if event.is_terminal:
                             return
                     continue
+                async with self._lock:
+                    terminal_reached = await asyncio.to_thread(
+                        self._terminal_reached_sync, run_id, cursor
+                    )
+                if terminal_reached:
+                    return
                 async with self._changed:
                     try:
                         await asyncio.wait_for(
@@ -267,6 +290,16 @@ class SQLiteEventJournal:
         except BaseException:
             connection.rollback()
             raise
+
+    def _terminal_reached_sync(self, run_id: UUID, cursor: int) -> bool:
+        row = self._connection.execute(
+            "SELECT kind, sequence FROM journal_events WHERE run_id = ?"
+            " ORDER BY sequence DESC LIMIT 1",
+            (str(run_id),),
+        ).fetchone()
+        if row is None:
+            return False
+        return row[0] in TERMINAL_EVENT_KINDS and row[1] <= cursor
 
     def _last_sequence_sync(self, run_id: UUID) -> int:
         row = self._connection.execute(

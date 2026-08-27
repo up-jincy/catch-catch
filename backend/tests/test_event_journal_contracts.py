@@ -193,6 +193,43 @@ async def test_artifact_commit_requires_versioned_value(journal) -> None:
         )
 
 
+async def test_tail_returns_promptly_when_cursor_is_at_or_past_terminal(journal) -> None:
+    run_id = uuid4()
+    await journal.create(run_id, opened(), idempotency_key="cmd-1")
+    await journal.append(run_id, 1, [completed()])
+    drained = await asyncio.wait_for(
+        _collect(journal.tail(run_id, after_sequence=2)), timeout=2
+    )
+    assert drained == []
+
+
+async def _collect(iterator) -> list[int]:
+    return [event.sequence async for event in iterator]
+
+
+async def test_sqlite_append_stays_atomic_when_the_caller_is_cancelled(
+    tmp_path: Path,
+) -> None:
+    journal = SQLiteEventJournal(tmp_path / "cancel.sqlite3")
+    run_id = uuid4()
+    await journal.create(run_id, opened(), idempotency_key="cmd-1")
+    batch = [activity() for _ in range(200)]
+
+    task = asyncio.create_task(journal.append(run_id, 1, batch))
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    last = await journal.last_sequence(run_id)
+    assert last in {1, 201}
+    events = [event async for event in journal.read(run_id)]
+    assert [event.sequence for event in events] == list(range(1, last + 1))
+    terminal = await journal.append(run_id, last, [completed()])
+    assert terminal[-1].sequence == last + 1
+    await journal.close()
+
+
 async def test_sqlite_replays_identically_after_restart(tmp_path: Path) -> None:
     path = tmp_path / "restart.sqlite3"
     first = SQLiteEventJournal(path)
