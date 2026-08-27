@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>해커톤 기민성 구조 정리</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+</head>
+<body>
+<style>
+:root {
+  --paper: #FAFBFC;
+  --ink: #1C2733;
+  --ink-soft: #4A5867;
+  --accent: #0E7C7B;
+  --accent-soft: #E3F0EF;
+  --warn: #9A6B1F;
+  --warn-soft: #F5EDDC;
+  --line: #D9E0E5;
+  --card: #FFFFFF;
+  --mono-bg: #EFF3F5;
+}
+:root:not([data-theme="light"]) { }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #10171D;
+    --ink: #E2E8ED;
+    --ink-soft: #9AA8B5;
+    --accent: #3FB8B0;
+    --accent-soft: #14312F;
+    --warn: #D2A85A;
+    --warn-soft: #33290F;
+    --line: #2A3641;
+    --card: #161F27;
+    --mono-bg: #1C2731;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #10171D;
+  --ink: #E2E8ED;
+  --ink-soft: #9AA8B5;
+  --accent: #3FB8B0;
+  --accent-soft: #14312F;
+  --warn: #D2A85A;
+  --warn-soft: #33290F;
+  --line: #2A3641;
+  --card: #161F27;
+  --mono-bg: #1C2731;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  font-size: 16px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+main { max-width: 760px; margin: 0 auto; padding: 56px 24px 96px; }
+.eyebrow {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 10px;
+}
+h1 {
+  font-size: 34px;
+  line-height: 1.25;
+  font-weight: 700;
+  margin: 0 0 8px;
+  text-wrap: balance;
+}
+.sub { color: var(--ink-soft); margin: 0 0 6px; }
+.meta {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+  color: var(--ink-soft);
+  display: flex; flex-wrap: wrap; gap: 8px 18px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  margin: 28px 0 0;
+}
+.meta strong { color: var(--accent); font-weight: 500; }
+h2 {
+  font-size: 21px;
+  font-weight: 700;
+  margin: 56px 0 4px;
+  text-wrap: balance;
+}
+h2 + p.lead { margin-top: 10px; }
+section > p { margin: 14px 0; max-width: 66ch; }
+.rule { border: 0; border-top: 1px solid var(--line); margin: 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14.5px;
+  margin: 18px 0 6px;
+}
+.table-wrap { overflow-x: auto; }
+th {
+  text-align: left;
+  font-size: 12.5px;
+  letter-spacing: .06em;
+  color: var(--ink-soft);
+  font-weight: 500;
+  padding: 8px 14px 8px 0;
+  border-bottom: 1px solid var(--ink-soft);
+  white-space: nowrap;
+}
+td {
+  padding: 9px 14px 9px 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+code, .hash {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+  background: var(--mono-bg);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+.hash { color: var(--accent); }
+.boundary-list { display: grid; gap: 10px; margin: 20px 0 0; padding: 0; list-style: none; }
+.boundary-list li {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 14px 18px;
+}
+.boundary-list b { display: block; margin-bottom: 2px; }
+.boundary-list span { color: var(--ink-soft); font-size: 14.5px; }
+.boundary-list code { font-size: 12.5px; }
+.debt {
+  background: var(--warn-soft);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--warn);
+  border-radius: 6px;
+  padding: 6px 20px 14px;
+  margin: 18px 0;
+}
+.debt ul { margin: 8px 0 0; padding-left: 20px; }
+.debt li { margin: 7px 0; font-size: 15px; }
+.debt .label { color: var(--warn); font-weight: 700; font-size: 14px; letter-spacing: .04em; }
+.status-ok, .status-part {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.status-ok { color: var(--accent); background: var(--accent-soft); }
+.status-part { color: var(--warn); background: var(--warn-soft); }
+.verify {
+  background: var(--mono-bg);
+  border-radius: 6px;
+  padding: 16px 18px;
+  overflow-x: auto;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+  line-height: 1.9;
+  margin: 16px 0;
+}
+.verify .c { color: var(--ink-soft); }
+.num { font-variant-numeric: tabular-nums; }
+.push-note {
+  margin-top: 60px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+.push-note code { font-size: 12.5px; }
+a { color: var(--accent); }
+@media (max-width: 560px) { h1 { font-size: 28px; } main { padding-top: 40px; } }
+</style>
+
+<main>
+  <p class="eyebrow">demo-1 restructure report</p>
+  <h1>해커톤 기민성 구조 정리</h1>
+  <p class="sub">데이터 원천을 하나로, 분석과 표현을 어댑터 경계 뒤로. 2026-08-28</p>
+
+  <div class="meta">
+    <span>커밋 <strong class="num">9</strong>건</span>
+    <span>backend pytest <strong class="num">593</strong> 통과</span>
+    <span>frontend vitest <strong class="num">95</strong> 통과</span>
+    <span>적대적 리뷰 <strong class="num">18</strong>건 중 <strong class="num">14</strong>건 확인, 수정 반영</span>
+  </div>
+
+  <section>
+    <h2>목표</h2>
+    <p>해커톤에서 자주 생기는 변화를 싼 변경으로 만드는 작업이었습니다.
+    새 데이터 붙이기, 표현 구조 바꾸기, 분석 방식 여러 개 붙이기 — 그리고 이 셋을 받치는
+    전제로, 흩어져 있던 실행 기록을 append-only 정본 하나로 정리했습니다.</p>
+  </section>
+
+  <section>
+    <h2>무엇이 갈라졌나</h2>
+    <ul class="boundary-list">
+      <li><b>데이터 정본 — EventJournal</b>
+        <span>모든 Run 기록은 Canonical Run Event로 SQLite 저널에 먼저 커밋됩니다.
+        SSE 스트림, 스냅샷, Artifact는 전부 파생물이고, 재시작 뒤 SSE cursor replay가
+        저널에서 복원됩니다. <code>journal/</code></span></li>
+      <li><b>분석 어댑터 — Analysis Pack</b>
+        <span>새 분석은 Pack 모듈 1개 + Registry 1줄. 방출 순서, 공개 안전성, 저장은
+        Kernel이 소유하고, 하니스 한 번 호출로 계약을 검증합니다. 두 번째 Pack
+        (SourceOverviewPack)으로 검증 완료. <code>packs/</code></span></li>
+      <li><b>분석 어휘 — Primitive 카탈로그</b>
+        <span>14곳에 흩어졌던 Primitive 지식이 정의 1건 + 핸들러 1건으로 줄었습니다.
+        빠뜨리면 fail-fast와 drift 테스트가 잡습니다.
+        <code>domain/primitive_catalog.py</code>, <code>contracts/primitive-catalog.json</code></span></li>
+      <li><b>표현 — PresentationIntent</b>
+        <span>순수 함수 프로젝터가 저널 event를 protocol 중립 Intent로 접습니다.
+        표현 변경은 프로젝터 교체이고, 분석 코드는 무관합니다.
+        <code>presentation/</code>, <code>GET /api/runs/{id}/presentation</code></span></li>
+      <li><b>wire 호환 격리</b>
+        <span>기존 Frontend SSE 계약은 파일 하나에 격리됐습니다. 화면 계약을 갈아엎어도
+        Pack과 저널은 영향이 없습니다. <code>runtime/wire_projection.py</code></span></li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>수평확장 포인트</h2>
+    <div class="table-wrap"><table>
+      <tr><th>확장</th><th>변경 지점</th><th>검증</th></tr>
+      <tr><td>새 데이터 Source</td><td>온보딩 CLI로 spec 등록</td><td>source contract suite</td></tr>
+      <tr><td>새 분석 Pack</td><td>Pack 모듈 1개 + Registry 1줄</td><td><code>assert_pack_contract</code></td></tr>
+      <tr><td>새 Primitive</td><td>카탈로그 정의 1건 + 핸들러 1건</td><td>catalog drift 테스트</td></tr>
+      <tr><td>새 표현</td><td>프로젝터 교체 또는 Pack별 override</td><td>순수성, replay 동등성</td></tr>
+      <tr><td>새 저장 백엔드</td><td>EventJournal Adapter 1개</td><td>journal contract suite</td></tr>
+      <tr><td>모델 provider 교체</td><td>AnalysisModel 구현 1개</td><td>AnalysisLoop 기존 테스트</td></tr>
+    </table></div>
+    <p>피벗도 같은 경계를 씁니다. UI 전면 교체(A2UI, CopilotKit)는 PresentationIntent를
+    encode하는 Adapter 하나, 저장소 피벗(Postgres)은 journal 계약 구현 하나,
+    실데이터 연결은 SourceRegistry Adapter 추가 등록입니다.</p>
+  </section>
+
+  <section>
+    <h2>커밋 원장</h2>
+    <div class="table-wrap"><table>
+      <tr><th>해시</th><th>내용</th></tr>
+      <tr><td><span class="hash">a6297db</span></td><td>Canonical Run Event 정본과 EventJournal 이중 Adapter</td></tr>
+      <tr><td><span class="hash">4cfa3e4</span></td><td>AnalysisPackAdapter 계약, Registry, Pack Kernel</td></tr>
+      <tr><td><span class="hash">28e48fb</span></td><td>CustomerSignalPack 전환과 EventJournal 정본화</td></tr>
+      <tr><td><span class="hash">6975707</span></td><td>Primitive 정의 단일 카탈로그 통합</td></tr>
+      <tr><td><span class="hash">f5d1419</span></td><td>PresentationIntent 투영 심과 replay 엔드포인트</td></tr>
+      <tr><td><span class="hash">bc7c06a</span></td><td>AnalysisPackHarness와 두 번째 Pack 검증</td></tr>
+      <tr><td><span class="hash">0e86033</span></td><td>Kernel 검증 JSON 모드 수정</td></tr>
+      <tr><td><span class="hash">2070cd3</span></td><td>적대적 리뷰 확인 결함 수정 (동시성, 복원)</td></tr>
+      <tr><td><span class="hash">5b554ab</span></td><td>리포트와 런북 문서</td></tr>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>리뷰가 잡아낸 것</h2>
+    <p>구현 뒤 리뷰어 4, 검증자 18의 적대적 리뷰를 돌려 18건 중 14건을 실제 결함으로
+    확인하고 수정했습니다. 대표 사례는 취소된 SQLite 트랜잭션의 고아화(저널 손상 가능),
+    재시작 시 터미널 상태 미조정으로 생기는 좀비 Run, 터미널 이후 cursor에서의
+    무한 폴링입니다. 전체 목록과 조치는 저장소 리포트에 있습니다.</p>
+  </section>
+
+  <section>
+    <h2>남은 경계 부채</h2>
+    <div class="debt">
+      <p class="label">의도된 유지 — 설계 5단계(Legacy 제거) 대상</p>
+      <ul>
+        <li><code>POST /api/runs</code>는 아직 customer_signal 전용, 다른 Pack은 Kernel 직접 호출</li>
+        <li>Frontend의 domain decoder는 새 Frontend(설계 4단계) 전까지 유지</li>
+        <li>코디네이터의 <code>take_outcome</code> 결합 1건, 하니스의 timeout/cancellation 주입 검사 미구현</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>확인 명령</h2>
+    <div class="verify">
+      <div><span class="c"># 전체 검증</span></div>
+      <div>make test</div>
+      <div><span class="c"># 경계별 계약</span></div>
+      <div>uv run --project backend pytest backend/tests/test_pack_harness.py -q</div>
+      <div>uv run --project backend pytest backend/tests/test_event_journal_contracts.py -q</div>
+      <div>uv run --project backend pytest backend/tests/test_journal_wire_replay.py -q</div>
+    </div>
+    <p>실행 절차 전체는 저장소의 <code>docs/hackathon-agility-runbook.md</code>,
+    경계 상세와 피벗 시나리오는
+    <code>docs/superpowers/reports/2026-08-28-hackathon-agility-restructure.md</code>에 있습니다.</p>
+  </section>
+
+  <p class="push-note">상세 문서: <code>docs/superpowers/reports/2026-08-28-hackathon-agility-restructure.md</code>,
+  실행 절차: <code>docs/hackathon-agility-runbook.md</code></p>
+</main>
+</body>
+</html>
