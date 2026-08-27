@@ -15,6 +15,7 @@ from customer_signal.domain.facts import (
     FieldRef,
     SegmentComparisonPayload,
 )
+from customer_signal.domain.primitive_catalog import dependency_arity_table
 from customer_signal.domain.primitives import (
     AggregateEventsInput,
     CompareSegmentsInput,
@@ -204,18 +205,7 @@ def _validate_topology_and_arity(steps: Sequence[AnalysisStep]) -> None:
     if not 3 <= len(steps) <= 6:
         raise PlanValidationError("analysis plan must contain three to six steps")
 
-    arity = {
-        "catalog_sources": (0, 0),
-        "profile_events": (0, 0),
-        "aggregate_events": (0, 0),
-        "segment_customers": (0, 0),
-        "detect_repetition": (0, 0),
-        "match_sequence": (0, 0),
-        "compare_segments": (2, 2),
-        "rank_customers": (1, 4),
-        "get_customer_journey": (1, 1),
-        "get_evidence": (1, 1),
-    }
+    arity = dependency_arity_table()
     prior: set[str] = set()
     for step in steps:
         if len(step.input_step_ids) != len(set(step.input_step_ids)):

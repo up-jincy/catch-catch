@@ -29,6 +29,7 @@ from customer_signal.domain.facts import (
     SegmentCustomersPayload,
     SequenceMatchPayload,
 )
+from customer_signal.domain.primitive_catalog import PRIMITIVE_DEFINITIONS
 from customer_signal.domain.primitives import (
     AggregateEventsInput,
     CatalogSourcesInput,
@@ -98,6 +99,24 @@ HANDLERS: MappingProxyType[GenericPrimitiveName, HandlerSpec] = MappingProxyType
         ),
     }
 )
+
+
+def _require_registry_sync() -> None:
+    """Fail fast at import time when HANDLERS drifts from the primitive catalog."""
+
+    if tuple(HANDLERS) != tuple(PRIMITIVE_DEFINITIONS):
+        raise RuntimeError(
+            "primitive HANDLERS registry must exactly match the primitive "
+            "catalog definitions in order and content"
+        )
+    for name, spec in HANDLERS.items():
+        if spec.input_type is not PRIMITIVE_DEFINITIONS[name].input_type:
+            raise RuntimeError(
+                f"primitive handler {name} input type is out of sync with the primitive catalog"
+            )
+
+
+_require_registry_sync()
 
 
 __all__ = ["HANDLERS", "HandlerSpec", "PrimitiveContext"]

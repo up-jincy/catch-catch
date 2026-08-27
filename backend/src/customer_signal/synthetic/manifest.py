@@ -13,6 +13,7 @@ from customer_signal.domain.sources import (
     SourceManifest,
     TimeRange,
 )
+from customer_signal.domain.primitive_catalog import all_capabilities
 from customer_signal.domain.types import GenericPrimitiveName, SourceId
 
 
@@ -37,20 +38,7 @@ _IDENTITY_QUALITY = {
     "subscription": ("subscription_entry", "exact"),
     "voc": ("voc_case", "declared"),
 }
-_ALL_CAPABILITIES: frozenset[GenericPrimitiveName] = frozenset(
-    {
-        "catalog_sources",
-        "profile_events",
-        "aggregate_events",
-        "segment_customers",
-        "detect_repetition",
-        "match_sequence",
-        "compare_segments",
-        "rank_customers",
-        "get_customer_journey",
-        "get_evidence",
-    }
-)
+_ALL_CAPABILITIES: frozenset[GenericPrimitiveName] = all_capabilities()
 SYNTHETIC_ADAPTER_VERSION = "2"
 SYNTHETIC_MANIFEST_VERSION = "2"
 

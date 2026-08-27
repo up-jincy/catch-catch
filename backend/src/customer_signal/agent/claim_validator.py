@@ -23,6 +23,7 @@ from customer_signal.domain.facts import (
     SegmentCustomersPayload,
     validate_comparison_payload,
 )
+from customer_signal.domain.primitive_catalog import objectives
 
 
 class ClaimValidationError(ValueError):
@@ -306,18 +307,7 @@ def _comparison_holds(left: int | float, operator: str, right: object) -> bool:
 
 
 def _objective_for_primitive(primitive: str) -> str:
-    labels = {
-        "catalog_sources": "Confirm available customer-signal sources",
-        "profile_events": "Profile customer-event distributions and quality",
-        "aggregate_events": "Calculate the requested customer-event metric",
-        "segment_customers": "Identify the customer Segment matching verified conditions",
-        "detect_repetition": "Detect repeated customer behavior",
-        "match_sequence": "Match the requested customer-event Sequence",
-        "compare_segments": "Compare verified Segment metrics",
-        "rank_customers": "Rank customers using verified signals",
-        "get_customer_journey": "Review a representative customer Journey",
-        "get_evidence": "Retrieve masked evidence for verified results",
-    }
+    labels: dict[str, str] = objectives()
     return labels[primitive]
 
 

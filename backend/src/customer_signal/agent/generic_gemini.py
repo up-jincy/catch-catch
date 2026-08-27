@@ -27,6 +27,12 @@ from customer_signal.domain.analysis import (
     StepSelection,
     UnsupportedAnalysis,
 )
+from customer_signal.domain.primitive_catalog import (
+    dependency_arity_table,
+    descriptions_ko,
+    primitive_names,
+    required_metric_keys_table,
+)
 from customer_signal.domain.primitives import PRIMITIVE_INPUT_ADAPTER
 from customer_signal.domain.sources import PublicSourceManifest, SourceManifest
 from customer_signal.observability.langfuse import build_langfuse_config
@@ -191,19 +197,7 @@ class GeminiAnalysisModel:
                         "목표를 직접 측정하는 최소 단계만 계획한다. 마지막 분석 "
                         "단계의 required metric이 사용자 질문에 답하는 숫자여야 한다"
                     ),
-                    "primitive_selection_guide": {
-                        "aggregate_events": (
-                            "특정 이벤트·피드백 속성을 가진 고객 수/이벤트 수 집계 "
-                            "(예: 부정 피드백이 많은 Topic별 고객 수)"
-                        ),
-                        "match_sequence": (
-                            "순서가 있는 행동 패턴 매칭 (A 후 B, 시간 제한 포함 — "
-                            "예: 반복 행동 뒤 상담 전환, 가입 시작 후 미완료)"
-                        ),
-                        "segment_customers": "모집단을 명명된 cohort로 분할",
-                        "detect_repetition": "동일 행동의 반복 탐지",
-                        "compare_segments": "두 선행 단계 metric의 비교",
-                    },
+                    "primitive_selection_guide": descriptions_ko(),
                     "source_scope": (
                         "goal.source_ids의 source를 그대로 사용한다 — 질문이 "
                         "명시적으로 좁히지 않는 한 source를 임의로 제외하지 않는다"
@@ -232,16 +226,8 @@ class GeminiAnalysisModel:
                 "constraints": {
                     "initial_revision": 0,
                     "dependency_arity": {
-                        "catalog_sources": {"minimum": 0, "maximum": 0},
-                        "profile_events": {"minimum": 0, "maximum": 0},
-                        "aggregate_events": {"minimum": 0, "maximum": 0},
-                        "segment_customers": {"minimum": 0, "maximum": 0},
-                        "detect_repetition": {"minimum": 0, "maximum": 0},
-                        "match_sequence": {"minimum": 0, "maximum": 0},
-                        "compare_segments": {"minimum": 2, "maximum": 2},
-                        "rank_customers": {"minimum": 1, "maximum": 4},
-                        "get_customer_journey": {"minimum": 1, "maximum": 1},
-                        "get_evidence": {"minimum": 1, "maximum": 1},
+                        name: {"minimum": minimum, "maximum": maximum}
+                        for name, (minimum, maximum) in dependency_arity_table().items()
                     },
                     "step_count": "3..6",
                     "first_step_should_discover_sources": True,
@@ -252,18 +238,7 @@ class GeminiAnalysisModel:
                         "two dependencies must both publish parameters.metric_key; "
                         "required output is <metric_key>_delta"
                     ),
-                    "required_metric_keys": {
-                        "catalog_sources": ["source_count"],
-                        "profile_events": ["customer_count", "event_count"],
-                        "aggregate_events": ["exactly one requested metric key"],
-                        "segment_customers": ["segment_customer_count"],
-                        "detect_repetition": ["repeated_customer_count"],
-                        "match_sequence": ["matched_customer_count"],
-                        "compare_segments": ["<parameters.metric_key>_delta"],
-                        "rank_customers": ["ranked_customer_count"],
-                        "get_customer_journey": ["journey_event_count"],
-                        "get_evidence": ["evidence_record_count"],
-                    },
+                    "required_metric_keys": required_metric_keys_table(),
                     "read_only": True,
                 },
             },
@@ -514,18 +489,7 @@ def _public_manifests(manifests: Sequence[SourceManifest]) -> list[dict[str, Any
 
 def _primitive_catalog() -> dict[str, Any]:
     return {
-        "names": [
-            "catalog_sources",
-            "profile_events",
-            "aggregate_events",
-            "segment_customers",
-            "detect_repetition",
-            "match_sequence",
-            "compare_segments",
-            "rank_customers",
-            "get_customer_journey",
-            "get_evidence",
-        ],
+        "names": list(primitive_names()),
         "input_schema": PRIMITIVE_INPUT_ADAPTER.json_schema(),
         # match_sequence가 실제로 해석하는 토큰 어휘 — analytics.primitives.
         # sequences._matches_token과 동기화된 도구 문서. 임의로 지어낸 이벤트

@@ -19,6 +19,7 @@ from pydantic import (
 
 from customer_signal.domain.facts import FieldRef
 from customer_signal.domain.models import DomainModel
+from customer_signal.domain.primitive_catalog import dependency_arity_table
 from customer_signal.domain.primitives import PrimitiveInput
 from customer_signal.domain.sources import TimeRange
 from customer_signal.domain.types import (
@@ -250,18 +251,7 @@ class AnalysisStep(AnalysisContractModel):
         return self
 
 
-_DEPENDENCY_ARITY: dict[GenericPrimitiveName, tuple[int, int]] = {
-    "catalog_sources": (0, 0),
-    "profile_events": (0, 0),
-    "aggregate_events": (0, 0),
-    "segment_customers": (0, 0),
-    "detect_repetition": (0, 0),
-    "match_sequence": (0, 0),
-    "compare_segments": (2, 2),
-    "rank_customers": (1, 4),
-    "get_customer_journey": (1, 1),
-    "get_evidence": (1, 1),
-}
+_DEPENDENCY_ARITY: dict[GenericPrimitiveName, tuple[int, int]] = dependency_arity_table()
 
 
 class AnalysisPlan(AnalysisContractModel):

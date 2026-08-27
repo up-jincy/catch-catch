@@ -24,25 +24,13 @@ from customer_signal.domain.sources import (
     SourceManifest,
     TimeRange,
 )
+from customer_signal.domain.primitive_catalog import all_capabilities
 from customer_signal.domain.types import GenericPrimitiveName
 from customer_signal.onboarding.profiler import load_rows
 from customer_signal.onboarding.spec import FieldRule, SourceMappingSpec
 
 ONBOARDED_ADAPTER_VERSION = "1"
-_ALL_CAPABILITIES: frozenset[GenericPrimitiveName] = frozenset(
-    {
-        "catalog_sources",
-        "profile_events",
-        "aggregate_events",
-        "segment_customers",
-        "detect_repetition",
-        "match_sequence",
-        "compare_segments",
-        "rank_customers",
-        "get_customer_journey",
-        "get_evidence",
-    }
-)
+_ALL_CAPABILITIES: frozenset[GenericPrimitiveName] = all_capabilities()
 _TRUTHY = {"true", "t", "yes", "y", "1"}
 _FALSY = {"false", "f", "no", "n", "0"}
 

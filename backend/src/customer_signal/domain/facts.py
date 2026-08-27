@@ -17,6 +17,7 @@ from pydantic import (
 )
 
 from customer_signal.domain.models import DomainModel, EventType
+from customer_signal.domain.primitive_catalog import required_canonical_metrics
 from customer_signal.domain.sources import EventScope, TimeRange
 from customer_signal.domain.types import (
     DimensionValue,
@@ -267,18 +268,9 @@ class AnalysisMaskedEvidence(FactContractModel):
     summary: str = Field(min_length=1, max_length=1_000)
 
 
-_REQUIRED_CANONICAL_METRICS: dict[FactPayloadKind, frozenset[str]] = {
-    "catalog_sources": frozenset({"source_count"}),
-    "profile_events": frozenset({"customer_count", "event_count"}),
-    "aggregate_events": frozenset(),
-    "segment_customers": frozenset({"segment_customer_count"}),
-    "detect_repetition": frozenset({"repeated_customer_count"}),
-    "match_sequence": frozenset({"matched_customer_count"}),
-    "compare_segments": frozenset(),
-    "rank_customers": frozenset({"ranked_customer_count"}),
-    "get_customer_journey": frozenset({"journey_event_count"}),
-    "get_evidence": frozenset({"evidence_record_count"}),
-}
+_REQUIRED_CANONICAL_METRICS: dict[FactPayloadKind, frozenset[str]] = (
+    required_canonical_metrics()
+)
 
 
 class FactPayloadBase(FactContractModel):

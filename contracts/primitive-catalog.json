@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "description": "Consolidated catalog of the ten generic analysis primitives. Generated from customer_signal.domain.primitive_catalog; edit that module and regenerate instead of editing this file.",
+  "primitives": [
+    {
+      "name": "catalog_sources",
+      "dependency_arity": {
+        "minimum": 0,
+        "maximum": 0
+      },
+      "required_metric_keys": [
+        "source_count"
+      ],
+      "dynamic_metric": false,
+      "description_ko": null,
+      "objective_en": "Confirm available customer-signal sources"
+    },
+    {
+      "name": "profile_events",
+      "dependency_arity": {
+        "minimum": 0,
+        "maximum": 0
+      },
+      "required_metric_keys": [
+        "customer_count",
+        "event_count"
+      ],
+      "dynamic_metric": false,
+      "description_ko": null,
+      "objective_en": "Profile customer-event distributions and quality"
+    },
+    {
+      "name": "aggregate_events",
+      "dependency_arity": {
+        "minimum": 0,
+        "maximum": 0
+      },
+      "required_metric_keys": [],
+      "dynamic_metric": true,
+      "description_ko": "특정 이벤트·피드백 속성을 가진 고객 수/이벤트 수 집계 (예: 부정 피드백이 많은 Topic별 고객 수)",
+      "objective_en": "Calculate the requested customer-event metric"
+    },
+    {
+      "name": "segment_customers",
+      "dependency_arity": {
+        "minimum": 0,
+        "maximum": 0
+      },
+      "required_metric_keys": [
+        "segment_customer_count"
+      ],
+      "dynamic_metric": false,
+      "description_ko": "모집단을 명명된 cohort로 분할",
+      "objective_en": "Identify the customer Segment matching verified conditions"
+    },
+    {
+      "name": "detect_repetition",
+      "dependency_arity": {
+        "minimum": 0,
+        "maximum": 0
+      },
+      "required_metric_keys": [
+        "repeated_customer_count"
+      ],
+      "dynamic_metric": false,
+      "description_ko": "동일 행동의 반복 탐지",
+      "objective_en": "Detect repeated customer behavior"
+    },
+    {
+      "name": "match_sequence",
+      "dependency_arity": {
+        "minimum": 0,
+        "maximum": 0
+      },
+      "required_metric_keys": [
+        "matched_customer_count"
+      ],
+      "dynamic_metric": false,
+      "description_ko": "순서가 있는 행동 패턴 매칭 (A 후 B, 시간 제한 포함 — 예: 반복 행동 뒤 상담 전환, 가입 시작 후 미완료)",
+      "objective_en": "Match the requested customer-event Sequence"
+    },
+    {
+      "name": "compare_segments",
+      "dependency_arity": {
+        "minimum": 2,
+        "maximum": 2
+      },
+      "required_metric_keys": [],
+      "dynamic_metric": true,
+      "description_ko": "두 선행 단계 metric의 비교",
+      "objective_en": "Compare verified Segment metrics"
+    },
+    {
+      "name": "rank_customers",
+      "dependency_arity": {
+        "minimum": 1,
+        "maximum": 4
+      },
+      "required_metric_keys": [
+        "ranked_customer_count"
+      ],
+      "dynamic_metric": false,
+      "description_ko": null,
+      "objective_en": "Rank customers using verified signals"
+    },
+    {
+      "name": "get_customer_journey",
+      "dependency_arity": {
+        "minimum": 1,
+        "maximum": 1
+      },
+      "required_metric_keys": [
+        "journey_event_count"
+      ],
+      "dynamic_metric": false,
+      "description_ko": null,
+      "objective_en": "Review a representative customer Journey"
+    },
+    {
+      "name": "get_evidence",
+      "dependency_arity": {
+        "minimum": 1,
+        "maximum": 1
+      },
+      "required_metric_keys": [
+        "evidence_record_count"
+      ],
+      "dynamic_metric": false,
+      "description_ko": null,
+      "objective_en": "Retrieve masked evidence for verified results"
+    }
+  ]
+}
