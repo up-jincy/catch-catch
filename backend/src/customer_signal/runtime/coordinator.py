@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from typing import Literal, cast
 from uuid import UUID
 
-from customer_signal.agent.analysis_loop import AnalysisLoop
 from customer_signal.agent.contracts import (
-    AnalysisEvent,
     AnalysisRunner,
     RunRequest,
     RunnerOutcome,
@@ -27,9 +26,14 @@ from customer_signal.observability.langfuse import (
     flush_langfuse,
     update_langfuse_workflow,
 )
+from customer_signal.journal.events import CanonicalRunEvent
+from customer_signal.packs.customer_signal import CustomerSignalPack
+from customer_signal.packs.kernel import PackKernel
+from customer_signal.packs.registry import AnalysisPackRegistry
 from customer_signal.runtime.artifact_store import ArtifactStore, ArtifactWriteError
 from customer_signal.runtime.artifacts import RunArtifact, RunVersions
-from customer_signal.runtime.events import GenericRunnerEventType, RunnerEvent
+from customer_signal.runtime.events import RunnerEvent
+from customer_signal.runtime.wire_projection import wire_events_for
 from customer_signal.runtime.run_store import (
     InvalidRunTransitionError,
     RequestedAgentMode,
@@ -101,8 +105,8 @@ class RunCoordinator:
         gemini_timeout_seconds: float = 45.0,
         analytics: AnalyticsService,
         store: RunStore,
-        generic_fixture_loop: AnalysisLoop | None = None,
-        generic_gemini_loop: AnalysisLoop | None = None,
+        kernel: PackKernel | None = None,
+        packs: AnalysisPackRegistry | None = None,
         artifact_store: ArtifactStore | None = None,
     ) -> None:
         if gemini_timeout_seconds <= 0:
@@ -124,8 +128,8 @@ class RunCoordinator:
         self._gemini_timeout_seconds = gemini_timeout_seconds
         self._analytics = analytics
         self._store = store
-        self._generic_fixture_loop = generic_fixture_loop
-        self._generic_gemini_loop = generic_gemini_loop
+        self._kernel = kernel
+        self._packs = packs
         self._artifact_store = artifact_store
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._journey_cache: dict[tuple[str, str], CustomerJourneyResult] = {}
@@ -328,31 +332,24 @@ class RunCoordinator:
         *,
         already_running: bool = False,
     ) -> None:
-        """Run the validated generic loop without falling back to the legacy runner."""
+        """Run the generic analysis through the Pack Kernel with the journal as truth."""
 
         if not already_running:
             await self._store.mark_running(run_id)
-            await self._store.append_generic_event(
-                run_id,
-                "run_started",
-                {"status": "running"},
-            )
-            self._checkpoint(run_id)
 
-        pending_error: PublicRunError | None = None
+        published_terminal = False
 
-        async def emit(event: AnalysisEvent) -> None:
-            nonlocal pending_error
-            if event.type == "unsupported_analysis":
-                return
-            if event.type == "error":
-                pending_error = PublicRunError.model_validate(event.payload)
-                return
-            await self._store.append_generic_event(
-                run_id,
-                cast(GenericRunnerEventType, event.type),
-                event.payload,
-            )
+        async def publish(events: Sequence[CanonicalRunEvent]) -> None:
+            nonlocal published_terminal
+            for event in events:
+                for wire_type, payload in wire_events_for(event):
+                    try:
+                        await self._store.append_generic_event(run_id, wire_type, payload)
+                    except Exception:
+                        # A wire-projection failure must not fail the canonical Run.
+                        continue
+                    if wire_type == "done":
+                        published_terminal = True
             self._checkpoint(run_id)
 
         context = LangfuseRunContext(
@@ -361,18 +358,29 @@ class RunCoordinator:
             question=request.question,
             source_ids=tuple(request.enabled_sources),
         )
+        outcome = None
         try:
-            loop = self._generic_loop_for(self._store.get_requested_mode(run_id))
+            kernel, pack = self._customer_signal_runtime()
+            mode = self._store.get_requested_mode(run_id)
             with bind_langfuse_run(context):
-                async with asyncio.timeout(130):
-                    outcome = await loop.run(request, emit=emit)
+                result = await kernel.run(
+                    pack,
+                    request,
+                    run_id=UUID(run_id),
+                    options={"mode": mode},
+                    resume_payload=(
+                        {"answer": request.question} if already_running else None
+                    ),
+                    on_committed=publish,
+                )
+                outcome = pack.take_outcome(UUID(run_id))
                 update_langfuse_workflow(
                     output={
-                        "status": outcome.status,
-                        "agent_mode": outcome.agent_mode,
-                        "outcome_kind": outcome.outcome_kind,
-                        "fact_count": len(outcome.facts),
-                        "note_count": len(outcome.notes),
+                        "status": result.status,
+                        "agent_mode": outcome.agent_mode if outcome else None,
+                        "outcome_kind": outcome.outcome_kind if outcome else None,
+                        "fact_count": len(outcome.facts) if outcome else 0,
+                        "note_count": len(outcome.notes) if outcome else 0,
                     }
                 )
         except asyncio.CancelledError:
@@ -380,76 +388,68 @@ class RunCoordinator:
                 code="run_cancelled",
                 message="분석 실행이 취소됐습니다.",
             )
-            await self._fail_generic(run_id, public_error)
+            await self._finalize_generic_failure(run_id, public_error, published_terminal)
             raise
         except Exception:
             public_error = PublicRunError(
                 code="generic_run_failed",
                 message="분석 실행에 실패했습니다.",
             )
-            await self._fail_generic(run_id, public_error)
+            await self._finalize_generic_failure(run_id, public_error, published_terminal)
             return
 
-        if outcome.status == "awaiting_clarification":
-            await self._store.mark_awaiting(run_id, outcome)
+        if result.status == "awaiting_input":
+            if outcome is not None and outcome.status == "awaiting_clarification":
+                await self._store.mark_awaiting(run_id, outcome)
             self._checkpoint(run_id)
             return
 
-        if outcome.status == "failed":
-            public_error = (
-                outcome.error
-                or pending_error
-                or PublicRunError(
-                    code="generic_run_failed",
-                    message="분석 실행에 실패했습니다.",
+        if outcome is not None and outcome.status == result.status:
+            await self._store.mark_generic_terminal(run_id, outcome)
+        else:
+            failure = result.error or PublicRunError(
+                code="generic_run_failed",
+                message="분석 실행에 실패했습니다.",
+            )
+            try:
+                await self._store.mark_failed(run_id, failure)
+            except InvalidRunTransitionError:
+                pass
+        self._checkpoint(run_id)
+
+    async def _finalize_generic_failure(
+        self,
+        run_id: str,
+        error: PublicRunError,
+        published_terminal: bool,
+    ) -> None:
+        if not published_terminal:
+            try:
+                await self._store.append_generic_event(
+                    run_id,
+                    "error",
+                    error.model_dump(mode="json"),
                 )
-            )
-            if pending_error is not None:
-                public_error = pending_error
-            await self._store.append_generic_event(
-                run_id,
-                "error",
-                public_error.model_dump(mode="json"),
-            )
-            self._checkpoint(run_id)
-        # A no-data loop reports an internal typed error so the coordinator can retain
-        # diagnostics, but the public lifecycle is a limitation-only degraded result.
-        await self._store.mark_generic_terminal(run_id, outcome)
-        done_payload = {
-            "status": outcome.status,
-            "limitations": list(outcome.limitations),
-        }
-        await self._store.append_generic_event(run_id, "done", done_payload)
+                await self._store.append_generic_event(
+                    run_id,
+                    "done",
+                    {"status": "failed", "limitations": []},
+                )
+            except Exception:
+                pass
+        try:
+            await self._store.mark_failed(run_id, error)
+        except InvalidRunTransitionError:
+            pass
         self._checkpoint(run_id)
 
-    async def _fail_generic(self, run_id: str, error: PublicRunError) -> None:
-        await self._store.append_generic_event(
-            run_id,
-            "error",
-            error.model_dump(mode="json"),
-        )
-        await self._store.mark_failed(run_id, error)
-        await self._store.append_generic_event(
-            run_id,
-            "done",
-            {"status": "failed", "limitations": []},
-        )
-        self._checkpoint(run_id)
-
-    def _generic_loop_for(self, mode: RequestedAgentMode) -> AnalysisLoop:
-        if mode == "fixture":
-            if self._generic_fixture_loop is None:
-                raise RuntimeError("generic fixture loop is not configured")
-            return self._generic_fixture_loop
-        if mode == "gemini":
-            if self._generic_gemini_loop is None:
-                raise RuntimeError("generic Gemini loop is not configured")
-            return self._generic_gemini_loop
-        if self._generic_gemini_loop is not None:
-            return self._generic_gemini_loop
-        if self._generic_fixture_loop is None:
-            raise RuntimeError("generic analysis loop is not configured")
-        return self._generic_fixture_loop
+    def _customer_signal_runtime(self) -> tuple[PackKernel, CustomerSignalPack]:
+        if self._kernel is None or self._packs is None:
+            raise RuntimeError("analysis pack runtime is not configured")
+        pack = self._packs.get("customer_signal")
+        if not isinstance(pack, CustomerSignalPack):
+            raise RuntimeError("customer_signal pack is not registered")
+        return self._kernel, pack
 
     def _checkpoint(self, run_id: str) -> None:
         if self._artifact_store is None:

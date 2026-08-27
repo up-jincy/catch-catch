@@ -235,6 +235,33 @@ class RunStore:
         )
         return self.get_snapshot(run_id)
 
+    def restore_events(
+        self,
+        run_id: str,
+        events: Iterable[tuple[StoredRunEventType, dict[str, JsonValue], datetime]],
+    ) -> None:
+        """Replace a restored Run's empty history with journal-projected events.
+
+        Snapshot Artifacts restore state without events; the EventJournal is
+        the source of truth for history, so replayed wire events supersede the
+        artifact's ``last_event_id`` offset.
+        """
+
+        state = self._require(run_id)
+        if state.events:
+            raise ValueError("only Runs without in-memory events can restore history")
+        restored = [
+            StoredRunEvent(
+                id=index,
+                type=event_type,
+                payload=payload,
+                created_at=created_at,
+            )
+            for index, (event_type, payload, created_at) in enumerate(events, start=1)
+        ]
+        state.events = restored
+        state.event_id_offset = 0
+
     def get_snapshot(self, run_id: str) -> RunSnapshot:
         return self._snapshot(self._require(run_id))
 

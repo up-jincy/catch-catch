@@ -35,17 +35,18 @@ TERMINAL_EVENT_KINDS: frozenset[str] = frozenset(
     {"run.completed", "run.degraded", "run.failed"}
 )
 
+# Matches the generic analysis publication gate (agent contracts): keys that
+# may never appear in a public payload.  Masked public fields such as
+# ``records`` and ``masked_customer_id`` are legitimate generic Fact content.
 _FORBIDDEN_PAYLOAD_KEYS = frozenset(
     {
         "chain_of_thought",
         "internal_reasoning",
-        "masked_customer_id",
         "messages",
         "prompt",
         "provider_response",
         "raw_fields",
         "reasoning",
-        "records",
         "thoughts",
     }
 )

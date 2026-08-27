@@ -62,6 +62,7 @@ def _settings(tmp_path: Path) -> Settings:
         agent_mode="fixture",
         database_path=tmp_path / "customer-signal.duckdb",
         artifact_directory=tmp_path / "artifacts",
+        onboarded_sources_dir=tmp_path / "onboarded-sources",
         frontend_origin="http://frontend.test",
         _env_file=None,
     )
@@ -173,10 +174,12 @@ def test_default_gemini_loop_owns_all_stages_without_fixture_delegate(
         _env_file=None,
     )
     dependencies = _default_dependencies(settings)
-    loop = dependencies.coordinator._generic_gemini_loop
+    assert dependencies.packs is not None
+    pack = dependencies.packs.get("customer_signal")
+    loop = pack._loops["gemini"]
     assert loop is not None
     model = loop._model
-    fixture_loop = dependencies.coordinator._generic_fixture_loop
+    fixture_loop = pack._loops["fixture"]
 
     assert isinstance(model, GeminiAnalysisModel)
     assert model is not fixture_loop._model

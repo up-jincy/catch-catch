@@ -20,10 +20,18 @@ class Settings(BaseSettings):
     gemini_fallback_model: str = "gemini-3.6-flash"
     database_path: Path = Path("data/generated/customer_signal.duckdb")
     artifact_directory: Path = Path("data/run-artifacts")
+    journal_path: Path | None = None
     onboarded_sources_dir: Path = Path("data/onboarded-sources")
     api_host: str = "127.0.0.1"
     api_port: int = 8000
     frontend_origin: str = "http://127.0.0.1:3000"
+
+    @computed_field
+    @property
+    def resolved_journal_path(self) -> Path:
+        if self.journal_path is not None:
+            return self.journal_path
+        return self.artifact_directory / "event-journal.sqlite3"
 
     @computed_field
     @property

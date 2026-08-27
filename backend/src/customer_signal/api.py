@@ -31,7 +31,12 @@ from customer_signal.data.repository import DuckDBRepository
 from customer_signal.data.source_registry import SourceRegistry
 from customer_signal.domain.models import EvidenceRecord
 from customer_signal.domain.sources import PublicSourceList, PublicSourceManifest
+from customer_signal.journal.journal import EventJournal
+from customer_signal.journal.sqlite import SQLiteEventJournal
 from customer_signal.mcp_server import create_mcp_server
+from customer_signal.packs.customer_signal import CustomerSignalPack
+from customer_signal.packs.kernel import PackKernel
+from customer_signal.packs.registry import AnalysisPackRegistry
 from customer_signal.onboarding.adapter import CompositeEvidenceProvider, load_onboarded_adapters
 from customer_signal.runtime.coordinator import (
     RunCoordinator,
@@ -45,6 +50,7 @@ from customer_signal.runtime.artifact_store import (
 )
 from customer_signal.runtime.artifacts import ArtifactListResponse
 from customer_signal.runtime.document_renderer import render_document, render_markdown_bytes
+from customer_signal.runtime.wire_projection import restore_wire_events
 from customer_signal.runtime.run_store import (
     InvalidLastEventIdError,
     InvalidRunTransitionError,
@@ -92,6 +98,8 @@ class ApiDependencies:
     artifact_store: ArtifactStore | None = None
     source_ids: tuple[str, ...] = ()
     generic_default_mode: RequestedAgentMode = "fixture"
+    journal: EventJournal | None = None
+    packs: AnalysisPackRegistry | None = None
 
 
 class _RepositoryEvidenceProvider:
@@ -111,8 +119,12 @@ class _RepositoryEvidenceProvider:
 class _FunctionalFixtureModel(GenericFixtureModel):
     """Bind the three deterministic demo Plans to their authoritative sources."""
 
-    async def create_plan(self, goal, manifests):
-        plan = await super().create_plan(goal, manifests)
+    async def create_plan(self, goal, manifests, *, validation_feedback=None):
+        plan = await super().create_plan(
+            goal,
+            manifests,
+            validation_feedback=validation_feedback,
+        )
         scenario = goal.goal_id.removeprefix("goal-")
         scopes = {
             "negative": {
@@ -203,6 +215,13 @@ def _default_dependencies(settings: Settings) -> ApiDependencies:
             executor=executor,
             registry=registry,
         )
+    customer_signal_pack = CustomerSignalPack(
+        fixture_loop=generic_fixture_loop,
+        gemini_loop=generic_gemini_loop,
+    )
+    packs = AnalysisPackRegistry([customer_signal_pack])
+    journal = SQLiteEventJournal(settings.resolved_journal_path)
+    kernel = PackKernel(journal, timeout_seconds=130.0)
     coordinator = RunCoordinator(
         agent_mode=settings.agent_mode,
         fixture_runner=FixtureRunner(mcp_server),
@@ -214,8 +233,8 @@ def _default_dependencies(settings: Settings) -> ApiDependencies:
         ),
         analytics=analytics,
         store=store,
-        generic_fixture_loop=generic_fixture_loop,
-        generic_gemini_loop=generic_gemini_loop,
+        kernel=kernel,
+        packs=packs,
         artifact_store=artifact_store,
     )
     return ApiDependencies(
@@ -229,6 +248,8 @@ def _default_dependencies(settings: Settings) -> ApiDependencies:
             *(adapter.describe().source_id for adapter in onboarded),
         ),
         generic_default_mode=settings.resolved_agent_mode,
+        journal=journal,
+        packs=packs,
     )
 
 
@@ -252,10 +273,17 @@ def create_app(
 
     @asynccontextmanager
     async def api_lifespan(_app: FastAPI):
+        if resolved.journal is not None:
+            # The journal is the source of truth: rebuild replayable SSE
+            # histories for restored Runs before serving traffic.
+            await restore_wire_events(resolved.journal, resolved.store)
         try:
             yield {}
         finally:
             await resolved.coordinator.close()
+            journal_close = getattr(resolved.journal, "close", None)
+            if journal_close is not None:
+                await journal_close()
 
     app = FastAPI(
         title="Customer Signal API",
