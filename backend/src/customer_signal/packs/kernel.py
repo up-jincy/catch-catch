@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Literal
 from uuid import UUID
@@ -233,7 +234,7 @@ class PackKernel:
         if isinstance(request_data, BaseModel):
             request_data = request_data.model_dump(mode="json")
         try:
-            return pack.Input.model_validate(request_data)
+            return pack.Input.model_validate_json(_canonical_json(request_data))
         except ValidationError as error:
             raise PackInputError(str(error)) from error
 
@@ -308,7 +309,7 @@ class PackKernel:
             schema = pack.spec.schema_for(kind)
         except KeyError as error:
             raise PackContractViolation(str(error)) from error
-        validated = schema.model.model_validate(value)
+        validated = schema.model.model_validate_json(_canonical_json(value))
         return EventDraft(
             kind="artifact.committed",
             pack=pack.spec.ref,
@@ -415,6 +416,10 @@ class PackKernel:
             return await self._journal.append(run_id, expected_sequence, drafts)
         except SequenceConflictError as conflict:
             return await self._journal.append(run_id, conflict.latest_sequence, drafts)
+
+
+def _canonical_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
 async def _notify(
