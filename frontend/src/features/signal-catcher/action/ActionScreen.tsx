@@ -13,8 +13,8 @@ import type {
 
 import styles from "./action.module.css";
 
-/** 매직 연출 길이. 항목이 하나씩 그려지는 시간까지 포함한다. */
-const MAGIC_MS = 1900;
+/** 진입 연출 길이. 항목이 하나씩 그려지는 시간까지 포함한다. */
+const INTRO_MS = 1900;
 /** 타임랩스 한 프레임. */
 const FRAME_MS = 420;
 
@@ -35,6 +35,12 @@ function stageOf(experiment: Experiment | undefined): ActionStage {
   return "watching";
 }
 
+/** 시작값에서 목표까지 얼마나 왔는지. 값이 작아져야 좋은 지표도 같은 방향으로 읽는다. */
+function progress(from: number, now: number, goal: number): number {
+  if (from === goal) return 1;
+  return Math.min(1, Math.max(0, (now - from) / (goal - from)));
+}
+
 export function ActionScreen({
   plan,
   experiment,
@@ -46,44 +52,24 @@ export function ActionScreen({
   onBack,
 }: ActionScreenProps) {
   const [stage, setStage] = useState<ActionStage>(() => stageOf(experiment));
+  const [intro, setIntro] = useState(true);
   const [askConflict, setAskConflict] = useState(false);
   const [frame, setFrame] = useState(0);
   const applied = useRef(false);
-  const compareRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    if (stage === "applying") return;
     setStage(stageOf(experiment));
-  }, [experiment, stage]);
+  }, [experiment]);
 
   /*
-   * 적용 버튼은 화면 아래에 있어 연출이 시야 밖에서 일어날 수 있다.
-   * 이미 다 보이면 건드리지 않고, 벗어난 만큼만 옮긴다.
-   * scrollIntoView 는 재렌더와 겹치면 엉뚱한 위치로 튄다.
+   * 무엇이 바뀌는지는 이 화면에 들어온 순간 보여준다.
+   * 버튼이 연출까지 맡으면 이미 적용을 결정한 사용자에게 대기시간을 강요하게 된다.
    */
   useEffect(() => {
-    if (stage !== "applying") return;
-    const el = compareRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    if (rect.top >= 0 && rect.bottom <= window.innerHeight) return;
-    window.scrollTo({ top: window.scrollY + rect.top - 80, behavior: "smooth" });
-  }, [stage]);
-
-  useEffect(() => {
-    if (stage !== "applying") return;
-    const timer = setTimeout(() => {
-      onApply();
-      setStage("watching");
-    }, MAGIC_MS);
+    if (stage !== "preview" || !intro) return;
+    const timer = setTimeout(() => setIntro(false), INTRO_MS);
     return () => clearTimeout(timer);
-  }, [stage, onApply]);
-
-  /* 단계가 넘어가면 내용이 통째로 바뀌므로 처음부터 보게 한다. */
-  useEffect(() => {
-    if (stage !== "watching" && stage !== "report") return;
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [stage]);
+  }, [stage, intro]);
 
   useEffect(() => {
     if (stage !== "watching" || frame === 0) return;
@@ -102,6 +88,12 @@ export function ActionScreen({
     return () => clearTimeout(timer);
   }, [stage, frame, plan, onAdvance, onComplete]);
 
+  /* 단계가 넘어가면 내용이 통째로 바뀌므로 처음부터 보게 한다. */
+  useEffect(() => {
+    if (stage === "preview") return;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [stage]);
+
   function apply() {
     if (conflict) {
       setAskConflict(true);
@@ -114,15 +106,16 @@ export function ActionScreen({
     if (applied.current) return;
     applied.current = true;
     setAskConflict(false);
-    setStage("applying");
+    onApply();
+    setStage("watching");
   }
 
   const gains = plan.predictions.filter((p) => p.direction === "gain");
   const risks = plan.predictions.filter((p) => p.direction === "risk");
   const hits = plan.outcomes.filter((o) => o.verdict === "hit").length;
+  const misses = plan.outcomes.length - hits;
   const point = plan.timelapse[Math.min(frame, plan.timelapse.length - 1)];
   const start = plan.timelapse[0];
-  const preview = stage === "preview" || stage === "applying";
 
   return (
     <div className={styles.screen}>
@@ -141,15 +134,22 @@ export function ActionScreen({
           </p>
         </header>
 
-        {preview ? (
+        {stage === "preview" ? (
           <>
-            <section className={styles.compare} ref={compareRef}>
-              <MockupPanel mockup={plan.asIs} state="asIs" magic={stage === "applying"} />
-              <MockupPanel mockup={plan.toBe} state="toBe" magic={stage === "applying"} />
+            <section className={styles.compare}>
+              <MockupPanel mockup={plan.asIs} state="asIs" magic={intro} />
+              <MockupPanel mockup={plan.toBe} state="toBe" magic={intro} />
             </section>
             <p className={styles.changeNote}>
               입력창 바로 위에 <mark>상황형 추천검색어 3줄</mark>이 새로 노출됩니다.
-              <span>실제 화면 구조를 따른 와이어프레임입니다.</span>
+              <span>
+                실제 화면 구조를 따른 와이어프레임입니다.
+                {intro ? null : (
+                  <button type="button" className={styles.replay} onClick={() => setIntro(true)}>
+                    다시 보기
+                  </button>
+                )}
+              </span>
             </p>
 
             <section>
@@ -181,7 +181,7 @@ export function ActionScreen({
                 <tbody className={styles.riskBody}>
                   <tr className={styles.riskHead}>
                     <th scope="row" colSpan={4}>
-                      이런 위험이 있어요
+                      이건 나빠질 수 있어요
                     </th>
                   </tr>
                   {risks.map((item) => (
@@ -198,22 +198,17 @@ export function ActionScreen({
                 </tbody>
               </table>
               <p className={styles.footnote}>
-                좋아지는 것만 싣지 않습니다. 나빠질 수 있는 부분까지 함께 예측해야 적용
-                여부를 스스로 판단할 수 있습니다.
+                최근 14일간 이 고객 {plan.segmentSize.toLocaleString("ko-KR")}명의 행동에서
+                계산한 값이에요. 위험 항목도 같은 데이터로 계산했습니다.
               </p>
             </section>
 
             <div className={styles.applyRow}>
               <span className={styles.applyNote}>
-                적용 후 {plan.observeDays}일간 예측이 맞았는지 지켜봅니다
+                적용하면 {plan.observeDays}일간 지켜보고 결과를 알려드려요
               </span>
-              <button
-                type="button"
-                className={styles.applyBtn}
-                onClick={apply}
-                disabled={stage === "applying"}
-              >
-                {stage === "applying" ? "바꾸는 중…" : `✨ ${plan.applyLabel}`}
+              <button type="button" className={styles.applyBtn} onClick={apply}>
+                ✨ {plan.applyLabel}
               </button>
             </div>
           </>
@@ -231,37 +226,35 @@ export function ActionScreen({
               <span className={styles.timelineEnd}>{plan.observeDays}일</span>
             </div>
 
-            <table className={styles.sheet}>
-              <thead>
-                <tr>
-                  <th scope="col">지표</th>
-                  <th scope="col">적용 전</th>
-                  <th scope="col">지금</th>
-                  <th scope="col" className={styles.numCol}>
-                    목표
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {TIMELAPSE_SERIES.map((series) => {
-                  const pred = gains.find((g) => g.predictionId === series.key);
-                  return (
-                    <tr key={series.key}>
-                      <th scope="row">{series.label}</th>
-                      <td className={styles.from}>
-                        {start.values[series.key]}
+            <ul className={styles.tracks}>
+              {TIMELAPSE_SERIES.map((series) => {
+                const pred = gains.find((g) => g.predictionId === series.key);
+                const from = start.values[series.key];
+                const now = point.values[series.key];
+                const goal = Number.parseFloat(pred?.to ?? String(from));
+                const ratio = progress(from, now, goal);
+                return (
+                  <li key={series.key}>
+                    <p className={styles.trackLabel}>{series.label}</p>
+                    <p className={styles.trackNow}>
+                      {now.toLocaleString("ko-KR")}
+                      <small>{series.unit}</small>
+                    </p>
+                    <div className={styles.track}>
+                      <span className={styles.trackFill} style={{ width: `${ratio * 100}%` }} />
+                      <span className={styles.trackPin} style={{ left: `${ratio * 100}%` }} />
+                    </div>
+                    <p className={styles.trackEnds}>
+                      <span>
+                        적용 전 {from}
                         {series.unit}
-                      </td>
-                      <td className={styles.to}>
-                        {point.values[series.key]}
-                        {series.unit}
-                      </td>
-                      <td className={styles.numCol}>{pred?.to ?? "—"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      </span>
+                      <span>목표 {pred?.to ?? "—"}</span>
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
 
             {frame === 0 ? (
               <div className={styles.ffRow}>
@@ -285,8 +278,10 @@ export function ActionScreen({
               예측 {plan.outcomes.length}개 중 <em>{hits}개</em>가 맞았어요
             </p>
             <p className={styles.footnote}>
-              빗나간 예측도 그대로 싣습니다. 전부 맞은 리포트는 채점하지 않은 리포트와
-              구분되지 않습니다.
+              {plan.observeDays}일간 쌓인 실제 데이터와 하나씩 비교했어요.
+              {misses > 0
+                ? ` 예상과 달랐던 ${misses}개는 왜 그랬는지 아래에 정리했습니다.`
+                : ""}
             </p>
 
             <table className={styles.sheet}>
@@ -296,7 +291,7 @@ export function ActionScreen({
                   <th scope="col">예측</th>
                   <th scope="col">실제</th>
                   <th scope="col" className={styles.numCol}>
-                    판정
+                    결과
                   </th>
                 </tr>
               </thead>
@@ -316,7 +311,10 @@ export function ActionScreen({
                       <td className={styles.from}>{pred.delta}</td>
                       <td className={styles.to}>{outcome.actual}</td>
                       <td className={styles.numCol}>
-                        <span className={styles.verdict}>{miss ? "빗나감" : "적중"}</span>
+                        <span className={styles.verdict}>
+                          <i aria-hidden="true">{miss ? "✕" : "✓"}</i>
+                          {miss ? "예상과 다름" : "맞음"}
+                        </span>
                       </td>
                     </tr>
                   );
@@ -326,10 +324,10 @@ export function ActionScreen({
 
             {plan.nextActionReason ? (
               <div className={styles.next}>
-                <p className={styles.eyebrow}>빗나간 예측이 알려준 것</p>
+                <p className={styles.eyebrow}>예상과 달랐던 부분이 알려준 것</p>
                 <p className={styles.nextReason}>{plan.nextActionReason}</p>
                 <button type="button" className={styles.nextBtn} onClick={onOpenNext}>
-                  다음 액션 보기 <span aria-hidden="true">→</span>
+                  분석 결과에서 이어지는 액션 보기 <span aria-hidden="true">→</span>
                 </button>
               </div>
             ) : null}
@@ -382,7 +380,7 @@ interface MockupPanelProps {
   magic: boolean;
 }
 
-/** AS-IS / TO-BE 시안. 화면처럼 보이도록 검색바와 결과 목록 형태를 유지한다. */
+/** AS-IS / TO-BE 시안. 배치는 실제 AI검색 구조를 따른 와이어프레임이다. */
 function MockupPanel({ mockup, state, magic }: MockupPanelProps) {
   const addedIndex = useMemo(() => {
     let seen = 0;

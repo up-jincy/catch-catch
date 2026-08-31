@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { CatchAction, CatchReport, DepthMode, RunOutcome } from "../state/types";
 
@@ -21,6 +21,9 @@ interface ResultScreenProps {
   /** 액션 상세로 이동. 액션 탭 카드가 곧 실험 목록 역할을 한다. */
   onOpenAction: (actionId: string) => void;
   experimentOf: (actionId: string) => { status: string; elapsedDays: number; observeDays: number; hits: number; total: number } | undefined;
+  /** 리포트에서 넘어온 다음 액션. 액션 탭을 열고 그 카드로 안내한다. */
+  highlightActionId: string | null;
+  onHighlightSeen: () => void;
 }
 
 export function ResultScreen({
@@ -32,11 +35,31 @@ export function ResultScreen({
   onRestart,
   onOpenAction,
   experimentOf,
+  highlightActionId,
+  onHighlightSeen,
 }: ResultScreenProps) {
   const [tab, setTab] = useState<Tab>("journey");
   const [evidenceId, setEvidenceId] = useState<string | null>(null);
   const [action, setAction] = useState<CatchAction | null>(null);
   const [limitsOpen, setLimitsOpen] = useState(false);
+  const highlightRef = useRef<HTMLLIElement>(null);
+
+  /*
+   * 리포트의 "이어지는 액션"에서 넘어오면 결과 화면 어딘가에 떨어져 당황하게 된다.
+   * 액션 탭을 열고 해당 카드로 데려간 뒤 잠깐 표시해 어디를 보라는지 알린다.
+   */
+  useEffect(() => {
+    if (!highlightActionId) return;
+    setTab("insight");
+    const timer = setTimeout(() => {
+      highlightRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+    const clear = setTimeout(onHighlightSeen, 2600);
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(clear);
+    };
+  }, [highlightActionId, onHighlightSeen]);
 
   const degraded = outcome === "degraded";
   const findings = depth === "analyst"
@@ -183,7 +206,11 @@ export function ResultScreen({
                 <h3 className={styles.blockTitle}>다음 행동</h3>
                 <ul className={styles.actions}>
                   {report.actions.map((item) => (
-                    <li key={item.actionId}>
+                    <li
+                      key={item.actionId}
+                      ref={item.actionId === highlightActionId ? highlightRef : undefined}
+                      data-highlight={item.actionId === highlightActionId}
+                    >
                       {(() => {
                         const exp = experimentOf(item.actionId);
                         if (!exp) return null;

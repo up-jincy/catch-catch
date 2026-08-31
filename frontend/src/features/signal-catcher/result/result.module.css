@@ -322,6 +322,15 @@
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius);
+  transition:
+    border-color 400ms ease,
+    box-shadow 400ms ease;
+}
+
+/* 리포트에서 넘어온 카드. 잠깐만 표시하고 조용히 돌아간다. */
+.actions li[data-highlight="true"] {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 4px var(--signal-wash);
 }
 
 /* 액션 카드가 곧 실험 목록이다. 상태 배지와 진행 바를 카드에 얹는다. */

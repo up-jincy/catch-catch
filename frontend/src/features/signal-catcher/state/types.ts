@@ -180,8 +180,8 @@ export interface ActionPlan {
   nextActionReason: string | null;
 }
 
-/** 액션 페이지의 4단계. */
-export type ActionStage = "preview" | "applying" | "watching" | "report";
+/** 액션 페이지의 단계. 진입 연출은 단계가 아니라 미리보기 화면 안의 상태다. */
+export type ActionStage = "preview" | "watching" | "report";
 
 /**
  * 적용한 실험. Run 하나보다 오래 살기 때문에 CatchSession 밖에 둔다.

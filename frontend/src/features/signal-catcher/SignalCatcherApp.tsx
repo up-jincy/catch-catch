@@ -48,6 +48,8 @@ export function SignalCatcherApp() {
   const [question, setQuestion] = useState("");
   const [depth, setDepth] = useState<DepthMode>("basic");
   const [actionId, setActionId] = useState<string>("search_keyword");
+  /** 리포트에서 "이어지는 액션"으로 넘어왔을 때 결과 화면이 안내할 카드. */
+  const [highlightActionId, setHighlightActionId] = useState<string | null>(null);
   const lastPhase = useRef(session.phase);
 
   // 로딩(catching)은 되돌아갈 지점이 아니라서 기록에 남기지 않는다.
@@ -169,6 +171,8 @@ export function SignalCatcherApp() {
                 controller.openAction();
               }}
               experimentOf={experiments.find}
+              highlightActionId={highlightActionId}
+              onHighlightSeen={() => setHighlightActionId(null)}
             />
           </div>
         ) : null}
@@ -192,7 +196,10 @@ export function SignalCatcherApp() {
               }
               onAdvance={(days) => experiments.advance(actionId, days)}
               onComplete={(hits, total) => experiments.complete(actionId, hits, total)}
-              onOpenNext={controller.closeAction}
+              onOpenNext={() => {
+                setHighlightActionId(ACTION_PLANS[actionId].nextActionId);
+                controller.closeAction();
+              }}
               onBack={controller.closeAction}
             />
           </div>

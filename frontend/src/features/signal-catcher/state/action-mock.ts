@@ -175,9 +175,12 @@ export const ACTION_PLANS: Record<string, ActionPlan> = {
   search_keyword: SEARCH_KEYWORD_PLAN,
 };
 
-/** 타임랩스 차트에 그릴 지표. 예측 중 gain 세 개만 쓴다. */
+/**
+ * 관찰 화면에 그릴 지표.
+ * `better` 는 값이 커지는 게 좋은지 작아지는 게 좋은지다. 진행률 계산에 쓴다.
+ */
 export const TIMELAPSE_SERIES = [
-  { key: "conversion", label: "가입 전환율", unit: "%", min: 10, max: 20 },
-  { key: "research_days", label: "탐색 기간", unit: "일", min: 2, max: 4.5 },
-  { key: "voc_transfer", label: "상담 인입", unit: "명", min: 24, max: 43 },
+  { key: "conversion", label: "가입 전환율", unit: "%", better: "up" },
+  { key: "research_days", label: "평균 탐색 기간", unit: "일", better: "down" },
+  { key: "voc_transfer", label: "상담 인입", unit: "명", better: "down" },
 ] as const;

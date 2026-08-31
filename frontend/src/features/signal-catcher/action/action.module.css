@@ -207,6 +207,23 @@
   color: var(--fog-dim);
 }
 
+.replay {
+  margin-left: 0.5rem;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--fog);
+  font: inherit;
+  font-size: 0.78rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.replay:hover {
+  color: var(--chalk);
+}
+
 .changeNote mark {
   background: none;
   color: var(--signal-soft);
@@ -357,11 +374,21 @@
 }
 
 /* ── 판정 ────────────────────────────────────────────── */
+/* 기호를 붙여 훑을 때 걸리게 한다. 다만 적중은 조용한 회색으로 둔다. */
 .verdict {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
   font-family: var(--font-mono);
   font-size: 0.68rem;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   color: var(--fog-dim);
+  white-space: nowrap;
+}
+
+.verdict i {
+  font-style: normal;
+  font-size: 0.8rem;
 }
 
 /* 적중은 기대대로이므로 조용하다. 시선은 빗나간 쪽으로 가야 한다. */
@@ -429,7 +456,7 @@
 /* ── 관찰 ────────────────────────────────────────────── */
 .watch {
   display: grid;
-  gap: 1.75rem;
+  gap: 2rem;
 }
 
 .timeline {
@@ -463,6 +490,86 @@
   height: 100%;
   background: var(--signal);
   transition: width 380ms linear;
+}
+
+/*
+ * 관찰 지표는 표보다 트랙이 낫다.
+ * 적용 전에서 목표까지 얼마나 왔는지가 위치로 읽히고, 지금 값이 가장 크다.
+ */
+.tracks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1.9rem;
+}
+
+.tracks li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 0.4rem 1rem;
+}
+
+.trackLabel {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--fog);
+}
+
+.trackNow {
+  margin: 0;
+  font-size: 1.65rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  text-align: right;
+}
+
+.trackNow small {
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: var(--fog-dim);
+  margin-left: 0.12rem;
+}
+
+.track {
+  position: relative;
+  grid-column: 1 / -1;
+  height: 3px;
+  margin-top: 0.35rem;
+  background: var(--line);
+}
+
+.trackFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--signal);
+  transition: width 380ms linear;
+}
+
+.trackPin {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border-radius: 50%;
+  background: var(--signal);
+  transform: translateY(-50%);
+  transition: left 380ms linear;
+}
+
+.trackEnds {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  margin: 0.55rem 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--fog-dim);
+  font-variant-numeric: tabular-nums;
 }
 
 .ffRow {
