@@ -112,6 +112,9 @@ export interface CatchReport {
   limitations: string[];
   planSteps: PlanStep[];
   score: TraceScore;
+  /** 이 리포트가 어느 구간을 본 것인지. 사후에 갱신하지 않으므로 시점을 밝힌다. */
+  periodLabel: string;
+  analyzedAt: string;
   datasetVersion: string;
   adapterVersions: Record<SourceId, string>;
 }

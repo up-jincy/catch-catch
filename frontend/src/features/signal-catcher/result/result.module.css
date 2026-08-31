@@ -99,6 +99,56 @@
   gap: 0.35rem;
 }
 
+.period {
+  margin: -0.6rem 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--fog-dim);
+}
+
+/* 리포트를 고치는 대신 이후에 무슨 일이 있었는지만 알린다. */
+.after {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  padding: 0.85rem 1.1rem;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--fog-dim);
+  border-radius: 4px var(--radius) var(--radius) 4px;
+  background: var(--card);
+}
+
+.after p {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.7;
+  color: var(--fog);
+}
+
+.after strong {
+  color: var(--chalk);
+  font-weight: 500;
+}
+
+.after button {
+  flex: none;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--signal-soft);
+  font: inherit;
+  font-size: 0.86rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.after button:hover {
+  color: var(--chalk);
+}
+
 .summary {
   margin: 0;
   max-width: 46rem;

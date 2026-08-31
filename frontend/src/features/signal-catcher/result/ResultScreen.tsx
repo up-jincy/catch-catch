@@ -24,6 +24,8 @@ interface ResultScreenProps {
   /** 리포트에서 넘어온 다음 액션. 액션 탭을 열고 그 카드로 안내한다. */
   highlightActionId: string | null;
   onHighlightSeen: () => void;
+  /** 이 분석 이후 적용된 실험. 리포트를 고치지 않고 맥락만 얹는다. */
+  applied: { actionId: string; title: string; status: string }[];
 }
 
 export function ResultScreen({
@@ -37,6 +39,7 @@ export function ResultScreen({
   experimentOf,
   highlightActionId,
   onHighlightSeen,
+  applied,
 }: ResultScreenProps) {
   const [tab, setTab] = useState<Tab>("journey");
   const [evidenceId, setEvidenceId] = useState<string | null>(null);
@@ -117,6 +120,28 @@ export function ResultScreen({
                 <li key={item}>{item}</li>
               ))}
             </ul>
+          ) : null}
+
+          <p className={styles.period}>
+            {report.periodLabel} 데이터 · {report.analyzedAt} 분석
+          </p>
+
+          {/*
+            리포트는 사후에 갱신하지 않는다. 갱신하면 "이 결론이 나온 과정"을
+            재현할 수 없어진다. 대신 이후에 무슨 일이 있었는지 맥락만 얹는다.
+          */}
+          {applied.length ? (
+            <div className={styles.after} role="status">
+              <p>
+                이 분석 이후 <strong>{applied[0].title}</strong>를 적용
+                {applied[0].status === "done" ? "했어요" : "해 관찰 중이에요"}.
+                아래 수치는 <strong>적용 전 시점</strong>의 값입니다.
+              </p>
+              <button type="button" onClick={() => onOpenAction(applied[0].actionId)}>
+                {applied[0].status === "done" ? "실험 결과 보기" : "경과 보기"}
+                <span aria-hidden="true"> →</span>
+              </button>
+            </div>
           ) : null}
 
           <p className={styles.summary}>{report.summary}</p>

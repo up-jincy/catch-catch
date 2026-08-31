@@ -538,6 +538,8 @@ export const REPORT: CatchReport = {
     planRevisions: 1,
     durationMs: 18400,
   },
+  periodLabel: "2026.08.05 – 08.19",
+  analyzedAt: "2026.08.19",
   datasetVersion: "synthetic-20260819",
   adapterVersions: {
     search_history: "v1.2",

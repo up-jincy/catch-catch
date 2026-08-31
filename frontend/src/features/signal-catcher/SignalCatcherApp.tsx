@@ -173,6 +173,7 @@ export function SignalCatcherApp() {
               experimentOf={experiments.find}
               highlightActionId={highlightActionId}
               onHighlightSeen={() => setHighlightActionId(null)}
+              applied={experiments.experiments}
             />
           </div>
         ) : null}
