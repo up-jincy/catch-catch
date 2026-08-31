@@ -59,6 +59,15 @@ export function SignalCatcherApp() {
     syncUrl(session.phase, true);
   }, [session.phase, options.pause]);
 
+  /*
+   * 화면이 바뀌면 스크롤을 처음으로 되돌린다.
+   * 한 페이지에서 phase 만 갈아끼우기 때문에 그대로 두면
+   * 아래쪽에서 누른 버튼의 스크롤 위치를 다음 화면이 물려받는다.
+   */
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
+  }, [session.phase]);
+
   useEffect(() => {
     if (options.pause) return;
     function onPop() {

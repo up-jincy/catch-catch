@@ -17,14 +17,19 @@ const SEARCH_KEYWORD_PLAN: ActionPlan = {
   applyLabel: "캐치한 대로 바꿔보기",
   observeDays: 7,
 
+  /*
+   * 실제 AI검색은 답변이 위, 입력창이 하단이고 추천검색어가 입력창 바로 위에 뜬다.
+   * 픽셀까지 재현하지 않되 위치는 실제 구조를 따른다.
+   * 어디에 뜨는지가 틀리면 시안이 전달하는 정보 자체가 거짓이 된다.
+   */
   asIs: {
     label: "지금 AI검색 화면",
     context: "고객이 '로밍'을 검색했을 때",
     items: [
-      { kind: "query", text: "로밍", sub: null, added: false },
       { kind: "result", text: "로밍 요금제 안내", sub: "상품 소개", added: false },
       { kind: "result", text: "로밍 가입 방법", sub: "이용 가이드", added: false },
       { kind: "result", text: "해외 데이터 로밍이란?", sub: "용어 설명", added: false },
+      { kind: "query", text: "로밍", sub: null, added: false },
     ],
   },
 
@@ -32,13 +37,13 @@ const SEARCH_KEYWORD_PLAN: ActionPlan = {
     label: "바꾼 뒤 AI검색 화면",
     context: "고객이 '로밍'을 검색했을 때",
     items: [
-      { kind: "query", text: "로밍", sub: null, added: false },
-      { kind: "suggestion", text: "일본 4일 로밍 추천", sub: "여행 기간 + 목적지", added: true },
-      { kind: "suggestion", text: "일본 여행 로밍 가격 비교", sub: "비교 행동 2순위 시그널", added: true },
-      { kind: "suggestion", text: "내 여행에 맞는 로밍 찾기", sub: "조건을 모르는 고객용", added: true },
       { kind: "result", text: "로밍 요금제 안내", sub: "상품 소개", added: false },
       { kind: "result", text: "로밍 가입 방법", sub: "이용 가이드", added: false },
       { kind: "result", text: "해외 데이터 로밍이란?", sub: "용어 설명", added: false },
+      { kind: "suggestion", text: "일본 4일 로밍 추천", sub: "여행 기간 + 목적지", added: true },
+      { kind: "suggestion", text: "일본 여행 로밍 가격 비교", sub: "비교 행동 2순위 시그널", added: true },
+      { kind: "suggestion", text: "내 여행에 맞는 로밍 찾기", sub: "조건을 모르는 고객용", added: true },
+      { kind: "query", text: "로밍", sub: null, added: false },
     ],
   },
 

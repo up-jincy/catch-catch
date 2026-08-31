@@ -78,13 +78,15 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
   gap: 1.25rem;
-  align-items: start;
+  /* 실제 화면은 내용이 적어도 입력창이 하단에 고정된다. 두 패널 높이를 맞춘다. */
+  align-items: stretch;
 }
 
 .mockup {
   min-width: 0;
   margin: 0;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 0.5rem;
 }
 
@@ -100,11 +102,17 @@
   color: var(--fog);
 }
 
-/* 시안만 면을 갖는다. 화면처럼 보이도록 안쪽을 한 단계 어둡게 판다. */
+/*
+ * 시안만 면을 갖는다. 픽셀을 재현하지 않는 와이어프레임이지만
+ * 배치는 실제 AI검색 구조를 따른다 — 답변이 위, 입력창이 하단,
+ * 추천검색어는 입력창 바로 위.
+ */
 .mockupBody {
   position: relative;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 1px;
+  min-height: 15rem;
   padding: 0.85rem;
   background: var(--ground);
   border: 1px solid var(--line);
@@ -123,13 +131,31 @@
   color: var(--fog);
 }
 
+.row[data-kind="result"] + .row[data-kind="result"] {
+  border-top: 1px solid var(--line-soft);
+}
+
+/* 추천검색어는 입력창 바로 위에 붙는다. 첫 줄만 위쪽 여백을 밀어낸다. */
+.row[data-kind="suggestion"] {
+  border-radius: 100px;
+  border: 1px dashed var(--line);
+  margin-top: 1px;
+}
+
+.row[data-kind="suggestion"]:first-of-type {
+  margin-top: auto;
+  padding-top: 0.55rem;
+}
+
+/* 입력창은 언제나 맨 아래. */
 .row[data-kind="query"] {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  margin-bottom: 0.5rem;
+  margin-top: 0.6rem;
   border: 1px solid var(--line);
   border-radius: 100px;
+  background: var(--card);
   color: var(--chalk);
 }
 
@@ -143,13 +169,15 @@
   box-shadow: 3px 3px 0 -1.5px var(--fog-dim);
 }
 
-.row[data-kind="result"] + .row[data-kind="result"] {
-  border-top: 1px solid var(--line-soft);
+/* AS-IS 에는 추천검색어가 없으므로 결과 묶음이 위로 붙도록 여백을 만든다. */
+.mockup[data-state="asIs"] .row[data-kind="query"] {
+  margin-top: auto;
 }
 
 /* 마젠타는 여기 하나. "새로 생기는 것"에만 쓴다. */
 .row[data-added="true"] {
-  border-left: 2px solid var(--signal);
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--signal) 45%, transparent);
   background: var(--signal-wash);
   color: var(--chalk);
 }
@@ -170,6 +198,13 @@
   font-size: 0.9rem;
   line-height: 1.7;
   color: var(--fog);
+}
+
+.changeNote span {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.78rem;
+  color: var(--fog-dim);
 }
 
 .changeNote mark {

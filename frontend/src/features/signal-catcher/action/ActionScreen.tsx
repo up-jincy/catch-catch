@@ -79,6 +79,12 @@ export function ActionScreen({
     return () => clearTimeout(timer);
   }, [stage, onApply]);
 
+  /* 단계가 넘어가면 내용이 통째로 바뀌므로 처음부터 보게 한다. */
+  useEffect(() => {
+    if (stage !== "watching" && stage !== "report") return;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [stage]);
+
   useEffect(() => {
     if (stage !== "watching" || frame === 0) return;
     if (frame >= plan.timelapse.length - 1) {
@@ -142,7 +148,8 @@ export function ActionScreen({
               <MockupPanel mockup={plan.toBe} state="toBe" magic={stage === "applying"} />
             </section>
             <p className={styles.changeNote}>
-              검색 결과 위에 <mark>상황형 추천검색어 3줄</mark>이 새로 노출됩니다.
+              입력창 바로 위에 <mark>상황형 추천검색어 3줄</mark>이 새로 노출됩니다.
+              <span>실제 화면 구조를 따른 와이어프레임입니다.</span>
             </p>
 
             <section>
