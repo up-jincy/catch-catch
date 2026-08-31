@@ -1,0 +1,156 @@
+.root {
+  position: relative;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--signal) 34%, transparent);
+  border-radius: 100px;
+  background: var(--signal-wash);
+  color: var(--signal-soft);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  padding: 0.28rem 0.7rem;
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+
+.badge:hover {
+  background: color-mix(in srgb, var(--signal) 22%, transparent);
+  color: var(--chalk);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fog-dim);
+}
+
+.badge[data-live="true"] .dot {
+  background: var(--signal);
+  box-shadow: 0 0 0 0 var(--signal-glow);
+  animation: ping 2s ease-out infinite;
+}
+
+@keyframes ping {
+  50% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+
+/* ── Panel ───────────────────────────────────────────── */
+.panel {
+  position: absolute;
+  top: calc(100% + 0.6rem);
+  right: 0;
+  width: min(23rem, calc(100vw - 2rem));
+  padding: 0.75rem;
+  background: var(--raise);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  z-index: 12;
+  display: grid;
+  gap: 1rem;
+  text-align: left;
+  animation: pop 180ms var(--ease) both;
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+.groupTitle {
+  margin: 0 0 0.5rem 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fog-dim);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.list button {
+  width: 100%;
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.75rem 0.8rem;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease;
+}
+
+.list button:hover {
+  border-color: color-mix(in srgb, var(--signal) 45%, transparent);
+}
+
+.list strong {
+  font-size: 0.86rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.list small {
+  font-size: 0.72rem;
+  color: var(--fog-dim);
+}
+
+.progress {
+  display: block;
+  height: 3px;
+  margin-top: 0.2rem;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.progress i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--signal);
+}
+
+.days {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--signal-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.score {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--fog);
+}
+
+.score b {
+  color: var(--signal-soft);
+  font-weight: 500;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badge[data-live="true"] .dot,
+  .panel {
+    animation: none;
+  }
+}

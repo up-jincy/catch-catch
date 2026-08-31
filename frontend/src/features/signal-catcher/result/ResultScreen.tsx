@@ -18,6 +18,9 @@ interface ResultScreenProps {
   onDepthChange: (depth: DepthMode) => void;
   onOpenTrace: () => void;
   onRestart: () => void;
+  /** 액션 상세로 이동. 액션 탭 카드가 곧 실험 목록 역할을 한다. */
+  onOpenAction: (actionId: string) => void;
+  experimentOf: (actionId: string) => { status: string; elapsedDays: number; observeDays: number; hits: number; total: number } | undefined;
 }
 
 export function ResultScreen({
@@ -27,6 +30,8 @@ export function ResultScreen({
   onDepthChange,
   onOpenTrace,
   onRestart,
+  onOpenAction,
+  experimentOf,
 }: ResultScreenProps) {
   const [tab, setTab] = useState<Tab>("journey");
   const [evidenceId, setEvidenceId] = useState<string | null>(null);
@@ -179,6 +184,28 @@ export function ResultScreen({
                 <ul className={styles.actions}>
                   {report.actions.map((item) => (
                     <li key={item.actionId}>
+                      {(() => {
+                        const exp = experimentOf(item.actionId);
+                        if (!exp) return null;
+                        return (
+                          <p className={styles.actionState} data-status={exp.status}>
+                            <span>
+                              {exp.status === "done"
+                                ? `실험 완료 · 예측 ${exp.total}개 중 ${exp.hits}개 적중`
+                                : `관찰 중 · ${exp.elapsedDays}일째`}
+                            </span>
+                            {exp.status === "watching" ? (
+                              <i>
+                                <b
+                                  style={{
+                                    width: `${(exp.elapsedDays / exp.observeDays) * 100}%`,
+                                  }}
+                                />
+                              </i>
+                            ) : null}
+                          </p>
+                        );
+                      })()}
                       <h4>{item.title}</h4>
                       <p>{item.reason}</p>
                       <div className={styles.actionFoot}>
@@ -193,9 +220,11 @@ export function ResultScreen({
                           <button
                             type="button"
                             className={styles.primaryBtn}
-                            onClick={() => setAction(item)}
+                            onClick={() => onOpenAction(item.actionId)}
                           >
-                            추천검색어 적용하기
+                            {experimentOf(item.actionId)
+                              ? "경과 보기"
+                              : "이렇게 바꾸면 어떻게 될까요?"}
                           </button>
                         ) : (
                           <span className={styles.actionSoon}>다음 단계</span>

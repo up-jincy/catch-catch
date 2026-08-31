@@ -7,7 +7,7 @@ import type {
 } from "../../customer-intelligence/contracts";
 
 /** 한 화면씩 넘어가는 셸의 상태. Next 라우트가 아니라 phase로 전환한다. */
-export type CatchPhase = "ask" | "catching" | "result" | "trace";
+export type CatchPhase = "ask" | "catching" | "result" | "trace" | "action";
 
 /** 결과 화면의 정보 밀도. 페이지를 나누지 않고 같은 화면의 노출량을 바꾼다. */
 export type DepthMode = "basic" | "analyst";
@@ -114,6 +114,89 @@ export interface CatchReport {
   score: TraceScore;
   datasetVersion: string;
   adapterVersions: Record<SourceId, string>;
+}
+
+/** 액션 적용 전후를 비교할 시안 한 장. */
+export interface MockupItem {
+  kind: "query" | "suggestion" | "result" | "guide";
+  text: string;
+  sub: string | null;
+  /** TO-BE 에서 새로 생기는 항목. 매직 연출로 하나씩 그려진다. */
+  added: boolean;
+}
+
+export interface ActionMockup {
+  label: string;
+  context: string;
+  items: MockupItem[];
+}
+
+/**
+ * 적용 시 예상되는 변화 하나.
+ * 좋아지는 것과 나빠질 수 있는 것을 같은 모양으로 싣는다.
+ * 좋은 것만 실으면 검증하지 않은 제안과 구분되지 않는다.
+ */
+export interface Prediction {
+  predictionId: string;
+  direction: "gain" | "risk";
+  label: string;
+  from: string;
+  to: string;
+  delta: string;
+  reason: string;
+  evidenceIds: string[];
+}
+
+/** 관찰 기간이 끝난 뒤의 실측과 채점. 빗나간 예측도 그대로 싣는다. */
+export interface PredictionOutcome {
+  predictionId: string;
+  actual: string;
+  verdict: "hit" | "miss";
+  note: string;
+}
+
+/** 타임랩스 한 프레임. */
+export interface TimelapsePoint {
+  day: number;
+  date: string;
+  values: Record<string, number>;
+}
+
+export interface ActionPlan {
+  actionId: string;
+  title: string;
+  /** 실험 겹침 판정 키. 같은 Segment 를 건드리면 효과를 귀인할 수 없다. */
+  segmentLabel: string;
+  segmentSize: number;
+  applyLabel: string;
+  asIs: ActionMockup;
+  toBe: ActionMockup;
+  predictions: Prediction[];
+  observeDays: number;
+  timelapse: TimelapsePoint[];
+  outcomes: PredictionOutcome[];
+  /** 채점 결과가 정당화하는 다음 액션. */
+  nextActionId: string | null;
+  nextActionReason: string | null;
+}
+
+/** 액션 페이지의 4단계. */
+export type ActionStage = "preview" | "applying" | "watching" | "report";
+
+/**
+ * 적용한 실험. Run 하나보다 오래 살기 때문에 CatchSession 밖에 둔다.
+ * localStorage 에 보관해 첫 화면으로 나갔다 와도, 새로고침해도 이어서 볼 수 있다.
+ */
+export interface Experiment {
+  actionId: string;
+  title: string;
+  segmentLabel: string;
+  observeDays: number;
+  elapsedDays: number;
+  status: "watching" | "done";
+  startedAt: string;
+  hits: number;
+  total: number;
 }
 
 export type RunOutcome = "completed" | "degraded" | "failed";

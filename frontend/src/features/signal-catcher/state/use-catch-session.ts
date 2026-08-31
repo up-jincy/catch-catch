@@ -32,7 +32,7 @@ export type PauseAt = StageKey | "complete" | "clarify";
 export type BurstMark = "heart" | "lens";
 
 /** 결과와 검증 기록은 새로고침해도 살아남아야 한다. 시연 중 사고 방지. */
-export type ViewParam = "result" | "trace";
+export type ViewParam = "result" | "trace" | "action";
 
 const PAUSE_KEYS: PauseAt[] = ["goal", "plan", "analyze", "insight", "verify", "complete", "clarify"];
 
@@ -122,7 +122,7 @@ export function useDemoOptions(): DemoOptions {
     const burst: BurstMark = params.get("burst") === "lens" ? "lens" : "heart";
     const viewRaw = params.get("view");
     const view: ViewParam | null =
-      viewRaw === "result" || viewRaw === "trace" ? viewRaw : null;
+      viewRaw === "result" || viewRaw === "trace" || viewRaw === "action" ? viewRaw : null;
     setOptions({ flags, pause, speed, burst, view });
   }, []);
 
@@ -145,6 +145,9 @@ export interface CatchSessionController {
   restore: (view: ViewParam, question: string) => void;
   openTrace: () => void;
   closeTrace: () => void;
+  /** 액션 상세로 이동. 어떤 액션인지는 셸이 따로 들고 있는다. */
+  openAction: () => void;
+  closeAction: () => void;
   reset: () => void;
 }
 
@@ -410,6 +413,14 @@ export function useCatchSession({ flags, pause, speed, view }: DemoOptions): Cat
     });
   }, [start]);
 
+  const openAction = useCallback(() => {
+    setSession((prev) => (prev.report ? { ...prev, phase: "action" } : prev));
+  }, []);
+
+  const closeAction = useCallback(() => {
+    setSession((prev) => (prev.phase === "action" ? { ...prev, phase: "result" } : prev));
+  }, []);
+
   const openTrace = useCallback(() => {
     setSession((prev) => (prev.report ? { ...prev, phase: "trace" } : prev));
   }, []);
@@ -440,6 +451,8 @@ export function useCatchSession({ flags, pause, speed, view }: DemoOptions): Cat
       answerClarification,
       openTrace,
       closeTrace,
+      openAction,
+      closeAction,
       reset,
     }),
     [
@@ -454,6 +467,8 @@ export function useCatchSession({ flags, pause, speed, view }: DemoOptions): Cat
       answerClarification,
       openTrace,
       closeTrace,
+      openAction,
+      closeAction,
       reset,
     ],
   );

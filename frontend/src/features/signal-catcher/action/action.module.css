@@ -1,0 +1,724 @@
+.screen {
+  flex: 1;
+  padding: clamp(1.5rem, 4vh, 3rem) 1.5rem 5rem;
+}
+
+.inner {
+  width: min(58rem, 100%);
+  margin-inline: auto;
+  display: grid;
+  gap: 2.25rem;
+}
+
+.back {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 0;
+  background: none;
+  color: var(--fog);
+  font: inherit;
+  font-size: 0.86rem;
+  padding: 0.3rem 0;
+  cursor: pointer;
+}
+
+.back:hover {
+  color: var(--signal-soft);
+}
+
+.head {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.tag {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--signal);
+}
+
+.head h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.5rem, 4vw, 2.1rem);
+  line-height: 1.32;
+  letter-spacing: -0.005em;
+}
+
+.target {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--fog-dim);
+}
+
+.target em {
+  font-style: normal;
+  color: var(--fog);
+}
+
+/* ── AS-IS / TO-BE ───────────────────────────────────── */
+/* 위를 맞춰야 검색어 줄이 나란히 놓여 무엇이 늘었는지 바로 읽힌다. */
+.compare {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.arrow {
+  align-self: center;
+  color: var(--fog-dim);
+  font-size: 1.1rem;
+}
+
+.mockup {
+  min-width: 0;
+  padding: 1.1rem 1.15rem 1.25rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.mockup[data-state="toBe"] {
+  border-color: color-mix(in srgb, var(--signal) 34%, transparent);
+}
+
+.mockupLabel {
+  margin: 0 0 0.2rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.mockup[data-state="toBe"] .mockupLabel {
+  color: var(--signal-soft);
+}
+
+.mockupContext {
+  margin: 0 0 0.9rem;
+  font-size: 0.74rem;
+  color: var(--fog-dim);
+}
+
+.mockupBody {
+  position: relative;
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.75rem;
+  background: var(--ground);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.mockupItem {
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  background: var(--card-2);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.mockupItem[data-kind="query"] {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--fog);
+}
+
+.mockupItem[data-kind="query"] .mockupText::before {
+  content: "🔍 ";
+}
+
+.mockupItem[data-kind="suggestion"] {
+  background: var(--signal-wash);
+  border: 1px solid color-mix(in srgb, var(--signal) 30%, transparent);
+}
+
+.mockupItem[data-kind="suggestion"] .mockupText {
+  color: var(--signal-soft);
+}
+
+.mockupText {
+  display: block;
+}
+
+.mockupSub {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.66rem;
+  color: var(--fog-dim);
+}
+
+/*
+ * 매직 연출. 마젠타 빛줄기가 TO-BE 를 훑고 지나가며
+ * 새 항목이 뒤따라 하나씩 그려진다. 심박 라인과 같은 "선이 지나간다" 언어.
+ */
+.mockup[data-magic="true"][data-state="toBe"] .mockupItem[data-added="true"] {
+  animation: draw 520ms var(--ease) both;
+  animation-delay: calc(560ms + var(--order, 0) * 220ms);
+}
+
+.mockup[data-magic="true"][data-state="asIs"] {
+  animation: recede 900ms var(--ease) both;
+}
+
+.sweep {
+  position: absolute;
+  inset: 0 auto 0 -40%;
+  width: 40%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--signal) 55%, transparent),
+    transparent
+  );
+  animation: sweep 900ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  pointer-events: none;
+}
+
+@keyframes sweep {
+  to {
+    left: 110%;
+  }
+}
+
+@keyframes draw {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scaleX(0.94);
+    filter: blur(3px);
+  }
+}
+
+@keyframes recede {
+  to {
+    opacity: 0.35;
+    transform: scale(0.98);
+  }
+}
+
+/* ── 예측 ────────────────────────────────────────────── */
+.predict {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 1.75rem;
+  align-items: start;
+}
+
+.blockTitle {
+  margin: 0 0 0.85rem;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.blockTitle[data-tone="risk"] {
+  color: var(--amber);
+}
+
+.predictions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.predictions li {
+  padding: 0.9rem 1rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--signal);
+  border-radius: 4px var(--radius) var(--radius) 4px;
+}
+
+.predictions li[data-direction="risk"] {
+  border-left-color: var(--amber);
+}
+
+.predHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.predLabel {
+  font-size: 0.88rem;
+  font-weight: 500;
+}
+
+.predDelta {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--signal);
+  font-variant-numeric: tabular-nums;
+}
+
+.predictions li[data-direction="risk"] .predDelta {
+  color: var(--amber);
+}
+
+.predNums {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  margin-top: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--fog-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.predNums strong {
+  color: var(--chalk);
+  font-weight: 500;
+}
+
+.predReason {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  line-height: 1.65;
+  color: var(--fog);
+}
+
+.honest {
+  margin: -0.9rem 0 0;
+  padding: 0.85rem 1.1rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 0.86rem;
+  line-height: 1.7;
+  color: var(--fog);
+}
+
+/* ── 적용 ────────────────────────────────────────────── */
+.applyRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.9rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line-soft);
+}
+
+.applyBtn {
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--signal);
+  color: var(--u-white);
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 500;
+  padding: 0.7rem 1.35rem;
+  cursor: pointer;
+  box-shadow: 0 0 0 0 var(--signal-glow);
+  transition:
+    box-shadow 260ms ease,
+    filter 160ms ease;
+}
+
+.applyBtn:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow: 0 0 0 5px var(--signal-wash);
+}
+
+.applyBtn:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.applyNote {
+  font-size: 0.84rem;
+  color: var(--fog-dim);
+}
+
+/* ── 관찰 ────────────────────────────────────────────── */
+.watch {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.watchLead {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.6;
+  color: var(--fog);
+}
+
+.watchLead strong {
+  color: var(--chalk);
+  font-weight: 600;
+}
+
+.timeline {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.timelineDay {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--signal-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.timelineBar {
+  height: 4px;
+  border-radius: 4px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.timelineBar i {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--signal);
+  transition: width 380ms linear;
+}
+
+.series {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.7rem;
+}
+
+.series div {
+  position: relative;
+  padding: 1rem 1.1rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.series dt {
+  font-size: 0.76rem;
+  color: var(--fog-dim);
+  margin-bottom: 0.35rem;
+}
+
+.series dd {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+.series dd small {
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--fog-dim);
+  margin-left: 0.15rem;
+}
+
+.spark {
+  position: absolute;
+  right: 1rem;
+  bottom: 1rem;
+  width: 4px;
+  height: 2.2rem;
+  display: flex;
+  align-items: flex-end;
+}
+
+.spark i {
+  display: block;
+  width: 100%;
+  border-radius: 4px;
+  background: var(--signal);
+  transition: height 380ms var(--ease);
+}
+
+.ffRow {
+  display: grid;
+  gap: 0.6rem;
+  justify-items: start;
+}
+
+.ffBtn {
+  border: 1px solid color-mix(in srgb, var(--signal) 40%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--signal-wash);
+  color: var(--signal-soft);
+  font: inherit;
+  font-size: 0.92rem;
+  padding: 0.65rem 1.2rem;
+  cursor: pointer;
+}
+
+.ffBtn:hover {
+  background: color-mix(in srgb, var(--signal) 22%, transparent);
+  color: var(--chalk);
+}
+
+.ffNote {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.65;
+  color: var(--fog-dim);
+  max-width: 34rem;
+}
+
+.ffPlaying {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--signal-soft);
+}
+
+/* ── 채점 리포트 ─────────────────────────────────────── */
+.report {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.scoreLead {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.4rem, 3.8vw, 1.95rem);
+  line-height: 1.35;
+}
+
+.scoreLead em {
+  font-style: normal;
+  color: var(--signal);
+}
+
+.scoreNote {
+  margin: -0.7rem 0 0;
+  font-size: 0.88rem;
+  line-height: 1.7;
+  color: var(--fog);
+  max-width: 40rem;
+}
+
+.outcomes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.outcomes li {
+  padding: 1rem 1.15rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.outcomes li[data-verdict="miss"] {
+  background: none;
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--amber) 40%, var(--line));
+}
+
+.outcomeHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.outcomeLabel {
+  font-size: 0.92rem;
+  font-weight: 500;
+}
+
+.outcomeVerdict {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.09em;
+  border-radius: 100px;
+  padding: 0.12rem 0.55rem;
+  white-space: nowrap;
+  color: var(--jade);
+  background: var(--jade-wash);
+  border: 1px solid color-mix(in srgb, var(--jade) 32%, transparent);
+}
+
+.outcomes li[data-verdict="miss"] .outcomeVerdict {
+  color: var(--amber);
+  background: var(--amber-wash);
+  border-color: color-mix(in srgb, var(--amber) 38%, transparent);
+}
+
+.outcomeNums {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--fog-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.outcomeNums b {
+  color: var(--chalk);
+  font-weight: 500;
+}
+
+.outcomeNote {
+  margin: 0.55rem 0 0;
+  font-size: 0.84rem;
+  line-height: 1.7;
+  color: var(--fog);
+}
+
+.next {
+  padding: 1.25rem 1.35rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--signal);
+  border-radius: 4px var(--radius) var(--radius) 4px;
+  display: grid;
+  gap: 0.5rem;
+  justify-items: start;
+}
+
+.nextTag {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--signal);
+}
+
+.nextReason {
+  margin: 0;
+  font-size: 0.94rem;
+  line-height: 1.75;
+}
+
+.nextBtn {
+  margin-top: 0.4rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--signal);
+  color: var(--u-white);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 500;
+  padding: 0.55rem 1.05rem;
+  cursor: pointer;
+}
+
+.nextBtn:hover {
+  filter: brightness(1.08);
+}
+
+/* ── 겹침 경고 ───────────────────────────────────────── */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: rgb(12 7 9 / 76%);
+  backdrop-filter: blur(3px);
+}
+
+.conflict {
+  width: min(30rem, 100%);
+  padding: 1.6rem 1.6rem 1.4rem;
+  background: var(--raise);
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.conflictTag {
+  margin: 0 0 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+.conflict h2 {
+  margin: 0 0 0.8rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.conflictBody {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.75;
+  color: var(--fog);
+}
+
+.conflictBody strong {
+  color: var(--chalk);
+  font-weight: 500;
+}
+
+.conflictFoot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1.35rem;
+}
+
+.primaryBtn {
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--signal);
+  color: var(--u-white);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 500;
+  padding: 0.55rem 1rem;
+  cursor: pointer;
+}
+
+.ghostBtn {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fog);
+  font: inherit;
+  font-size: 0.86rem;
+  padding: 0.55rem 1rem;
+  cursor: pointer;
+}
+
+.ghostBtn:hover {
+  color: var(--chalk);
+  border-color: var(--fog-dim);
+}
+
+@media (max-width: 52rem) {
+  .compare {
+    grid-template-columns: 1fr;
+  }
+
+  .arrow {
+    justify-self: center;
+    transform: rotate(90deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sweep,
+  .mockup[data-magic="true"][data-state="toBe"] .mockupItem[data-added="true"],
+  .mockup[data-magic="true"][data-state="asIs"] {
+    animation: none;
+  }
+}

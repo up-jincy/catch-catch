@@ -324,6 +324,36 @@
   border-radius: var(--radius);
 }
 
+/* 액션 카드가 곧 실험 목록이다. 상태 배지와 진행 바를 카드에 얹는다. */
+.actionState {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0 0 0.6rem !important;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  color: var(--signal-soft) !important;
+}
+
+.actionState[data-status="done"] {
+  color: var(--fog) !important;
+}
+
+.actionState i {
+  display: block;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.actionState i b {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--signal);
+}
+
 .actions h4 {
   margin: 0 0 0.45rem;
   font-size: 0.95rem;
