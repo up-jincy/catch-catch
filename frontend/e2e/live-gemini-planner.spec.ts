@@ -11,7 +11,7 @@ test.skip(
 
 test("자유 질문을 동적 Plan으로 분석하고 공개 기록을 남긴다", async ({ page }) => {
   test.setTimeout(180_000);
-  await page.goto("/");
+  await page.goto("/legacy");
   await page
     .getByRole("textbox", { name: "분석 질문", exact: true })
     .fill(question);

@@ -15,7 +15,7 @@ async function expectNoHorizontalPageScroll(page: Page) {
 }
 
 test("기존 Journey 문구도 단일 Analysis Agent로 분석한다", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/legacy");
 
   const question = page.getByRole("textbox", {
     name: "분석 질문",
@@ -62,7 +62,7 @@ test("VOC를 끄면 검증된 0명 결과에서 후속 조회를 멈춘다", asy
   const sourceCatalogLoaded = page.waitForResponse(
     (response) => response.url().endsWith("/api/sources") && response.ok(),
   );
-  await page.goto("/");
+  await page.goto("/legacy");
   await sourceCatalogLoaded;
 
   await page

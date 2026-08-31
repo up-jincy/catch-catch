@@ -1,0 +1,561 @@
+.screen {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: clamp(2rem, 8vh, 6rem) 1.5rem 4rem;
+}
+
+.center {
+  width: min(48rem, 100%);
+  text-align: center;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.kicker {
+  margin: 0 0 0.9rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  color: var(--fog-dim);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(2rem, 5.8vw, 3.1rem);
+  line-height: 1.24;
+  letter-spacing: -0.005em;
+  text-wrap: balance;
+}
+
+/*
+ * 범위 밖 질문은 오류가 아니라 Agent 의 안내다.
+ * 경고색을 쓰면 사용자를 탓하는 톤이 되므로 브랜드 톤으로 말을 건다.
+ */
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin: 1.5rem auto 0;
+  max-width: 34rem;
+  padding: 0.85rem 1.1rem 0.85rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--signal) 34%, transparent);
+  background: var(--signal-wash);
+  border-radius: var(--radius);
+  text-align: left;
+}
+
+.notice p {
+  margin: 0;
+  color: var(--chalk);
+  font-size: 0.92rem;
+  line-height: 1.65;
+}
+
+
+/* ── Composer ────────────────────────────────────────── */
+.composerWrap {
+  margin-top: 2.4rem;
+}
+
+.tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: center;
+  margin-bottom: 0.7rem;
+}
+
+.token {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  color: var(--signal-soft);
+  background: var(--signal-wash);
+  border: 1px solid color-mix(in srgb, var(--signal) 26%, transparent);
+  border-radius: 100px;
+  padding: 0.2rem 0.7rem;
+}
+
+.composer {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+  padding: 0.65rem 0.7rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  transition: border-color 200ms ease;
+}
+
+.composer:focus-within {
+  border-color: var(--signal);
+  box-shadow:
+    var(--shadow),
+    0 0 0 3px var(--signal-wash);
+}
+
+/* 감싸는 튜브만 반응하게 하고 안쪽 입력의 기본 링은 지운다. */
+.field textarea:focus-visible {
+  outline: none;
+}
+
+.plus,
+.go {
+  flex: none;
+  width: 2.4rem;
+  height: 2.4rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--card-2);
+  color: var(--fog);
+  font-size: 1.15rem;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    color 160ms ease,
+    border-color 160ms ease;
+}
+
+.plus:hover {
+  color: var(--chalk);
+  border-color: var(--signal);
+}
+
+.go {
+  --mark-heart: var(--u-white);
+
+  background: var(--signal);
+  border-color: var(--signal);
+  color: var(--u-white);
+}
+
+.go:hover {
+  filter: brightness(1.1);
+}
+
+.field {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  min-height: 2.4rem;
+}
+
+.field textarea {
+  width: 100%;
+  max-height: 9rem;
+  resize: none;
+  border: 0;
+  background: none;
+  color: var(--chalk);
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1.6;
+  padding: 0.35rem 0;
+  outline: none;
+  overflow-y: auto;
+}
+
+.ghost {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  color: var(--fog-dim);
+  font-size: 1rem;
+  text-align: left;
+  pointer-events: none;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 2px;
+  background: var(--signal);
+  animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* ── Context menu ────────────────────────────────────── */
+.menu {
+  position: absolute;
+  bottom: calc(100% + 0.6rem);
+  left: 0;
+  width: min(24rem, calc(100vw - 3rem));
+  background: var(--raise);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 0.5rem;
+  text-align: left;
+  z-index: 5;
+  animation: pop 180ms var(--ease) both;
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.menuList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.menuList button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.7rem 0.75rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--chalk);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.menuList button:hover {
+  background: var(--card-2);
+}
+
+.menuList strong {
+  display: block;
+  font-weight: 500;
+  font-size: 0.92rem;
+}
+
+.menuList small {
+  display: block;
+  color: var(--fog-dim);
+  font-size: 0.76rem;
+}
+
+.menuIcon {
+  color: var(--signal);
+  font-size: 0.9rem;
+}
+
+.menuChevron {
+  margin-left: auto;
+  color: var(--fog-dim);
+}
+
+.menuPanel {
+  padding: 0.25rem;
+}
+
+.menuBack {
+  border: 0;
+  background: none;
+  color: var(--signal-soft);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  padding: 0.3rem 0.25rem;
+}
+
+.menuHint {
+  margin: 0.25rem 0.25rem 0.75rem;
+  color: var(--fog-dim);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.menuRange {
+  margin: 0.85rem 0.25rem 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--fog-dim);
+}
+
+.sourceList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.2rem;
+  max-height: 19rem;
+  overflow-y: auto;
+}
+
+.source {
+  display: flex;
+  gap: 0.7rem;
+  padding: 0.6rem 0.65rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.source:hover {
+  background: var(--card-2);
+}
+
+.source[data-required="true"] {
+  cursor: default;
+}
+
+.source input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sourceBox {
+  flex: none;
+  margin-top: 0.22rem;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: var(--ground);
+  position: relative;
+}
+
+.source[data-on="true"] .sourceBox {
+  background: var(--signal);
+  border-color: var(--signal);
+}
+
+.source[data-on="true"] .sourceBox::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 1px;
+  width: 4px;
+  height: 9px;
+  border: solid var(--u-white);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.sourceBody strong {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.88rem;
+  font-weight: 500;
+}
+
+.sourceReq {
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  color: var(--fog-dim);
+  border: 1px solid var(--line);
+  border-radius: 100px;
+  padding: 0 0.35rem;
+}
+
+.sourceBody small {
+  display: block;
+  color: var(--fog-dim);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.sourceTopics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.35rem;
+}
+
+.sourceTopics i {
+  font-style: normal;
+  font-size: 0.66rem;
+  color: var(--fog);
+  background: var(--card-2);
+  border-radius: 100px;
+  padding: 0.08rem 0.45rem;
+}
+
+.sourceInterval {
+  display: block;
+  margin-top: 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--fog-dim);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0 0.25rem;
+}
+
+.chip {
+  border: 1px solid var(--line);
+  background: var(--card-2);
+  color: var(--fog);
+  border-radius: 100px;
+  padding: 0.35rem 0.8rem;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.chip[data-on="true"] {
+  background: var(--signal-wash);
+  border-color: var(--signal);
+  color: var(--signal-soft);
+}
+
+/* ── Suggestion cards ────────────────────────────────── */
+.cards {
+  list-style: none;
+  margin: 2.2rem 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.7rem;
+}
+
+.card {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  gap: 0.5rem;
+  padding: 1rem 1.05rem;
+  text-align: left;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--chalk);
+  font: inherit;
+  cursor: pointer;
+  position: relative;
+  transition:
+    border-color 180ms ease,
+    transform 180ms var(--ease),
+    background 180ms ease;
+}
+
+.card:hover {
+  border-color: color-mix(in srgb, var(--signal) 50%, transparent);
+  background: var(--card-2);
+  transform: translateY(-2px);
+}
+
+.cardTag {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  color: var(--signal);
+  text-transform: uppercase;
+}
+
+.cardLabel {
+  font-size: 0.92rem;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--chalk);
+  padding-right: 1rem;
+}
+
+.cardQuestion {
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--fog-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cardArrow {
+  position: absolute;
+  top: 0.9rem;
+  right: 1rem;
+  color: var(--fog-dim);
+  font-size: 0.8rem;
+  transition: color 180ms ease;
+}
+
+.card:hover .cardArrow {
+  color: var(--signal);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card:hover {
+    transform: none;
+  }
+
+  .caret {
+    animation: none;
+  }
+
+  .menu {
+    animation: none;
+  }
+}
+
+/* ── 직접 기간 선택 ──────────────────────────────────── */
+.range {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin: 0.85rem 0.25rem 0.25rem;
+}
+
+.range label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.range span {
+  font-size: 0.72rem;
+  color: var(--fog-dim);
+}
+
+.range input {
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--chalk);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.range input:focus-visible {
+  outline: none;
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--signal-wash);
+}

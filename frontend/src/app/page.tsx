@@ -1,5 +1,5 @@
-import { CustomerIntelligencePage } from "@/features/customer-intelligence/CustomerIntelligencePage";
+import { SignalCatcherApp } from "@/features/signal-catcher/SignalCatcherApp";
 
 export default function Home() {
-  return <CustomerIntelligencePage />;
+  return <SignalCatcherApp />;
 }

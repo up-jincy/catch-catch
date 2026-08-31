@@ -4,8 +4,8 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Signal Trace · Customer Signal Intelligence",
-  description: "Goal부터 공개 Fact와 Analysis Note까지 이어지는 고객 신호 분석 데모",
+  title: "고객 시그널 캐처 · Customer Signal Catcher",
+  description: "흩어진 고객 행동을 하나의 시그널로 연결하는 Customer Intelligence Agent",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

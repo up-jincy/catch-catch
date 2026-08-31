@@ -53,7 +53,7 @@ async function expectNoHorizontalPageScroll(page: Page) {
 }
 
 async function runQuestion(page: Page, question: string) {
-  await page.goto("/");
+  await page.goto("/legacy");
   await page
     .getByRole("button", { name: new RegExp(escapeRegex(question)) })
     .click();
@@ -191,7 +191,7 @@ test("저장된 Run을 새로고침 뒤 열고 JSON과 Markdown을 다운로드�
 });
 
 test("확인 답변 뒤 같은 Run에서 분석을 계속한다", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/legacy");
   await page
     .getByRole("textbox", { name: "분석 질문", exact: true })
     .fill(AMBIGUOUS_QUESTION);
@@ -235,7 +235,7 @@ test("mobile에서는 Chat 다음에 Workspace가 오고 가로 스크롤이 없
   isMobile,
 }) => {
   test.skip(!isMobile, "mobile 프로젝트 전용 검증입니다.");
-  await page.goto("/");
+  await page.goto("/legacy");
   const chat = page.getByRole("complementary", { name: "질문과 Run 기록" });
   const workspace = page.getByRole("region", { name: "분석 Workspace" });
   await expect(chat).toBeVisible();

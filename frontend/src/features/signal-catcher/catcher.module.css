@@ -1,0 +1,214 @@
+/*
+ * 고객 시그널 캐처 디자인 토큰.
+ * LG유플러스 2025 리브랜딩 팔레트를 기준으로 하고, 파생값도 이 5색에서만 만든다.
+ * 기존 globals.css 는 legacy 화면이 계속 쓰기 때문에 건드리지 않고
+ * 새 화면의 토큰은 이 shell class 안에만 스코프한다.
+ */
+.app {
+  /* 공식 팔레트 */
+  --magenta: #ff2e98;
+  --u-black: #22171c;
+  --u-gray: #82817e;
+  --u-light: #f4f4ee;
+  --u-white: #ffffff;
+
+  /*
+   * 밝은 바탕은 마젠타를 포인트로 밀어내 브랜드가 약해진다.
+   * U+ Black 을 바탕에 깔고 U+ Light Gray 를 글자로 쓰면
+   * 여전히 공식 5색이면서 마젠타가 화면을 끌고 간다.
+   */
+  --ground: var(--u-black);
+  --raise: color-mix(in srgb, var(--u-black) 94%, var(--u-white));
+  --card: color-mix(in srgb, var(--u-black) 94%, var(--u-white));
+  --card-2: color-mix(in srgb, var(--u-black) 88%, var(--u-white));
+  --line: color-mix(in srgb, var(--u-black) 79%, var(--u-white));
+  --line-soft: color-mix(in srgb, var(--u-black) 87%, var(--u-white));
+
+  /* 첫 다크의 문제는 어두움이 아니라 중간톤이 죽어 있던 것이었다 */
+  --chalk: var(--u-light);
+  --fog: color-mix(in srgb, var(--u-gray) 52%, var(--u-light));
+  --fog-dim: var(--u-gray);
+
+  --signal: var(--magenta);
+  --signal-soft: color-mix(in srgb, var(--magenta) 52%, var(--u-white));
+  --signal-wash: rgb(255 46 152 / 15%);
+  --signal-glow: rgb(255 46 152 / 45%);
+
+  /* 검증 통과는 마젠타 계열 */
+  --jade: var(--magenta);
+  --jade-wash: rgb(255 46 152 / 13%);
+
+  /*
+   * 경고만 팔레트 밖 색을 쓴다.
+   * 브랜드 팔레트는 아이덴티티 색이지 시스템 상태색까지 규정하지 않고,
+   * 오류를 브랜드색으로 칠하면 브랜드가 오염된다.
+   * 마젠타와 색상환에서 충분히 떨어지면서 같은 밝기대에 있는 앰버 하나만 추가한다.
+   */
+  --amber: #ffa62e;
+  --amber-wash: rgb(255 166 46 / 13%);
+
+  --radius-sm: 8px;
+  --radius: 14px;
+  --radius-lg: 999px;
+
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --shadow: 0 22px 54px rgb(0 0 0 / 42%);
+
+  /* 캐치캐치 워드마크에만 포스터체를 남기고, 화면 글자는 한 가족으로 정리한다 */
+  --font-body: "IBM Plex Sans KR", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* 개성은 큰 헤드라인에 깔릴 때 나온다. 로고에만 두면 이질적인 로고체로 보인다. */
+  --font-display: "Gasoek One", var(--font-body);
+  --font-logo: var(--font-display);
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(circle at 50% -10%, rgb(255 46 152 / 20%), transparent 34rem),
+    radial-gradient(circle at 88% 8%, rgb(255 46 152 / 8%), transparent 26rem),
+    var(--ground);
+  color: var(--chalk);
+  font-family: var(--font-body);
+  font-weight: 400;
+  line-height: 1.7;
+  word-break: keep-all;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app *,
+.app *::before,
+.app *::after {
+  box-sizing: border-box;
+}
+
+/*
+ * legacy globals.css 는 layout 에서 앱 전체에 로드되고 밝은 테마 기준의
+ * 전역 table 규칙(min-width: 880px, 밝은 배경, 대문자 변환)을 갖고 있다.
+ * 새 화면으로 새어 들어오므로 스코프 안에서 무효화한다.
+ * 각 컴포넌트가 직접 지정하는 값(padding, border, 정렬)은 건드리지 않는다.
+ */
+.app table {
+  min-width: 0;
+  background: none;
+}
+
+.app th {
+  background: none;
+  font-size: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.app tbody tr:hover {
+  background: none;
+}
+
+.app :focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* ── Top bar ─────────────────────────────────────────── */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.1rem clamp(1.25rem, 4vw, 2.5rem);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.brandText {
+  color: var(--chalk);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.15;
+}
+
+.brandText strong {
+  font-family: var(--font-logo);
+  font-weight: 400;
+  font-size: 1.05rem;
+  letter-spacing: 0.01em;
+}
+
+.brandText small {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.16em;
+  color: var(--fog-dim);
+  text-transform: uppercase;
+}
+
+.barSpacer {
+  flex: 1;
+}
+
+.barNote {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  color: var(--fog-dim);
+}
+
+.barBadge {
+  font-style: normal;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  color: var(--signal);
+  background: var(--signal-wash);
+  border: 1px solid color-mix(in srgb, var(--signal) 32%, transparent);
+  border-radius: 100px;
+  padding: 0.16rem 0.55rem;
+}
+
+/* ── Stage transition ────────────────────────────────── */
+.stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.enter {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  animation: rise 520ms var(--ease) both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.994);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .enter {
+    animation: none;
+  }
+}

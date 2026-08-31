@@ -1,0 +1,398 @@
+.wrap {
+  display: grid;
+  gap: 1rem;
+}
+
+/* ── Playback controls ───────────────────────────────── */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.play {
+  flex: none;
+  width: 2.3rem;
+  height: 2.3rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--signal);
+  background: var(--signal-wash);
+  color: var(--signal);
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+
+.play:hover {
+  background: var(--signal);
+  color: var(--ground);
+}
+
+.scrub {
+  flex: 1;
+  appearance: none;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--line);
+  cursor: pointer;
+}
+
+.scrub::-webkit-slider-thumb {
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--signal);
+  border: 0;
+  box-shadow: 0 0 0 4px var(--signal-wash);
+}
+
+.scrub::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--signal);
+  border: 0;
+}
+
+.count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--fog-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Board ───────────────────────────────────────────── */
+.board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 19rem;
+  gap: 1rem;
+  align-items: start;
+}
+
+.frame {
+  min-width: 0;
+  overflow-x: auto;
+  padding: 1.2rem 1rem 1rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+/* 격자와 강도 라인이 같은 가로 스케일을 쓰도록 한 겹으로 묶는다. */
+.track {
+  --label: 5.4rem;
+
+  min-width: 34rem;
+}
+
+.grid {
+  --row: 3.25rem;
+
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--label) repeat(var(--cols), minmax(3.6rem, 1fr));
+  width: 100%;
+}
+
+.laneRow {
+  display: contents;
+}
+
+.corner {
+  min-height: 2.6rem;
+}
+
+.date {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.05rem;
+  padding-bottom: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.4;
+  transition: opacity 300ms ease;
+}
+
+.date[data-on="true"] {
+  opacity: 1;
+}
+
+.date strong {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--fog);
+}
+
+.date small {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--fog-dim);
+}
+
+.laneName {
+  display: flex;
+  align-items: center;
+  height: var(--row);
+  padding-right: 0.9rem;
+  border-top: 1px solid var(--line-soft);
+  font-size: 0.76rem;
+  color: var(--fog);
+}
+
+.cell {
+  position: relative;
+  height: var(--row);
+  border-top: 1px solid var(--line-soft);
+  display: grid;
+  place-items: center;
+}
+
+/* 연결선 오버레이. 레인 영역에만 정확히 겹친다. */
+.link {
+  position: absolute;
+  left: var(--label);
+  bottom: 0;
+  /* SVG는 replaced element라 left+right 로는 늘어나지 않고 내재 비율 폭을 쓴다. */
+  width: calc(100% - var(--label));
+  height: calc(var(--row) * var(--lanes));
+  pointer-events: none;
+  overflow: visible;
+}
+
+.link path {
+  fill: none;
+  stroke: var(--signal);
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.75;
+  transition: stroke-dashoffset 600ms var(--ease);
+}
+
+/* ── Node ────────────────────────────────────────────── */
+.node {
+  position: relative;
+  z-index: 1;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: 0;
+  cursor: pointer;
+  opacity: 0.22;
+  transform: scale(0.82);
+  transition:
+    opacity 320ms ease,
+    transform 320ms var(--ease);
+}
+
+.node[data-on="true"] {
+  opacity: 1;
+  transform: none;
+}
+
+.dot {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--signal);
+  box-shadow: 0 0 0 4px var(--signal-wash);
+  transition: box-shadow 200ms ease;
+}
+
+.node[data-tone="negative"] .dot {
+  background: var(--amber);
+  box-shadow: 0 0 0 4px var(--amber-wash);
+}
+
+.node[data-tone="repeat"] .dot {
+  background: var(--signal-soft);
+}
+
+.node[data-selected="true"] .dot {
+  box-shadow:
+    0 0 0 4px var(--signal-wash),
+    0 0 0 7px color-mix(in srgb, var(--signal) 45%, transparent);
+}
+
+.nodeLabel {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.64rem;
+  line-height: 1.25;
+  color: var(--fog-dim);
+  white-space: nowrap;
+}
+
+.node[data-selected="true"] .nodeLabel {
+  color: var(--chalk);
+}
+
+/* ── Intensity ───────────────────────────────────────── */
+.intensity {
+  margin-top: 1.2rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line-soft);
+  width: 100%;
+}
+
+.intensityHead {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fog-dim);
+  margin-bottom: 0.4rem;
+}
+
+.intensity svg {
+  display: block;
+  margin-left: var(--label);
+  width: calc(100% - var(--label));
+  height: 46px;
+}
+
+.intensityFill {
+  fill: var(--signal-wash);
+}
+
+.intensityLine {
+  fill: none;
+  stroke: var(--signal);
+  stroke-width: 1.75;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+/* ── Detail panel ────────────────────────────────────── */
+.detail {
+  padding: 1.15rem 1.25rem 1.25rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  position: sticky;
+  top: 1rem;
+}
+
+.detailWhen {
+  margin: 0 0 0.4rem;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  color: var(--signal);
+}
+
+.detailTitle {
+  margin: 0 0 0.9rem;
+  font-size: 0.98rem;
+  font-weight: 500;
+  line-height: 1.55;
+}
+
+.detailMeta {
+  margin: 0 0 0.9rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.detailMeta div {
+  display: grid;
+  grid-template-columns: 5.4rem 1fr;
+  gap: 0.5rem;
+}
+
+.detailMeta dt {
+  font-size: 0.74rem;
+  color: var(--fog-dim);
+}
+
+.detailMeta dd {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--fog);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.74rem !important;
+}
+
+.detailInsight {
+  margin: 0 0 1rem;
+  padding: 0.75rem 0.85rem;
+  background: var(--card-2);
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  line-height: 1.65;
+  color: var(--fog);
+}
+
+.detailInsight span {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--signal-soft);
+}
+
+.detailEvidence {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--chalk);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: border-color 160ms ease;
+}
+
+.detailEvidence:hover {
+  border-color: var(--signal);
+}
+
+.detailEvidence em {
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--fog-dim);
+}
+
+@media (max-width: 62rem) {
+  .board {
+    grid-template-columns: 1fr;
+  }
+
+  .detail {
+    position: static;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .link path,
+  .node,
+  .date {
+    transition: none;
+  }
+}
