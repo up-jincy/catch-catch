@@ -35,6 +35,11 @@
   stroke: none;
 }
 
+.sparkle {
+  display: block;
+  fill: currentColor;
+}
+
 /* ── Heartbeat as stepper ────────────────────────────── */
 .beat {
   width: min(52rem, 100%);

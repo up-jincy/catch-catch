@@ -32,6 +32,25 @@ export function SignalMark({ size = 26, title }: SignalMarkProps) {
   );
 }
 
+/**
+ * AI 가 만든 것임을 표시하는 스파클.
+ * SaaS 관습대로 AI 산출물과 AI 실행 버튼에만 쓴다. 다른 곳에 붙이면 의미가 흐려진다.
+ */
+export function Sparkle({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      className={styles.sparkle}
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path d="M12 2.5 13.9 8.6 20 10.5 13.9 12.4 12 18.5 10.1 12.4 4 10.5 10.1 8.6Z" />
+      <path d="M18.5 15.5 19.4 18.1 22 19 19.4 19.9 18.5 22.5 17.6 19.9 15 19 17.6 18.1Z" />
+    </svg>
+  );
+}
+
 const BEAT_W = 200;
 const BASE_Y = 90;
 

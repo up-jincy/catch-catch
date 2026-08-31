@@ -432,6 +432,9 @@
 }
 
 .applyBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
   border: 0;
   border-radius: var(--radius-sm);
   background: var(--signal);
@@ -618,7 +621,7 @@
 /* ── 리포트 ──────────────────────────────────────────── */
 .report {
   display: grid;
-  gap: 1.5rem;
+  gap: 1.75rem;
 }
 
 .scoreLead {
@@ -638,36 +641,70 @@
   margin-top: -1.1rem;
 }
 
-.next {
+
+
+
+
+/*
+ * AI 인사이트.
+ * 측정된 수치가 아니라 AI 가 해석해 만든 문장이라 표·그래프와 성격이 다르다.
+ * 이 화면에서 면을 갖는 유일한 블록이고 스파클로 출처를 밝힌다.
+ */
+.insight {
   display: grid;
-  gap: 0.5rem;
+  gap: 0.6rem;
   justify-items: start;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--line-soft);
+  padding: 1.35rem 1.45rem 1.4rem;
+  background: var(--signal-wash);
+  border: 1px solid color-mix(in srgb, var(--signal) 26%, transparent);
+  border-radius: var(--radius);
 }
 
-.nextReason {
+.insightTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--signal-soft);
+}
+
+.insightMark {
+  display: grid;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--signal) 22%, transparent);
+  color: var(--signal);
+}
+
+.insightBody {
   margin: 0;
   max-width: 42rem;
-  font-size: 0.94rem;
-  line-height: 1.8;
+  font-size: 1rem;
+  line-height: 1.85;
+  color: var(--chalk);
 }
 
-.nextBtn {
+.insightBtn {
   margin-top: 0.5rem;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--radius-sm);
-  background: none;
-  color: var(--chalk);
+  background: var(--signal);
+  color: var(--u-white);
   font: inherit;
   font-size: 0.88rem;
-  padding: 0.55rem 1.05rem;
+  font-weight: 500;
+  padding: 0.6rem 1.1rem;
   cursor: pointer;
 }
 
-.nextBtn:hover {
-  border-color: var(--signal);
-  color: var(--signal-soft);
+.insightBtn:hover {
+  filter: brightness(1.08);
 }
 
 /* ── 겹침 경고 ───────────────────────────────────────── */

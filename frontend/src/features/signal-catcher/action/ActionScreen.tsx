@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { Sparkle } from "../brand/Brand";
 import { Overlay } from "../Overlay";
 import { TIMELAPSE_SERIES } from "../state/action-mock";
 import type {
@@ -9,6 +10,7 @@ import type {
   ActionPlan,
   ActionStage,
   Experiment,
+  Prediction,
 } from "../state/types";
 
 import styles from "./action.module.css";
@@ -235,7 +237,8 @@ export function ActionScreen({
                 적용하면 {plan.observeDays}일간 지켜보고 결과를 알려드려요
               </span>
               <button type="button" className={styles.applyBtn} onClick={apply}>
-                ✨ {plan.applyLabel}
+                <Sparkle size={15} />
+                {plan.applyLabel}
               </button>
             </div>
           </>
@@ -250,61 +253,7 @@ export function ActionScreen({
               </span>
             </p>
 
-            <ul className={styles.metrics}>
-              {TIMELAPSE_SERIES.map((series) => {
-                const pred = gains.find((g) => g.predictionId === series.key);
-                const from = start.values[series.key];
-                const now = point.values[series.key];
-                const goal = Number.parseFloat(pred?.to ?? String(from));
-                const shown = plan.timelapse
-                  .slice(0, frame + 1)
-                  .map((f) => f.values[series.key]);
-                const full = plan.timelapse.map((f) => f.values[series.key]);
-                const { lo, hi } = scale(full, goal);
-                const gy = goalY(goal, lo, hi, SPARK_H);
-                const lastX = ((shown.length - 1) / (full.length - 1)) * SPARK_W;
-                const lastY =
-                  SPARK_H - ((now - lo) / (hi - lo)) * SPARK_H;
-                return (
-                  <li key={series.key}>
-                    <p className={styles.metricLabel}>{series.label}</p>
-                    <p className={styles.metricNow}>
-                      {now.toLocaleString("ko-KR")}
-                      <small>{series.unit}</small>
-                      <em>{formatDelta(from, now, series.unit)}</em>
-                    </p>
-                    <svg
-                      className={styles.spark}
-                      viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
-                      preserveAspectRatio="none"
-                      aria-hidden="true"
-                    >
-                      <line
-                        className={styles.sparkGoal}
-                        x1="0"
-                        y1={gy}
-                        x2={SPARK_W}
-                        y2={gy}
-                      />
-                      <path
-                        className={styles.sparkLine}
-                        d={sparkPath(shown, lo, hi, SPARK_W, SPARK_H)}
-                      />
-                      {shown.length > 1 ? (
-                        <circle className={styles.sparkDot} cx={lastX} cy={lastY} r="3.5" />
-                      ) : null}
-                    </svg>
-                    <p className={styles.metricEnds}>
-                      <span>
-                        적용 전 {from}
-                        {series.unit}
-                      </span>
-                      <span className={styles.metricGoal}>목표 {pred?.to ?? "—"}</span>
-                    </p>
-                  </li>
-                );
-              })}
-            </ul>
+            <MetricSparks plan={plan} gains={gains} upto={frame} />
 
             {frame === 0 ? (
               <div className={styles.ffRow}>
@@ -333,6 +282,8 @@ export function ActionScreen({
                 ? ` 예상과 달랐던 ${misses}개는 왜 그랬는지 아래에 정리했습니다.`
                 : ""}
             </p>
+
+            <MetricSparks plan={plan} gains={gains} upto={plan.timelapse.length - 1} />
 
             <table className={styles.sheet}>
               <thead>
@@ -373,13 +324,18 @@ export function ActionScreen({
             </table>
 
             {plan.nextActionReason ? (
-              <div className={styles.next}>
-                <p className={styles.eyebrow}>예상과 달랐던 부분이 알려준 것</p>
-                <p className={styles.nextReason}>{plan.nextActionReason}</p>
-                <button type="button" className={styles.nextBtn} onClick={onOpenNext}>
+              <aside className={styles.insight}>
+                <p className={styles.insightTag}>
+                  <span className={styles.insightMark}>
+                    <Sparkle size={13} />
+                  </span>
+                  AI 인사이트
+                </p>
+                <p className={styles.insightBody}>{plan.nextActionReason}</p>
+                <button type="button" className={styles.insightBtn} onClick={onOpenNext}>
                   분석 결과에서 이어지는 액션 보기 <span aria-hidden="true">→</span>
                 </button>
-              </div>
+              </aside>
             ) : null}
           </section>
         ) : null}
@@ -421,6 +377,72 @@ export function ActionScreen({
         </Overlay>
       ) : null}
     </div>
+  );
+}
+
+interface MetricSparksProps {
+  plan: ActionPlan;
+  gains: Prediction[];
+  /** 어느 프레임까지 그릴지. 관찰 중엔 재생 위치, 리포트에선 끝까지. */
+  upto: number;
+}
+
+/**
+ * 큰 숫자 · 델타 · 스파크라인.
+ * 관찰 중과 리포트가 함께 쓴다. 리포트에서는 목표 점선과 실제 종착점의 거리가
+ * 곧 채점 결과라 표보다 먼저 읽힌다.
+ */
+function MetricSparks({ plan, gains, upto }: MetricSparksProps) {
+  const start = plan.timelapse[0];
+  const point = plan.timelapse[Math.min(upto, plan.timelapse.length - 1)];
+
+  return (
+    <ul className={styles.metrics}>
+      {TIMELAPSE_SERIES.map((series) => {
+        const pred = gains.find((g) => g.predictionId === series.key);
+        const from = start.values[series.key];
+        const now = point.values[series.key];
+        const goal = Number.parseFloat(pred?.to ?? String(from));
+        const full = plan.timelapse.map((f) => f.values[series.key]);
+        const shown = plan.timelapse.slice(0, upto + 1).map((f) => f.values[series.key]);
+        const { lo, hi } = scale(full, goal);
+        const gy = goalY(goal, lo, hi, SPARK_H);
+        const lastX = ((shown.length - 1) / (full.length - 1)) * SPARK_W;
+        const lastY = SPARK_H - ((now - lo) / (hi - lo)) * SPARK_H;
+        return (
+          <li key={series.key}>
+            <p className={styles.metricLabel}>{series.label}</p>
+            <p className={styles.metricNow}>
+              {now.toLocaleString("ko-KR")}
+              <small>{series.unit}</small>
+              <em>{formatDelta(from, now, series.unit)}</em>
+            </p>
+            <svg
+              className={styles.spark}
+              viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
+              <line className={styles.sparkGoal} x1="0" y1={gy} x2={SPARK_W} y2={gy} />
+              <path
+                className={styles.sparkLine}
+                d={sparkPath(shown, lo, hi, SPARK_W, SPARK_H)}
+              />
+              {shown.length > 1 ? (
+                <circle className={styles.sparkDot} cx={lastX} cy={lastY} r="3.5" />
+              ) : null}
+            </svg>
+            <p className={styles.metricEnds}>
+              <span>
+                적용 전 {from}
+                {series.unit}
+              </span>
+              <span className={styles.metricGoal}>목표 {pred?.to ?? "—"}</span>
+            </p>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
