@@ -2,24 +2,27 @@
   position: relative;
 }
 
+/* 상단 바에서 마젠타 면을 또 쓰면 강조가 흩어진다. 점 하나만 색을 갖는다. */
 .badge {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  border: 1px solid color-mix(in srgb, var(--signal) 34%, transparent);
+  border: 1px solid var(--line);
   border-radius: 100px;
-  background: var(--signal-wash);
-  color: var(--signal-soft);
+  background: none;
+  color: var(--fog);
   font-family: var(--font-mono);
   font-size: 0.68rem;
   letter-spacing: 0.08em;
   padding: 0.28rem 0.7rem;
   cursor: pointer;
-  transition: background 160ms ease;
+  transition:
+    border-color 160ms ease,
+    color 160ms ease;
 }
 
 .badge:hover {
-  background: color-mix(in srgb, var(--signal) 22%, transparent);
+  border-color: var(--fog-dim);
   color: var(--chalk);
 }
 
@@ -100,7 +103,7 @@
 }
 
 .list button:hover {
-  border-color: color-mix(in srgb, var(--signal) 45%, transparent);
+  border-color: var(--fog-dim);
 }
 
 .list strong {
@@ -133,7 +136,7 @@
 .days {
   font-family: var(--font-mono);
   font-size: 0.68rem;
-  color: var(--signal-soft);
+  color: var(--fog-dim);
   font-variant-numeric: tabular-nums;
 }
 
@@ -144,7 +147,7 @@
 }
 
 .score b {
-  color: var(--signal-soft);
+  color: var(--chalk);
   font-weight: 500;
 }
 

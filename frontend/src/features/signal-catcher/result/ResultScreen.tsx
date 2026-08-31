@@ -222,9 +222,7 @@ export function ResultScreen({
                             className={styles.primaryBtn}
                             onClick={() => onOpenAction(item.actionId)}
                           >
-                            {experimentOf(item.actionId)
-                              ? "경과 보기"
-                              : "이렇게 바꾸면 어떻게 될까요?"}
+                            {experimentOf(item.actionId) ? "경과 보기" : "미리보기"}
                           </button>
                         ) : (
                           <span className={styles.actionSoon}>다음 단계</span>

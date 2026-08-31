@@ -332,11 +332,11 @@
   font-family: var(--font-mono);
   font-size: 0.66rem;
   letter-spacing: 0.06em;
-  color: var(--signal-soft) !important;
+  color: var(--fog) !important;
 }
 
 .actionState[data-status="done"] {
-  color: var(--fog) !important;
+  color: var(--fog-dim) !important;
 }
 
 .actionState i {

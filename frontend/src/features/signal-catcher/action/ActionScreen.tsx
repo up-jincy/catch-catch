@@ -9,7 +9,6 @@ import type {
   ActionPlan,
   ActionStage,
   Experiment,
-  Prediction,
 } from "../state/types";
 
 import styles from "./action.module.css";
@@ -50,14 +49,27 @@ export function ActionScreen({
   const [askConflict, setAskConflict] = useState(false);
   const [frame, setFrame] = useState(0);
   const applied = useRef(false);
+  const compareRef = useRef<HTMLElement>(null);
 
-  // 실험 상태가 밖에서 바뀌면(복원 등) 단계를 맞춘다.
   useEffect(() => {
     if (stage === "applying") return;
     setStage(stageOf(experiment));
   }, [experiment, stage]);
 
-  // 매직 연출이 끝나면 관찰 상태로 넘어간다.
+  /*
+   * 적용 버튼은 화면 아래에 있어 연출이 시야 밖에서 일어날 수 있다.
+   * 이미 다 보이면 건드리지 않고, 벗어난 만큼만 옮긴다.
+   * scrollIntoView 는 재렌더와 겹치면 엉뚱한 위치로 튄다.
+   */
+  useEffect(() => {
+    if (stage !== "applying") return;
+    const el = compareRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.top >= 0 && rect.bottom <= window.innerHeight) return;
+    window.scrollTo({ top: window.scrollY + rect.top - 80, behavior: "smooth" });
+  }, [stage]);
+
   useEffect(() => {
     if (stage !== "applying") return;
     const timer = setTimeout(() => {
@@ -67,7 +79,6 @@ export function ActionScreen({
     return () => clearTimeout(timer);
   }, [stage, onApply]);
 
-  // 타임랩스 재생.
   useEffect(() => {
     if (stage !== "watching" || frame === 0) return;
     if (frame >= plan.timelapse.length - 1) {
@@ -104,6 +115,8 @@ export function ActionScreen({
   const risks = plan.predictions.filter((p) => p.direction === "risk");
   const hits = plan.outcomes.filter((o) => o.verdict === "hit").length;
   const point = plan.timelapse[Math.min(frame, plan.timelapse.length - 1)];
+  const start = plan.timelapse[0];
+  const preview = stage === "preview" || stage === "applying";
 
   return (
     <div className={styles.screen}>
@@ -113,50 +126,80 @@ export function ActionScreen({
         </button>
 
         <header className={styles.head}>
-          <p className={styles.tag}>
-            {stage === "report" ? "실험 결과" : stage === "watching" ? "관찰 중" : "적용하면 어떻게 될까요"}
+          <p className={styles.eyebrow}>
+            {stage === "report" ? "실험 결과" : stage === "watching" ? "관찰 중" : "적용 미리보기"}
           </p>
           <h1>{plan.title}</h1>
           <p className={styles.target}>
-            대상 <em>{plan.segmentLabel}</em> · {plan.segmentSize.toLocaleString("ko-KR")}명
+            대상 {plan.segmentLabel} · {plan.segmentSize.toLocaleString("ko-KR")}명
           </p>
         </header>
 
-        {stage === "preview" || stage === "applying" ? (
+        {preview ? (
           <>
-            <section className={styles.compare}>
+            <section className={styles.compare} ref={compareRef}>
               <MockupPanel mockup={plan.asIs} state="asIs" magic={stage === "applying"} />
-              <span className={styles.arrow} aria-hidden="true">→</span>
               <MockupPanel mockup={plan.toBe} state="toBe" magic={stage === "applying"} />
             </section>
-
-            <section className={styles.predict}>
-              <div>
-                <h2 className={styles.blockTitle}>좋아질 것</h2>
-                <ul className={styles.predictions}>
-                  {gains.map((item) => (
-                    <PredictionRow key={item.predictionId} item={item} />
-                  ))}
-                </ul>
-              </div>
-              <div>
-                <h2 className={styles.blockTitle} data-tone="risk">
-                  나빠질 수 있는 것
-                </h2>
-                <ul className={styles.predictions}>
-                  {risks.map((item) => (
-                    <PredictionRow key={item.predictionId} item={item} />
-                  ))}
-                </ul>
-              </div>
-            </section>
-
-            <p className={styles.honest}>
-              좋아지는 것만 싣지 않습니다. 나빠질 수 있는 부분까지 함께 예측해야
-              적용 여부를 스스로 판단할 수 있습니다.
+            <p className={styles.changeNote}>
+              검색 결과 위에 <mark>상황형 추천검색어 3줄</mark>이 새로 노출됩니다.
             </p>
 
+            <section>
+              <h2 className={styles.blockTitle}>예상되는 변화</h2>
+              <table className={styles.sheet}>
+                <thead>
+                  <tr>
+                    <th scope="col">지표</th>
+                    <th scope="col">지금</th>
+                    <th scope="col">예상</th>
+                    <th scope="col" className={styles.numCol}>
+                      변화
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {gains.map((item) => (
+                    <tr key={item.predictionId}>
+                      <th scope="row">
+                        {item.label}
+                        <small>{item.reason}</small>
+                      </th>
+                      <td className={styles.from}>{item.from}</td>
+                      <td className={styles.to}>{item.to}</td>
+                      <td className={styles.numCol}>{item.delta}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tbody className={styles.riskBody}>
+                  <tr className={styles.riskHead}>
+                    <th scope="row" colSpan={4}>
+                      이런 위험이 있어요
+                    </th>
+                  </tr>
+                  {risks.map((item) => (
+                    <tr key={item.predictionId}>
+                      <th scope="row">
+                        {item.label}
+                        <small>{item.reason}</small>
+                      </th>
+                      <td className={styles.from}>{item.from}</td>
+                      <td className={styles.to}>{item.to}</td>
+                      <td className={styles.numCol}>{item.delta}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className={styles.footnote}>
+                좋아지는 것만 싣지 않습니다. 나빠질 수 있는 부분까지 함께 예측해야 적용
+                여부를 스스로 판단할 수 있습니다.
+              </p>
+            </section>
+
             <div className={styles.applyRow}>
+              <span className={styles.applyNote}>
+                적용 후 {plan.observeDays}일간 예측이 맞았는지 지켜봅니다
+              </span>
               <button
                 type="button"
                 className={styles.applyBtn}
@@ -165,19 +208,12 @@ export function ActionScreen({
               >
                 {stage === "applying" ? "바꾸는 중…" : `✨ ${plan.applyLabel}`}
               </button>
-              <span className={styles.applyNote}>
-                적용 후 {plan.observeDays}일간 예측이 맞았는지 지켜봅니다
-              </span>
             </div>
           </>
         ) : null}
 
         {stage === "watching" ? (
           <section className={styles.watch}>
-            <p className={styles.watchLead}>
-              적용했어요. <strong>{plan.observeDays}일간 지켜볼게요.</strong>
-            </p>
-
             <div className={styles.timeline}>
               <span className={styles.timelineDay}>
                 {point.date} · {point.day}일째
@@ -185,33 +221,47 @@ export function ActionScreen({
               <div className={styles.timelineBar}>
                 <i style={{ width: `${(point.day / plan.observeDays) * 100}%` }} />
               </div>
+              <span className={styles.timelineEnd}>{plan.observeDays}일</span>
             </div>
 
-            <dl className={styles.series}>
-              {TIMELAPSE_SERIES.map((series) => {
-                const value = point.values[series.key];
-                const ratio = (value - series.min) / (series.max - series.min);
-                return (
-                  <div key={series.key}>
-                    <dt>{series.label}</dt>
-                    <dd>
-                      {value.toLocaleString("ko-KR")}
-                      <small>{series.unit}</small>
-                    </dd>
-                    <span className={styles.spark}>
-                      <i style={{ height: `${Math.max(6, ratio * 100)}%` }} />
-                    </span>
-                  </div>
-                );
-              })}
-            </dl>
+            <table className={styles.sheet}>
+              <thead>
+                <tr>
+                  <th scope="col">지표</th>
+                  <th scope="col">적용 전</th>
+                  <th scope="col">지금</th>
+                  <th scope="col" className={styles.numCol}>
+                    목표
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {TIMELAPSE_SERIES.map((series) => {
+                  const pred = gains.find((g) => g.predictionId === series.key);
+                  return (
+                    <tr key={series.key}>
+                      <th scope="row">{series.label}</th>
+                      <td className={styles.from}>
+                        {start.values[series.key]}
+                        {series.unit}
+                      </td>
+                      <td className={styles.to}>
+                        {point.values[series.key]}
+                        {series.unit}
+                      </td>
+                      <td className={styles.numCol}>{pred?.to ?? "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
 
             {frame === 0 ? (
               <div className={styles.ffRow}>
                 <button type="button" className={styles.ffBtn} onClick={() => setFrame(1)}>
                   ⏩ {plan.observeDays}일 뒤로 감기
                 </button>
-                <p className={styles.ffNote}>
+                <p className={styles.footnote}>
                   실제로는 {plan.observeDays}일을 기다려야 하지만, 데모를 위해 미리 준비한
                   데이터로 감아 볼게요.
                 </p>
@@ -227,43 +277,49 @@ export function ActionScreen({
             <p className={styles.scoreLead}>
               예측 {plan.outcomes.length}개 중 <em>{hits}개</em>가 맞았어요
             </p>
-            <p className={styles.scoreNote}>
+            <p className={styles.footnote}>
               빗나간 예측도 그대로 싣습니다. 전부 맞은 리포트는 채점하지 않은 리포트와
               구분되지 않습니다.
             </p>
 
-            <ul className={styles.outcomes}>
-              {plan.outcomes.map((outcome) => {
-                const pred = plan.predictions.find(
-                  (p) => p.predictionId === outcome.predictionId,
-                );
-                if (!pred) return null;
-                return (
-                  <li key={outcome.predictionId} data-verdict={outcome.verdict}>
-                    <div className={styles.outcomeHead}>
-                      <span className={styles.outcomeLabel}>{pred.label}</span>
-                      <span className={styles.outcomeVerdict}>
-                        {outcome.verdict === "hit" ? "적중" : "빗나감"}
-                      </span>
-                    </div>
-                    <div className={styles.outcomeNums}>
-                      <span>
-                        예측 <b>{pred.delta}</b>
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      <span>
-                        실제 <b>{outcome.actual}</b>
-                      </span>
-                    </div>
-                    <p className={styles.outcomeNote}>{outcome.note}</p>
-                  </li>
-                );
-              })}
-            </ul>
+            <table className={styles.sheet}>
+              <thead>
+                <tr>
+                  <th scope="col">지표</th>
+                  <th scope="col">예측</th>
+                  <th scope="col">실제</th>
+                  <th scope="col" className={styles.numCol}>
+                    판정
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {plan.outcomes.map((outcome) => {
+                  const pred = plan.predictions.find(
+                    (p) => p.predictionId === outcome.predictionId,
+                  );
+                  if (!pred) return null;
+                  const miss = outcome.verdict === "miss";
+                  return (
+                    <tr key={outcome.predictionId} data-verdict={outcome.verdict}>
+                      <th scope="row">
+                        {pred.label}
+                        {miss ? <small>{outcome.note}</small> : null}
+                      </th>
+                      <td className={styles.from}>{pred.delta}</td>
+                      <td className={styles.to}>{outcome.actual}</td>
+                      <td className={styles.numCol}>
+                        <span className={styles.verdict}>{miss ? "빗나감" : "적중"}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
 
             {plan.nextActionReason ? (
               <div className={styles.next}>
-                <p className={styles.nextTag}>빗나간 예측이 알려준 것</p>
+                <p className={styles.eyebrow}>빗나간 예측이 알려준 것</p>
                 <p className={styles.nextReason}>{plan.nextActionReason}</p>
                 <button type="button" className={styles.nextBtn} onClick={onOpenNext}>
                   다음 액션 보기 <span aria-hidden="true">→</span>
@@ -284,7 +340,9 @@ export function ActionScreen({
               aria-label="겹치는 실험"
               onMouseDown={(event) => event.stopPropagation()}
             >
-              <p className={styles.conflictTag}>겹치는 실험이 있어요</p>
+              <p className={styles.eyebrow} data-tone="warn">
+                겹치는 실험이 있어요
+              </p>
               <h2>{conflict.title}</h2>
               <p className={styles.conflictBody}>
                 같은 고객군(<strong>{conflict.segmentLabel}</strong>)을 이미 관찰 중이에요.
@@ -297,7 +355,7 @@ export function ActionScreen({
                 </button>
                 <button
                   type="button"
-                  className={styles.primaryBtn}
+                  className={styles.applyBtn}
                   onClick={() => setAskConflict(false)}
                 >
                   진행 중인 실험 먼저 보기
@@ -311,30 +369,13 @@ export function ActionScreen({
   );
 }
 
-function PredictionRow({ item }: { item: Prediction }) {
-  return (
-    <li data-direction={item.direction}>
-      <div className={styles.predHead}>
-        <span className={styles.predLabel}>{item.label}</span>
-        <span className={styles.predDelta}>{item.delta}</span>
-      </div>
-      <div className={styles.predNums}>
-        <span>{item.from}</span>
-        <span aria-hidden="true">→</span>
-        <strong>{item.to}</strong>
-      </div>
-      <p className={styles.predReason}>{item.reason}</p>
-    </li>
-  );
-}
-
 interface MockupPanelProps {
   mockup: ActionMockup;
   state: "asIs" | "toBe";
   magic: boolean;
 }
 
-/** AS-IS / TO-BE 시안. 적용 연출 중에는 빛줄기가 훑고 지나가며 새 항목이 그려진다. */
+/** AS-IS / TO-BE 시안. 화면처럼 보이도록 검색바와 결과 목록 형태를 유지한다. */
 function MockupPanel({ mockup, state, magic }: MockupPanelProps) {
   const addedIndex = useMemo(() => {
     let seen = 0;
@@ -342,15 +383,14 @@ function MockupPanel({ mockup, state, magic }: MockupPanelProps) {
   }, [mockup.items]);
 
   return (
-    <div className={styles.mockup} data-state={state} data-magic={magic}>
-      <p className={styles.mockupLabel}>{mockup.label}</p>
-      <p className={styles.mockupContext}>{mockup.context}</p>
+    <figure className={styles.mockup} data-state={state} data-magic={magic}>
+      <figcaption className={styles.mockupCap}>{mockup.label}</figcaption>
       <div className={styles.mockupBody}>
         {magic && state === "toBe" ? <span className={styles.sweep} aria-hidden="true" /> : null}
         {mockup.items.map((item, index) => (
           <div
             key={`${item.kind}-${item.text}`}
-            className={styles.mockupItem}
+            className={styles.row}
             data-kind={item.kind}
             data-added={item.added}
             style={
@@ -359,11 +399,11 @@ function MockupPanel({ mockup, state, magic }: MockupPanelProps) {
                 : undefined
             }
           >
-            <span className={styles.mockupText}>{item.text}</span>
-            {item.sub ? <span className={styles.mockupSub}>{item.sub}</span> : null}
+            <span className={styles.rowText}>{item.text}</span>
+            {item.sub ? <span className={styles.rowSub}>{item.sub}</span> : null}
           </div>
         ))}
       </div>
-    </div>
+    </figure>
   );
 }
