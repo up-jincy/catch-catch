@@ -1,0 +1,1749 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>캐치캐치 화면 정의서</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gasoek+One&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&display=swap">
+
+<style>
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  /* ── Tokens ─────────────────────────────────────────────
+     Dark-first: the product itself is a dark hot-pink surface.
+     Bare :root carries the dark palette; light is the override. */
+  :root {
+    --ground: #0b0710;
+    --raise: #150d1e;
+    --card: #1d1329;
+    --card-2: #241735;
+    --line: #33223f;
+    --line-soft: #261a33;
+    --chalk: #f3edf7;
+    --fog: #a596b2;
+    --fog-dim: #7c6d89;
+    --signal: #ff2e98;
+    --signal-soft: #ff8cc6;
+    --signal-wash: rgb(255 46 152 / 12%);
+    --jade: #4ac9a3;
+    --jade-wash: rgb(74 201 163 / 12%);
+    --amber: #edb055;
+    --amber-wash: rgb(237 176 85 / 12%);
+    --shadow: 0 24px 60px rgb(0 0 0 / 45%);
+
+    --measure: 47rem;
+    --wide: 68rem;
+    --step: 1.0625rem;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --ground: #faf6fb;
+      --raise: #ffffff;
+      --card: #ffffff;
+      --card-2: #f4eef7;
+      --line: #e2d5e9;
+      --line-soft: #eee5f2;
+      --chalk: #1c1024;
+      --fog: #6b5c78;
+      --fog-dim: #8b7d97;
+      --signal: #d80077;
+      --signal-soft: #b8005f;
+      --signal-wash: rgb(216 0 119 / 8%);
+      --jade: #12876a;
+      --jade-wash: rgb(18 135 106 / 10%);
+      --amber: #9a6a12;
+      --amber-wash: rgb(154 106 18 / 12%);
+      --shadow: 0 18px 44px rgb(60 20 70 / 10%);
+    }
+  }
+
+  :root[data-theme="light"] {
+    --ground: #faf6fb;
+    --raise: #ffffff;
+    --card: #ffffff;
+    --card-2: #f4eef7;
+    --line: #e2d5e9;
+    --line-soft: #eee5f2;
+    --chalk: #1c1024;
+    --fog: #6b5c78;
+    --fog-dim: #8b7d97;
+    --signal: #d80077;
+    --signal-soft: #b8005f;
+    --signal-wash: rgb(216 0 119 / 8%);
+    --jade: #12876a;
+    --jade-wash: rgb(18 135 106 / 10%);
+    --amber: #9a6a12;
+    --amber-wash: rgb(154 106 18 / 12%);
+    --shadow: 0 18px 44px rgb(60 20 70 / 10%);
+  }
+
+  /* ── Base ───────────────────────────────────────────── */
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--chalk);
+    font-family: "IBM Plex Sans KR", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: var(--step);
+    font-weight: 300;
+    line-height: 1.72;
+    -webkit-font-smoothing: antialiased;
+    word-break: keep-all;
+  }
+
+  .page {
+    max-width: var(--wide);
+    margin: 0 auto;
+    padding: 0 1.5rem 7rem;
+  }
+
+  .col {
+    max-width: var(--measure);
+    margin-inline: auto;
+  }
+
+  h1, h2, h3, h4 { text-wrap: balance; margin: 0; font-weight: 600; }
+
+  a { color: var(--signal-soft); text-decoration-color: color-mix(in srgb, var(--signal-soft) 40%, transparent); text-underline-offset: 3px; }
+
+  :focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; border-radius: 3px; }
+
+  code, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.86em; }
+
+  code {
+    background: var(--card-2);
+    border: 1px solid var(--line-soft);
+    border-radius: 4px;
+    padding: 0.08em 0.36em;
+    color: var(--chalk);
+    white-space: nowrap;
+  }
+
+  /* ── Hero ───────────────────────────────────────────── */
+  .hero {
+    padding: 5.5rem 0 3rem;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--fog-dim);
+    margin: 0 0 1.75rem;
+  }
+
+  .wordmark {
+    font-family: "Gasoek One", "IBM Plex Sans KR", sans-serif;
+    font-weight: 400;
+    font-size: clamp(3.2rem, 11vw, 5.75rem);
+    line-height: 0.94;
+    letter-spacing: -0.01em;
+    color: var(--chalk);
+    margin: 0;
+  }
+
+  .wordmark em { font-style: normal; color: var(--signal); }
+
+  .hero-sub {
+    font-size: 1.15rem;
+    color: var(--fog);
+    max-width: 34rem;
+    margin: 1.5rem 0 0;
+    line-height: 1.7;
+  }
+
+  .hero-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+    margin-top: 2.5rem;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.76rem;
+    color: var(--fog-dim);
+    letter-spacing: 0.04em;
+  }
+
+  /* heartbeat: the loading animation this doc specs, shown rather than described */
+  .pulse-strip {
+    margin-top: 3rem;
+    height: 74px;
+    overflow: hidden;
+  }
+
+  .pulse-strip svg { width: 100%; height: 100%; display: block; }
+
+  .pulse-line {
+    fill: none;
+    stroke: var(--signal);
+    stroke-width: 2.25;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-dasharray: 1400;
+    stroke-dashoffset: 1400;
+    animation: trace 4.2s cubic-bezier(0.5, 0, 0.4, 1) infinite;
+  }
+
+  .pulse-ghost { fill: none; stroke: var(--line); stroke-width: 1.25; }
+
+  @keyframes trace {
+    0%   { stroke-dashoffset: 1400; }
+    62%  { stroke-dashoffset: 0; }
+    88%  { stroke-dashoffset: 0; opacity: 1; }
+    100% { stroke-dashoffset: 0; opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pulse-line { animation: none; stroke-dashoffset: 0; }
+  }
+
+  /* ── Section rhythm ─────────────────────────────────── */
+  .band { padding: 4.5rem 0 0; }
+
+  .band-head { max-width: var(--measure); margin-inline: auto; margin-bottom: 2rem; }
+
+  .band-head h2 {
+    font-size: clamp(1.5rem, 3.4vw, 1.95rem);
+    letter-spacing: -0.015em;
+    line-height: 1.35;
+  }
+
+  .band-head p { color: var(--fog); margin: 0.65rem 0 0; }
+
+  .tag {
+    display: inline-block;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--signal);
+    background: var(--signal-wash);
+    border: 1px solid color-mix(in srgb, var(--signal) 28%, transparent);
+    border-radius: 100px;
+    padding: 0.22rem 0.7rem;
+    margin-bottom: 0.9rem;
+  }
+
+  .col > p { margin: 1.15rem 0; }
+  .col > h3 {
+    font-size: 1.1rem;
+    margin: 2.5rem 0 0.6rem;
+    letter-spacing: -0.01em;
+  }
+
+  /* ── Tables ─────────────────────────────────────────── */
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--card);
+    margin: 1.5rem 0;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    line-height: 1.55;
+    min-width: 34rem;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 0.78rem 1rem;
+    border-bottom: 1px solid var(--line-soft);
+    vertical-align: top;
+  }
+
+  thead th {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--fog-dim);
+    font-weight: 500;
+    background: var(--raise);
+    white-space: nowrap;
+  }
+
+  tbody tr:last-child td { border-bottom: 0; }
+
+  td strong { font-weight: 600; }
+
+  .num { font-variant-numeric: tabular-nums; }
+
+  .keep td:first-child { color: var(--jade); font-weight: 500; }
+  .drop td:first-child { color: var(--fog-dim); }
+  .drop td:first-child s { text-decoration-thickness: 1px; text-decoration-color: color-mix(in srgb, var(--fog-dim) 60%, transparent); }
+
+  /* ── Callouts ───────────────────────────────────────── */
+  .note {
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--signal);
+    background: var(--card);
+    border-radius: 4px 12px 12px 4px;
+    padding: 1.25rem 1.4rem;
+    margin: 1.75rem 0;
+  }
+
+  .note.find { border-left-color: var(--jade); }
+  .note.warn { border-left-color: var(--amber); }
+
+  .note-label {
+    display: block;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--signal);
+    margin-bottom: 0.5rem;
+  }
+
+  .note.find .note-label { color: var(--jade); }
+  .note.warn .note-label { color: var(--amber); }
+
+  .note p { margin: 0; font-size: 0.98rem; }
+  .note p + p { margin-top: 0.7rem; }
+
+  /* ── Screen cards ───────────────────────────────────── */
+  .screen {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 1.9rem;
+    margin: 1.75rem 0;
+  }
+
+  .screen-top {
+    display: flex;
+    align-items: baseline;
+    gap: 0.9rem;
+    padding-bottom: 1.1rem;
+    border-bottom: 1px solid var(--line-soft);
+    margin-bottom: 1.35rem;
+  }
+
+  .screen-idx {
+    font-family: "Gasoek One", sans-serif;
+    font-size: 1.6rem;
+    color: var(--signal);
+    line-height: 1;
+  }
+
+  .screen-top h3 { font-size: 1.22rem; letter-spacing: -0.01em; }
+  .screen-top span.mono { color: var(--fog-dim); margin-left: auto; font-size: 0.74rem; white-space: nowrap; }
+
+  .decisions { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.85rem; }
+
+  .decisions li {
+    display: grid;
+    grid-template-columns: 4.6rem 1fr;
+    gap: 1rem;
+    align-items: start;
+    font-size: 0.95rem;
+    line-height: 1.62;
+  }
+
+  .decisions li > span:first-child {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.66rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 0.2rem 0;
+    color: var(--fog-dim);
+    border-top: 2px solid var(--line);
+  }
+
+  .decisions li.yes > span:first-child { color: var(--jade); border-top-color: var(--jade); }
+  .decisions li.no > span:first-child { color: var(--fog-dim); border-top-color: var(--fog-dim); }
+  .decisions li.ask > span:first-child { color: var(--amber); border-top-color: var(--amber); }
+
+  /* ── Swimlane ───────────────────────────────────────── */
+  .lane-frame {
+    border: 1px solid var(--line);
+    background: var(--card);
+    border-radius: 16px;
+    padding: 1.6rem 1.2rem 1.2rem;
+    margin: 1.75rem 0;
+    overflow-x: auto;
+  }
+
+  .lane-grid {
+    display: grid;
+    grid-template-columns: 6.2rem repeat(7, minmax(4.2rem, 1fr));
+    align-items: center;
+    min-width: 40rem;
+    row-gap: 0;
+  }
+
+  .lane-date {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.7rem;
+    color: var(--fog-dim);
+    text-align: center;
+    padding-bottom: 0.9rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .lane-name {
+    font-size: 0.78rem;
+    color: var(--fog);
+    padding-right: 0.9rem;
+    height: 3rem;
+    display: flex;
+    align-items: center;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .lane-cell {
+    height: 3rem;
+    border-top: 1px solid var(--line-soft);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+
+  .dot {
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: var(--signal);
+    box-shadow: 0 0 0 5px var(--signal-wash);
+  }
+
+  .dot.mute { background: var(--fog-dim); box-shadow: 0 0 0 5px color-mix(in srgb, var(--fog-dim) 14%, transparent); }
+  .dot.warn { background: var(--amber); box-shadow: 0 0 0 5px var(--amber-wash); }
+
+  .lane-cap {
+    position: absolute;
+    top: calc(50% + 12px);
+    font-size: 0.66rem;
+    color: var(--fog-dim);
+    white-space: nowrap;
+    line-height: 1.3;
+  }
+
+  .lane-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.1rem;
+    margin-top: 1.4rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--line-soft);
+    font-size: 0.76rem;
+    color: var(--fog-dim);
+    min-width: 40rem;
+  }
+
+  .lane-legend span { display: inline-flex; align-items: center; gap: 0.45rem; }
+  .lane-legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+  /* ── Sequence (real ordering) ───────────────────────── */
+  .seq { list-style: none; padding: 0; margin: 1.75rem 0 0; display: grid; gap: 0; }
+
+  .seq li {
+    display: grid;
+    grid-template-columns: 3.4rem 1fr;
+    gap: 1.4rem;
+    padding: 1.25rem 0;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .seq li:last-child { border-bottom: 1px solid var(--line-soft); }
+
+  .seq-n {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.82rem;
+    color: var(--signal);
+    font-variant-numeric: tabular-nums;
+    padding-top: 0.2rem;
+    letter-spacing: 0.05em;
+  }
+
+  .seq h4 { font-size: 1rem; margin-bottom: 0.35rem; }
+  .seq p { margin: 0; font-size: 0.92rem; color: var(--fog); }
+  .seq .out {
+    display: inline-block;
+    margin-top: 0.6rem;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.7rem;
+    color: var(--jade);
+    background: var(--jade-wash);
+    border-radius: 100px;
+    padding: 0.18rem 0.65rem;
+  }
+
+  /* ── Ask list ───────────────────────────────────────── */
+  .asks { list-style: none; padding: 0; margin: 1.5rem 0 0; display: grid; gap: 1rem; }
+
+  .asks li {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 1.1rem 1.3rem;
+    font-size: 0.95rem;
+  }
+
+  .asks strong { display: block; margin-bottom: 0.3rem; font-weight: 600; }
+  .asks span { color: var(--fog); font-size: 0.88rem; }
+
+  .foot {
+    margin-top: 5rem;
+    padding-top: 1.6rem;
+    border-top: 1px solid var(--line-soft);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.72rem;
+    color: var(--fog-dim);
+    letter-spacing: 0.05em;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+  }
+
+  /* ── Depth ladder ───────────────────────────────────── */
+  .ladder { display: grid; gap: 0; margin: 1.75rem 0; }
+
+  .rung {
+    display: grid;
+    grid-template-columns: 7.5rem 1fr;
+    gap: 1.4rem;
+    padding: 1.4rem 0;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .rung:last-child { border-bottom: 1px solid var(--line-soft); }
+
+  .rung-tier {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--fog-dim);
+    line-height: 1.5;
+  }
+
+  .rung-tier b { display: block; color: var(--signal); font-weight: 500; margin-bottom: 0.2rem; }
+  .rung h4 { font-size: 1rem; margin-bottom: 0.3rem; }
+  .rung p { margin: 0; font-size: 0.92rem; color: var(--fog); }
+  .rung p + p { margin-top: 0.5rem; }
+
+  /* ── Scorecard ──────────────────────────────────────── */
+  .score {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    margin: 1.75rem 0;
+  }
+
+  .score div { background: var(--card); padding: 1.1rem 1.15rem; }
+
+  .score dt {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.66rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--fog-dim);
+    margin-bottom: 0.45rem;
+  }
+
+  .score dd {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+
+  .score dd small { font-size: 0.8rem; font-weight: 400; color: var(--fog-dim); margin-left: 0.15rem; }
+  .score .ok dd { color: var(--jade); }
+  .score .hm dd { color: var(--amber); }
+
+  /* ── Claim ledger ───────────────────────────────────── */
+  .claim {
+    border: 1px solid var(--line);
+    background: var(--card);
+    border-radius: 12px;
+    padding: 1.25rem 1.35rem;
+    margin: 1.5rem 0;
+  }
+
+  .claim-say { font-size: 1rem; font-weight: 500; margin: 0 0 1rem; line-height: 1.55; }
+
+  .claim-say .pass {
+    display: inline-block;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.64rem;
+    letter-spacing: 0.1em;
+    color: var(--jade);
+    background: var(--jade-wash);
+    border: 1px solid color-mix(in srgb, var(--jade) 32%, transparent);
+    border-radius: 100px;
+    padding: 0.1rem 0.55rem;
+    margin-left: 0.5rem;
+    vertical-align: 0.15em;
+  }
+
+  .chain { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+
+  .chain li {
+    display: grid;
+    grid-template-columns: 5.4rem 1fr;
+    gap: 0.9rem;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.76rem;
+    line-height: 1.6;
+    color: var(--fog);
+    padding-left: 1rem;
+    border-left: 2px solid var(--line);
+  }
+
+  .chain li span:first-child { color: var(--signal-soft); letter-spacing: 0.05em; }
+  .chain li b { color: var(--chalk); font-weight: 500; }
+
+  /* ── Swimlane connector overlay ─────────────────────── */
+  .lane-grid { position: relative; }
+
+  .lane-link {
+    position: absolute;
+    left: 6.2rem;
+    right: 0;
+    bottom: 0;
+    height: 15rem;
+    pointer-events: none;
+    overflow: visible;
+  }
+
+  .lane-link path {
+    fill: none;
+    stroke: var(--signal);
+    stroke-width: 1.75;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: 0.55;
+    vector-effect: non-scaling-stroke;
+    stroke-dasharray: 1300;
+    stroke-dashoffset: 1300;
+    animation: draw 6s cubic-bezier(0.45, 0, 0.3, 1) infinite;
+  }
+
+  @keyframes draw {
+    0%   { stroke-dashoffset: 1300; }
+    55%  { stroke-dashoffset: 0; }
+    90%  { stroke-dashoffset: 0; opacity: 0.55; }
+    100% { stroke-dashoffset: 0; opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .lane-link path { animation: none; stroke-dashoffset: 0; }
+  }
+
+  /* ── Intensity sparkline under the lanes ────────────── */
+  .lane-intensity {
+    min-width: 40rem;
+    margin-top: 1.1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .lane-intensity-head {
+    display: flex;
+    justify-content: space-between;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.66rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--fog-dim);
+    margin-bottom: 0.45rem;
+  }
+
+  .lane-intensity svg {
+    display: block;
+    margin-left: 6.2rem;
+    width: calc(100% - 6.2rem);
+    height: 46px;
+  }
+  .lane-intensity .fillw { fill: var(--signal-wash); }
+  .lane-intensity .linew { fill: none; stroke: var(--signal); stroke-width: 1.75; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+
+  @media (max-width: 40rem) {
+    .rung { grid-template-columns: 1fr; gap: 0.4rem; }
+    .chain li { grid-template-columns: 1fr; gap: 0; }
+    .decisions li { grid-template-columns: 1fr; gap: 0.25rem; }
+    .decisions li > span:first-child { border-top: 0; padding-top: 0; }
+    .screen { padding: 1.4rem; }
+    .hero { padding-top: 3.5rem; }
+  }
+</style>
+  </head>
+  <body>
+
+<div class="page">
+
+  <header class="hero">
+    <p class="eyebrow">Frontend Screen Spec · v0.4 · 2026.08.28 · 구현 완료</p>
+    <h1 class="wordmark">시그널을<br>캐치하는<br><em>캐치캐치</em></h1>
+    <p class="hero-sub">
+      Customer Intelligence Agent의 프론트엔드를 대화형 UI 없이 다시 짰습니다.
+      질문·로딩·결과 세 화면과, 결론까지의 과정을 파고드는 검증 기록 페이지까지
+      Mock 데이터로 동작합니다. 이 문서는 만들어진 것과 남은 것, 팀 합의가 필요한 것을 정리합니다.
+    </p>
+    <div class="hero-meta">
+      <span>질문 → 캐치 → 결과 → 검증 기록</span>
+      <span>LG U+ 리브랜딩 팔레트</span>
+      <span>Next 16 · React 19</span>
+      <span>Mock 구동 · 백엔드 연결 대기</span>
+      <span>TEAM 네박자</span>
+    </div>
+
+    <div class="pulse-strip" aria-hidden="true">
+      <svg viewBox="0 0 1200 74" preserveAspectRatio="none">
+        <path class="pulse-ghost" d="M0 37 H1200" />
+        <path class="pulse-line" d="M0 37 H340 L360 37 L372 12 L388 62 L402 24 L414 37 L436 37 L448 30 L460 44 L472 37 H700 L716 37 L728 8 L744 66 L758 20 L770 37 H1200" />
+      </svg>
+    </div>
+  </header>
+
+  <!-- ─────────────────────────────────────────────── -->
+  <section class="band">
+    <div class="band-head">
+      <span class="tag">Position</span>
+      <h2>왜 대화형 UI를 버리는가</h2>
+      <p>
+        신청서의 STEP 1은 “Search / Chat Interface”라고만 적혀 있습니다.
+        해커톤에 나오는 거의 모든 Agent 프로토타입이 여기서 같은 화면을 만듭니다.
+      </p>
+    </div>
+
+    <div class="col">
+      <p>
+        캐치캐치는 <strong>대화</strong>가 아니라 <strong>탐색</strong>을 팝니다.
+        CX 담당자는 Agent와 수다를 떨고 싶은 게 아니라, 질문 하나를 던지고
+        검증된 답과 그 근거를 받고 싶습니다. 그래서 화면을 세 개로 고정합니다.
+      </p>
+      <div class="note">
+        <span class="note-label">한 줄 정의</span>
+        <p>
+          <strong>질문 하나 → Agent가 일하는 과정을 실시간으로 보여줌 → 근거까지 열어볼 수 있는 결과 한 장.</strong>
+          채팅 로그를 스크롤해서 답을 찾는 경험을 만들지 않습니다.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── -->
+  <section class="band">
+    <div class="band-head">
+      <span class="tag">Codebase</span>
+      <h2>갈아엎는 범위</h2>
+      <p>
+        현재 프론트엔드는 데이터 레이어와 화면 레이어가 이미 분리돼 있습니다.
+        백엔드 계약을 다시 협상할 필요 없이 화면만 교체할 수 있습니다.
+      </p>
+    </div>
+
+    <div class="col">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>구분</th><th>파일</th><th>이유</th></tr>
+          </thead>
+          <tbody>
+            <tr class="keep"><td>유지</td><td><code>contracts.ts</code></td><td>백엔드 공개 계약 타입 전부</td></tr>
+            <tr class="keep"><td>유지</td><td><code>run-client.ts</code> · <code>parse-sse.ts</code></td><td>SSE 스트림과 API 호출</td></tr>
+            <tr class="keep"><td>유지</td><td><code>run-reducer.ts</code></td><td>이벤트를 화면 상태로 접는 로직</td></tr>
+            <tr class="keep"><td>유지</td><td><code>use-run-controller.ts</code></td><td>훅 하나가 질문·기간·소스·실행·근거조회를 전부 제공</td></tr>
+            <tr class="keep"><td>재활용</td><td><code>EvidenceDrawer.tsx</code></td><td>근거 조회 로직만 가져오고 껍데기는 새로</td></tr>
+            <tr class="drop"><td><s>교체</s></td><td><code>CustomerIntelligencePage</code> · <code>ChatPanel</code> · <code>QueryComposer</code></td><td>대화형 셸</td></tr>
+            <tr class="drop"><td><s>교체</s></td><td><code>LegacyInsightWorkspace</code> · <code>AnalysisWorkspace</code> · <code>InsightSummary</code></td><td>구 대시보드</td></tr>
+            <tr class="drop"><td><s>교체</s></td><td><code>globals.css</code> <span class="num mono">2,419줄</span></td><td>navy + cyan + amber 팔레트 전면 교체</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note find">
+        <span class="note-label">기존 화면은 지우지 않았습니다</span>
+        <p>
+          동료가 만든 Working Demo 는 <code>/legacy</code> 경로에 그대로 살아 있고,
+          Playwright e2e 6개도 진입 경로만 바꿔 전부 통과합니다.
+          새 화면은 <code>/</code> 에 올라가 있으며 <code>src/features/signal-catcher/</code> 안에서만 동작합니다.
+        </p>
+      </div>
+
+      <div class="note find">
+        <span class="note-label">de-risk</span>
+        <p>
+          <code>useRunController()</code> 하나가 <code>question</code>, <code>startDate</code>, <code>endDate</code>,
+          <code>enabledSources</code>, <code>runState</code>, <code>run()</code>, <code>openEvidence()</code>를 모두 반환합니다.
+          새 화면은 이 훅에만 붙으면 되고, 백엔드 담당자는 이 작업 동안 아무것도 바꾸지 않아도 됩니다.
+        </p>
+      </div>
+
+      <h3>추가하는 의존성</h3>
+      <p>
+        <code>motion</code> 하나만 추가합니다. 화면 전환, 하트 스케일아웃, 저니 노드 stagger를
+        CSS 타이밍으로 손조율하면 시간이 다 날아갑니다. 심박 라인 자체는
+        <code>stroke-dashoffset</code> CSS 애니메이션이라 라이브러리가 필요 없습니다.
+      </p>
+      <p>
+        라우팅은 Next 라우트로 쪼개지 않고 <strong>한 페이지 안에서 <code>phase</code> 기반 뷰 전환</strong>으로 갑니다.
+        하트가 커지며 결과로 넘어가는 연출이 라우트 경계를 넘으면 끊깁니다.
+      </p>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── -->
+  <section class="band">
+    <div class="band-head">
+      <span class="tag">Design system</span>
+      <h2>LG유플러스 2025 리브랜딩 위에 얹기</h2>
+      <p>
+        사내 해커톤이라 회사의 새 브랜드 시스템을 그대로 씁니다.
+        공식 5색 밖의 색은 하나도 만들지 않았고, 파생값도 이 5색의 <code>color-mix</code> 로만 뽑았습니다.
+      </p>
+    </div>
+
+    <div class="col">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>공식 색</th><th>HEX</th><th>우리 화면에서의 역할</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Bright Magenta</strong></td><td class="mono">#ff2e98</td><td>강조 · 시그널 · 심박 라인 · 검증 통과</td></tr>
+            <tr><td><strong>U+ Black</strong></td><td class="mono">#22171c</td><td>페이지 바탕 · 주의 상태</td></tr>
+            <tr><td><strong>U+ Gray</strong></td><td class="mono">#82817e</td><td>흐린 글자</td></tr>
+            <tr><td><strong>U+ Light Gray</strong></td><td class="mono">#f4f4ee</td><td>본문 글자</td></tr>
+            <tr><td><strong>U+ White</strong></td><td class="mono">#ffffff</td><td>마젠타 버튼 위 글자</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note warn">
+        <span class="note-label">팔레트 밖 색은 딱 하나</span>
+        <p>
+          경고에만 앰버 <code>#ffa62e</code> 를 씁니다.
+          브랜드 팔레트는 아이덴티티 색이지 시스템 상태색까지 규정하지 않고,
+          <strong>오류를 브랜드색으로 칠하면 브랜드가 오염됩니다.</strong>
+          마젠타와 색상환에서 충분히 떨어지면서 같은 밝기대에 있는 색으로 골랐습니다.
+        </p>
+      </div>
+
+      <div class="note">
+        <span class="note-label">밝은 바탕을 쓰지 않은 이유</span>
+        <p>
+          Light Gray 를 바탕에 깔아 봤더니 마젠타가 막대·칩·헤드라인 한 단어 정도로만 나타나
+          <strong>브랜드 컬러가 화면을 끌고 가지 못했습니다.</strong> 포인트 색으로 밀려나 매력이 반감됩니다.
+        </p>
+        <p>
+          U+ Black 을 바탕에 깔고 U+ Light Gray 를 글자로 쓰면 <strong>여전히 공식 5색인데 마젠타가 발광</strong>합니다.
+          팔레트가 밝아야 한다는 규칙은 없습니다. 본문 대비는 <span class="num">13:1</span>, 흐린 글자도 <span class="num">4.6:1</span> 로
+          어둡지만 가시성 문제는 없습니다.
+        </p>
+      </div>
+
+      <h3>세 모티브의 대응</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>리브랜딩 모티브</th><th>우리 화면</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>튜브</strong> — 가로로 늘린 원</td><td>입력창, 조건 토큰, 근거 칩, 버튼, 로딩 상단 질의 바</td></tr>
+            <tr><td><strong>윈도우</strong> — 세로까지 확장</td><td>저니 보드, 근거 드로어, 결과·검증 카드</td></tr>
+            <tr><td><strong>브라이트 서클</strong></td><td>서비스 마크의 돋보기 렌즈, 상단 질의 바의 아이콘</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>서비스 마크</h3>
+      <p>
+        돋보기 렌즈 안에 시그널 파형이 들어가고, 오른쪽 위에 작은 하트가 붙습니다.
+        <strong>돋보기 = 찾는다, 파형 = 시그널, 하트 = 찾았다</strong>로 서비스 전체가 마크 하나에 들어갑니다.
+        하트는 전환 연출에서 터지는 하트의 복선이기도 합니다.
+      </p>
+      <p>
+        렌즈와 손잡이는 크림색이고 <strong>하트만 Bright Magenta 로 빠져나옵니다.</strong>
+        마크에서 유일한 유채색이라 작게 놓여도 눈에 걸립니다.
+      </p>
+      <div class="note">
+        <span class="note-label">노출은 상단 좌측 한 곳뿐</span>
+        <p>
+          로고를 화면 곳곳에 반복하면 브랜드가 강해지는 게 아니라 <strong>닳습니다.</strong>
+          서비스 마크는 상단 좌측 서비스명 자리에만 둡니다.
+          캐치 버튼은 평범한 돋보기 아이콘, 로딩 화면의 질의 바와 결과 헤드라인은 아이콘 없이 텍스트만 씁니다.
+        </p>
+      </div>
+      <p>
+        상단 우측은 SaaS 관례를 따라 <strong>환경 배지 자리</strong>로 씁니다.
+        <code>PROTOTYPE</code> 배지와 <code>by 네박자</code>를 나란히 두어
+        “아직 프로토타입”과 “누가 만들었나”를 한 줄로 전달합니다.
+        팀 이름 <strong>네박자</strong>(기획 2 · 개발 2)는 로딩 화면의 심박 라인과도 맞물립니다.
+      </p>
+
+      <h3>타이포그래피</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>역할</th><th>서체</th><th>굵기</th><th>쓰이는 곳</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Display</td><td><strong>Gasoek One</strong></td><td>400</td><td>워드마크, 화면 제목, 결과 헤드라인, 검증 기록 제목, “찾았다!”</td></tr>
+            <tr><td>Body</td><td><strong>IBM Plex Sans KR</strong></td><td>400·500·600</td><td>본문 전부</td></tr>
+            <tr><td>Data</td><td><strong>IBM Plex Mono</strong></td><td>400·500</td><td>라벨, 수치, ID, 이벤트명</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        Gasoek One 은 <strong>큰 헤드라인에 깔릴 때</strong> 개성이 나옵니다. 로고에만 남기면
+        본문과 따로 노는 이질적인 로고체로 보입니다. 굵기는 400 하나뿐이라 700 을 지정하면 가짜 굵기로 뭉개집니다.
+      </p>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── -->
+  <section class="band">
+    <div class="band-head">
+      <span class="tag">Screens</span>
+      <h2>세 화면</h2>
+      <p>손그림에서 열려 있던 질문 중 상당수는 백엔드가 이미 답을 갖고 있었습니다.</p>
+    </div>
+
+    <div class="col">
+
+      <!-- 화면 1 -->
+      <article class="screen">
+        <div class="screen-top">
+          <span class="screen-idx">1</span>
+          <h3>질문하기</h3>
+          <span class="mono">phase = idle</span>
+        </div>
+
+        <p style="margin:0 0 1.35rem; color:var(--fog); font-size:0.95rem;">
+          상단에 <strong style="color:var(--chalk)">“고객의 시그널을 찾아보세요”</strong>,
+          가운데 입력창 하나, 아래 제안 시나리오 카드. 그 외에는 아무것도 두지 않습니다.
+        </p>
+
+        <ul class="decisions">
+          <li class="yes">
+            <span>확정</span>
+            <span><strong>Placeholder 타이프라이터.</strong> 페르소나별 질문이 타자 치듯 나타났다 지워집니다.
+            실제 <code>placeholder</code> 속성 대신 오버레이 요소로 구현하고, 사용자가 입력을 시작하면 즉시 멈춥니다.</span>
+          </li>
+          <li class="yes">
+            <span>확정</span>
+            <span><strong>+ 버튼 → 2depth 컨텍스트 메뉴.</strong> <code>Dataset ></code>에서 연결된 데이터가 전부 선택된 상태로 열리고 개별 해제가 가능합니다.
+            <code>search_history</code>만 필수 고정.</span>
+          </li>
+          <li class="yes">
+            <span>확정</span>
+            <span><strong>기간은 자연어가 아니라 칩.</strong> <code>+ → 기간 ></code>에서 최근 7일 / 14일 / 30일 / 직접선택.
+            선택하면 입력창 앞에 <code>최근 14일 ×</code> 토큰 pill로 박힙니다.</span>
+          </li>
+          <li class="no">
+            <span>제외</span>
+            <span><strong>자연어 날짜 파싱.</strong> <code>RunRequest</code>가 ISO <code>start_at</code>/<code>end_at</code>을 요구하는데
+            백엔드에 파서가 없습니다. 프론트에서 파싱하면 데모 중 깨질 위험만 커집니다.</span>
+          </li>
+        </ul>
+
+        <h3 style="font-size:0.95rem; margin:1.75rem 0 0.5rem;">Dataset 2depth에 실제로 띄울 수 있는 것</h3>
+        <p style="margin:0; font-size:0.92rem; color:var(--fog);">
+          <code>GET /api/sources</code>가 소스별로 <code>label</code>, <code>description</code>,
+          <code>supported_topics</code>, <code>data_interval</code>까지 내려줍니다.
+          그래서 밋밋한 체크박스 대신 <strong style="color:var(--chalk)">“이 소스가 커버하는 주제” 뱃지 + 데이터 보유 기간</strong>을 함께 보여줍니다.
+          연결된 데이터가 진짜라는 인상이 여기서 만들어집니다.
+        </p>
+      </article>
+
+      <!-- 화면 2 -->
+      <article class="screen">
+        <div class="screen-top">
+          <span class="screen-idx">2</span>
+          <h3>캐치하는 중</h3>
+          <span class="mono">phase = running</span>
+        </div>
+
+        <p style="margin:0 0 1.35rem; color:var(--fog); font-size:0.95rem;">
+          상단에 질문이 고정되고, 가운데 심박 라인이 단계마다 채워지며,
+          그 아래로 진행 문장이 크레딧처럼 흘러 올라갑니다.
+          다 찾으면 하트가 터지며 결과 화면으로 넘어갑니다.
+        </p>
+
+        <div class="note find" style="margin-top:0;">
+          <span class="note-label">확정 · 백엔드가 이미 보내고 있음</span>
+          <p>
+            로딩 단계를 새로 정할 필요가 없습니다. 백엔드가 <strong>이미 이 순서로 SSE 이벤트를 스트리밍</strong>하고 있고,
+            각 이벤트에 화면에 그대로 띄울 수 있는 실제 문장이 들어 있습니다.
+            타이머로 흉내 내는 게 아니라 진짜 Agent 진행상황을 노출합니다.
+          </p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>SSE 이벤트</th><th>스테퍼 라벨</th><th>서브텍스트로 쓸 실데이터</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>run_started</code></td><td>준비</td><td>—</td></tr>
+              <tr><td><code>goal_created</code></td><td><strong>목표</strong></td><td><code>goal.objective</code> — LLM이 쓴 실제 목표 문장</td></tr>
+              <tr><td><code>plan_created</code> · <code>plan_revised</code></td><td><strong>계획</strong></td><td><code>plan.steps[]</code> 단계 수</td></tr>
+              <tr><td><code>step_started</code> → <code>fact_created</code> → <code>step_completed</code></td><td><strong>분석</strong></td><td><code>selection_reason</code>, primitive명, <code>duration_ms</code></td></tr>
+              <tr><td><code>analysis_note_created</code></td><td><strong>인사이트</strong></td><td><code>note.next_action</code>, <code>claims[]</code></td></tr>
+              <tr><td><code>report_validating</code></td><td><strong>검증</strong></td><td><code>fact_ids.length</code>개 근거 검증 중</td></tr>
+              <tr><td><code>result</code> · <code>done</code></td><td>완료 → 하트 심쿵</td><td><code>done.status</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="note">
+          <span class="note-label">차별점</span>
+          <p>
+            <code>report_validating</code> = <strong>“근거 검증”</strong> 단계를 로딩 화면에 노출하는 것.
+            “AI가 지어낸 게 아니라 <span class="num">14</span>개 주장을 대조해 <span class="num">12</span>개만 남겼다”를
+            사용자가 기다리는 동안 보게 됩니다. LLM 결과를 그냥 뱉는 다른 팀 데모와 갈리는 지점입니다.
+          </p>
+        </div>
+
+        <h3 style="font-size:0.95rem; margin:1.75rem 0 0.5rem;">심박 라인이 곧 스테퍼입니다</h3>
+        <p style="margin:0 0 1rem; font-size:0.92rem; color:var(--fog);">
+          처음에는 심박 라인과 5칸 스테퍼를 따로 뒀는데 <strong>시선이 두 갈래로 갈렸습니다.</strong>
+          원형 게이지로 합치는 안도 시도했지만 심박의 “살아 있는” 느낌이 사라졌습니다.
+          결론은 <strong>박동 하나 = 단계 하나</strong>입니다.
+        </p>
+        <ul class="decisions">
+          <li class="yes"><span>확정</span><span>5개의 박동이 이어져 하나의 심박 라인을 이룹니다. 단계가 끝나면 그 구간이 <strong>마젠타로 그려진 채 남고</strong>, 아직 오지 않은 구간은 회색 평선입니다.</span></li>
+          <li class="yes"><span>확정</span><span>진행 중인 박동은 그 단계의 소요시간에 맞춰 <strong>실시간으로 그려지는 중</strong>입니다. 라벨(목표·계획·분석·인사이트·검증)은 각 박동 바로 아래에 붙습니다.</span></li>
+          <li class="yes"><span>확정</span><span>진행이 멎으면(확인 대기·실패) 그리던 박동도 <strong>그 자리에 멈추고 회색으로</strong> 바뀝니다. 실패 시에는 평선으로 떨어집니다.</span></li>
+        </ul>
+
+        <h3 style="font-size:0.95rem; margin:1.75rem 0 0.5rem;">진행 문장은 크레딧처럼 흐릅니다</h3>
+        <p style="margin:0 0 1rem; font-size:0.92rem; color:var(--fog);">
+          한 줄만 바꾸면 “지금 일하고 있다”는 증거가 남지 않습니다.
+          지나간 문장이 위로 밀려 올라가며 <strong>마스크로 서서히 지워지고</strong>, 현재 문장이 가장 선명합니다.
+        </p>
+        <ul class="decisions">
+          <li class="yes"><span>확정</span><span><strong>등속 크레딧은 폐기.</strong> 문장 도착 간격이 <span class="num">350</span>ms~<span class="num">2400</span>ms 로 제각각이라 등속으로 흘리면 가장 중요한 검증 문장이 읽히는 중에 지나가 버립니다.</span></li>
+          <li class="yes"><span>확정</span><span><strong>계단식 스크롤.</strong> 문장이 도착할 때만 스택이 한 줄 밀려 올라가고, 현재 문장은 항상 같은 자리에 멈춰 있습니다.</span></li>
+          <li class="yes"><span>확정</span><span>현재 문장 앞에 단계 칩(<code>검증</code>)이 붙어 단계명과 세부 문장이 한 줄로 합쳐집니다. 지나간 줄은 <code>✓</code> 로 바뀝니다.</span></li>
+          <li class="yes"><span>확정</span><span>질문은 콘텐츠가 아니라 맥락이므로 중앙 스택에서 빼 <strong>상단 튜브에 고정</strong>합니다.</span></li>
+        </ul>
+
+        <h3 style="font-size:0.95rem; margin:1.75rem 0 0.5rem;">단계별 체류 시간</h3>
+        <p style="margin:0 0 1rem; font-size:0.92rem; color:var(--fog);">
+          문장마다 머무는 시간을 따로 줍니다. 데이터를 훑는 구간은 기계 속도로 흘려보내고,
+          결론과 검증만 사람이 읽을 수 있게 잡아 둡니다.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>단계</th><th>시간</th><th>성격</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>목표</td><td class="num">1.3초</td><td>훑는 속도</td></tr>
+              <tr><td>계획</td><td class="num">0.9초</td><td>훑는 속도</td></tr>
+              <tr><td>분석</td><td class="num">1.9초</td><td>5문장이 후루룩</td></tr>
+              <tr><td><strong>인사이트</strong></td><td class="num">2.1초</td><td>읽는 속도</td></tr>
+              <tr><td><strong>검증</strong></td><td class="num">3.5초</td><td>마지막 문장 혼자 <span class="num">2.4초</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p style="margin:0; font-size:0.92rem; color:var(--fog);">
+          총 <strong><span class="num">10.9</span>초</strong>. 앞 세 단계가 <span class="num">38</span>%,
+          인사이트와 검증이 <span class="num">62</span>%를 차지합니다.
+          심박이 그려지는 속도도 같이 따라가서 <strong>“빠르게 훑고 → 신중하게 검증한다”가 애니메이션으로 읽힙니다.</strong>
+        </p>
+
+        <h3 style="font-size:0.95rem; margin:1.75rem 0 0.5rem;">전환 — 하트</h3>
+        <p style="margin:0 0 1rem; font-size:0.92rem; color:var(--fog);">
+          링이 축소되며 사라지는 안도 만들어 봤지만 <strong>“찾았다”가 약했습니다.</strong> 하트로 되돌리고 세 겹으로 강화했습니다.
+        </p>
+        <ol class="seq" style="margin-top:0;">
+          <li><span class="seq-n">1</span><div><h4>바운스</h4><p>하트가 <span class="num">1.24</span>배로 튀어올랐다가 두 번 되튑니다.</p></div></li>
+          <li><span class="seq-n">2</span><div><h4>플래시</h4><p>절정에 맞춰 마젠타가 화면을 한 번 덮습니다.</p></div></li>
+          <li><span class="seq-n">3</span><div><h4>“찾았다!”</h4><p>그 위에 Gasoek One 으로 터집니다. 이때 아래 진행 문장은 숨깁니다.</p></div></li>
+          <li><span class="seq-n">4</span><div><h4>번짐</h4><p>하트가 <span class="num">7</span>배로 번지며 사라지고 결과 화면이 올라옵니다.</p></div></li>
+        </ol>
+        <p style="margin:1rem 0 0; font-size:0.92rem; color:var(--fog);">
+          돋보기 버전도 만들어 뒀습니다(<code>?burst=lens</code>). 다만 돋보기는 로고·상단 질의 바·결과 헤드라인에
+          이미 세 번 나오므로 전환에서 반복될 뿐이고, <strong>돋보기 = 찾는 중, 하트 = 찾았다</strong>로 의미가 갈립니다.
+        </p>
+      </article>
+
+      <!-- 화면 3 -->
+      <article class="screen">
+        <div class="screen-top">
+          <span class="screen-idx">3</span>
+          <h3>캐치 결과</h3>
+          <span class="mono">phase = done</span>
+        </div>
+
+        <p style="margin:0 0 1.35rem; color:var(--fog); font-size:0.95rem;">
+          돋보기+스파클 아이콘, 큰 타이포 헤드라인, 요약과 핵심지표, 그 아래 탭 3개.
+          <code>CustomerSignalReport</code> 필드가 손그림과 거의 그대로 붙습니다.
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>리포트 필드</th><th>화면 위치</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>headline</code></td><td>🔍✨ + 큰 타이포 “단기 일본 여행 로밍을 고르지 못한 고객 <span class="num">328</span>명을 찾았어요”</td></tr>
+              <tr><td><code>executive_summary</code></td><td>요약 (고객 특성)</td></tr>
+              <tr><td><code>metrics[]</code></td><td>핵심지표 카드 4개</td></tr>
+              <tr><td><code>signals[]</code></td><td>시그널 기여도 바</td></tr>
+              <tr><td><code>representative_journeys[]</code></td><td><strong>탭 1 · 시그널 저니</strong></td></tr>
+              <tr><td><code>findings[]</code> + <code>recommendations[]</code></td><td><strong>탭 2 · 인사이트 &amp; 액션</strong></td></tr>
+              <tr><td><code>ranked_customers[]</code></td><td>우측 결과 패널 (위험 고객 랭킹)</td></tr>
+              <tr><td><code>state.events</code> 원장</td><td><strong>탭 3 · 분석 로그</strong> — 분석가 모드에서만 노출</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <ul class="decisions">
+          <li class="yes">
+            <span>확정</span>
+            <span><strong>스테퍼가 아니라 탭.</strong> 스테퍼는 “순서대로 완료해야 함”을 뜻해서 조회 화면과 맞지 않습니다.
+            순서는 저니 → 인사이트&amp;액션 → 분석 로그. 로그를 2번에 두면 굳이 안 봐도 될 걸 보게 됩니다.</span>
+          </li>
+          <li class="yes">
+            <span>확정</span>
+            <span><strong>“특정 고객만 보기”는 넣습니다.</strong> 손그림에서 물음표였지만, 신청서 STEP 4가 정확히 이 기능이고
+            <code>GET /api/runs/{run_id}/customers/{customer_id}/journey</code>가 이미 존재합니다.
+            우측 랭킹에서 고객을 클릭하면 좌측 저니가 그 고객 것으로 교체됩니다.</span>
+          </li>
+          <li class="yes">
+            <span>확정</span>
+            <span><strong>노드 클릭 → 근거 패널.</strong> <code>JourneyEvent.evidence_id</code> →
+            <code>GET /api/runs/{id}/evidence/{evidence_id}</code>. 기존 <code>EvidenceDrawer</code> 로직 재활용.</span>
+          </li>
+          <li class="yes">
+            <span>확정</span>
+            <span><strong>우상단에 <code>기본 / 분석가</code> 토글, 하단에 <code>이 결론이 나온 과정 보기 →</code>.</strong>
+            깊이를 원하는 사용자를 위한 두 개의 출구입니다. 자세한 건 아래 <strong>Depth</strong> 항목에.</span>
+          </li>
+        </ul>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── -->
+  <section class="band">
+    <div class="band-head">
+      <span class="tag">Money shot</span>
+      <h2>시그널 저니 — 이어지는 노드 플로우</h2>
+      <p>
+        격자는 스윔레인, 그 위를 <strong>하나의 선</strong>이 시간순으로 관통합니다.
+        선이 레인을 넘나드는 모양 자체가 “고객이 채널을 넘나들었다”는 우리 주장입니다.
+      </p>
+    </div>
+
+    <div class="col">
+      <div class="lane-frame">
+        <div class="lane-grid" role="img" aria-label="한 고객의 8월 12일부터 18일까지 채널별 행동 타임라인. 로밍 검색에서 시작해 앱 비교와 가입 미완료를 거쳐 상담으로 끝납니다.">
+          <svg class="lane-link" viewBox="0 0 700 500" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M50 50 L100 50 L150 50 L200 50 L200 250 L250 250 L300 250 L350 250 L350 350 L400 350 L400 150 L450 150 L500 150 L500 50 L550 50 L600 50 L600 450 L650 450" />
+          </svg>
+          <div></div>
+          <div class="lane-date">8/12</div>
+          <div class="lane-date">8/12</div>
+          <div class="lane-date">8/12</div>
+          <div class="lane-date">8/13</div>
+          <div class="lane-date">8/14</div>
+          <div class="lane-date">8/17</div>
+          <div class="lane-date">8/18</div>
+
+          <div class="lane-name">AI검색</div>
+          <div class="lane-cell"><span class="dot"></span><span class="lane-cap">일본 로밍</span></div>
+          <div class="lane-cell"><span class="dot"></span><span class="lane-cap">일본 로밍 가격</span></div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"><span class="dot"></span><span class="lane-cap">4일 일본 로밍</span></div>
+          <div class="lane-cell"></div>
+
+          <div class="lane-name">검색 피드백</div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"><span class="dot warn"></span><span class="lane-cap">부정 피드백</span></div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"></div>
+
+          <div class="lane-name">앱 행동</div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"><span class="dot mute"></span><span class="lane-cap">요금제 비교</span></div>
+          <div class="lane-cell"><span class="dot mute"></span><span class="lane-cap">상세 3회</span></div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"></div>
+
+          <div class="lane-name">가입 정보</div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"><span class="dot warn"></span><span class="lane-cap">가입 미완료</span></div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"></div>
+
+          <div class="lane-name">상담</div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"></div>
+          <div class="lane-cell"><span class="dot warn"></span><span class="lane-cap">상담 인입</span></div>
+        </div>
+
+        <div class="lane-intensity" aria-hidden="true">
+          <div class="lane-intensity-head">
+            <span>시그널 강도</span>
+            <span>signals[].contribution</span>
+          </div>
+          <svg viewBox="0 0 600 46" preserveAspectRatio="none">
+            <path class="fillw" d="M50 36 L150 22 L250 28 L350 14 L450 6 L550 20 L650 2 L650 46 L50 46 Z" />
+            <path class="linew" d="M50 36 L150 22 L250 28 L350 14 L450 6 L550 20 L650 2" />
+          </svg>
+        </div>
+
+        <div class="lane-legend">
+          <span><i style="background:var(--signal)"></i> 시그널 행동</span>
+          <span><i style="background:var(--amber)"></i> 부정 신호</span>
+          <span><i style="background:var(--fog-dim)"></i> 반복 탐색</span>
+          <span>노드 클릭 → 원본 근거 패널</span>
+        </div>
+      </div>
+
+      <h3>표처럼 보이지 않게 만드는 세 가지</h3>
+      <ul class="decisions">
+        <li class="yes">
+          <span>확정</span>
+          <span><strong>노드를 잇는 꺾은선.</strong> 점만 찍으면 표로 읽힙니다.
+          시간순으로 다음 노드까지 직교선을 그으면 레인을 넘나드는 지그재그가 생기고,
+          그 모양 자체가 cross-channel의 시각적 증거가 됩니다.</span>
+        </li>
+        <li class="yes">
+          <span>확정</span>
+          <span><strong>재생 스크러버.</strong> 저니 위에 타임 스크러버와 ▶ 버튼.
+          누르면 노드가 시간순으로 하나씩 켜지며 선이 그려지고, 그동안 우측 패널의 원문과 AI 해석이 따라 바뀝니다.
+          <em style="font-style:normal;color:var(--chalk)">“따라가면서 보는 느낌”은 정적 레이아웃이 아니라 이 재생에서 나옵니다.</em>
+          로딩 화면 심박 라인과 같은 <code>stroke-dashoffset</code> 모션이라 브랜드 언어도 이어집니다.</span>
+        </li>
+        <li class="yes">
+          <span>확정</span>
+          <span><strong>하단 시그널 강도 라인.</strong> 저니맵의 감정 곡선이 놓이는 자리에
+          <code>signals[].contribution</code>으로 계산된 실제 강도 곡선을 깝니다.
+          곡선이 치솟는 지점이 곧 개입해야 할 시점입니다.</span>
+        </li>
+      </ul>
+
+      <h3>디자인 씽킹 유저 저니맵으로 가야 할까</h3>
+      <p>
+        결론은 <strong>격자는 안 가져오고, 서사 장치만 가져옵니다.</strong>
+      </p>
+      <p>
+        저니맵은 페르소나 한 명의 <em>일반화된</em> 여정을 워크숍에서 합의해 만드는 산출물입니다.
+        가로축이 “인지 → 탐색 → 가입 → 이탈” 같은 추상 단계이고, 세로에 행동·생각·감정·터치포인트가 놓입니다.
+        반면 우리 데이터는 타임스탬프가 찍힌 실제 이벤트 로그입니다.
+      </p>
+      <div class="note warn">
+        <span class="note-label">저니맵 격자를 쓰면 생기는 문제</span>
+        <p>
+          감정 곡선 칸을 채우려면 데이터에 없는 <strong>고객의 감정을 지어내야</strong> 합니다.
+          그 순간 “모든 주장은 원본 데이터로 검증된다”는 우리 팀의 최대 강점과 정면으로 충돌합니다.
+          검증할 근거가 없는 곡선을 화면에 올리는 건 우리가 하지 말아야 할 일입니다.
+        </p>
+      </div>
+      <p>
+        대신 저니맵에서 <strong>강도 곡선</strong>(→ 시그널 강도 라인)과
+        <strong>국면 구분</strong>(→ Phase 밴드)은 가져올 수 있습니다.
+        둘 다 데이터로 뒷받침될 때만 넣습니다. Phase 밴드는 분류 규칙을 기획에서 정의해줘야 하므로
+        아래 <strong>기획 확인 항목</strong>으로 넘겼습니다.
+      </p>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── -->
+  <section class="band">
+    <div class="band-head">
+      <span class="tag">Depth</span>
+      <h2>결론까지의 과정을 보고 싶은 사용자</h2>
+      <p>
+        손그림 맨 위의 “evaluation — 이걸 어떻게 넣지?”에 대한 답입니다.
+        근거 검증은 우리 팀이 다른 팀과 갈리는 지점이자 기술적으로 가장 어려운 부분인데,
+        지금 화면 어디에도 자리가 없습니다.
+      </p>
+    </div>
+
+    <div class="col">
+      <p>
+        문제는 <strong>모든 사용자가 이걸 보고 싶어 하지는 않는다</strong>는 겁니다.
+        CX 담당자는 “37명”만 필요하고, 데이터 담당자와 심사위원은 “왜 37명인지”를 끝까지 파고 싶어 합니다.
+        그래서 하나의 화면에 다 넣지 않고 <strong>깊이를 3단으로 나눕니다.</strong>
+      </p>
+
+      <div class="ladder">
+        <div class="rung">
+          <div class="rung-tier"><b>Tier 1</b>기본</div>
+          <div>
+            <h4>근거 칩</h4>
+            <p>결과 화면의 모든 문장 끝에 <code>근거 3</code> 같은 작은 칩. 기본 모드에서는 hover할 때만 드러나 읽기를 방해하지 않습니다.</p>
+            <p>여기서 멈추는 사용자가 대부분이고, 그래도 괜찮은 화면이어야 합니다.</p>
+          </div>
+        </div>
+        <div class="rung">
+          <div class="rung-tier"><b>Tier 2</b>궁금할 때</div>
+          <div>
+            <h4>근거 드로어</h4>
+            <p>칩을 누르면 우측에서 슬라이드. 이 문장이 어떤 Fact에서 나왔는지, 어떤 Source의 몇 건 데이터인지, 원문 스니펫까지.</p>
+            <p>맥락을 잃지 않도록 페이지 이동 없이 겹쳐서 엽니다.</p>
+          </div>
+        </div>
+        <div class="rung">
+          <div class="rung-tier"><b>Tier 3</b>딥다이브</div>
+          <div>
+            <h4>검증 기록 — 별도 전체 화면</h4>
+            <p>Run 하나의 <strong>Goal → Plan → Step → Fact → Claim → Report</strong> 계보 전체.
+            결과 화면 하단의 <code>이 결론이 나온 과정 보기 →</code>로 진입하고, 자체 URL을 갖습니다.</p>
+            <p>드로어에 욱여넣지 않고 페이지를 분리하는 이유: 이건 읽는 화면이 아니라 <strong>파고드는 화면</strong>이고, 링크로 공유돼야 하기 때문입니다.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="note find">
+        <span class="note-label">백엔드가 이미 지원함</span>
+        <p>
+          <code>GET /api/run-artifacts/{run_id}</code>로 완료된 Run의 Artifact 전체를 다시 꺼낼 수 있고,
+          <code>/document</code>, <code>/download.json</code>, <code>/download.md</code>까지 있습니다.
+          즉 검증 기록 페이지는 <strong>Run이 끝난 뒤에도 열리는 영속 URL</strong>이 되고,
+          “이 분석 결과를 링크로 팀에 공유하세요”가 데모에서 실제로 동작합니다.
+        </p>
+      </div>
+
+      <h3>검증 기록 페이지 — 상단 스코어카드</h3>
+      <p>
+        페이지를 열자마자 이 Run이 얼마나 믿을 만한지가 숫자로 보입니다.
+        이게 <strong>evaluation을 UI에 넣는 자리</strong>입니다.
+      </p>
+
+      <dl class="score">
+        <div class="ok"><dt>검증된 주장</dt><dd>12<small>/12</small></dd></div>
+        <div class="ok"><dt>근거 커버리지</dt><dd>100<small>%</small></dd></div>
+        <div><dt>분석 스텝</dt><dd>6</dd></div>
+        <div><dt>사용 소스</dt><dd>5</dd></div>
+        <div class="hm"><dt>계획 수정</dt><dd>1<small>회</small></dd></div>
+        <div><dt>소요</dt><dd>18.4<small>초</small></dd></div>
+      </dl>
+
+      <div class="note">
+        <span class="note-label">숨기지 말 것</span>
+        <p>
+          <code>plan_revised</code> 이벤트가 오면 <strong>“Agent가 계획을 1회 수정했습니다”</strong>를 그대로 노출합니다.
+          감추면 그냥 매끈한 결과지만, 드러내면 <strong>스스로 계획을 고치는 Agent</strong>라는 증거가 됩니다.
+          고급 사용자가 정확히 보고 싶어 하는 게 이겁니다.
+        </p>
+      </div>
+
+      <h3>검증 기록 페이지 — Claim Ledger</h3>
+      <p>
+        본문은 주장 하나당 카드 하나. 문장에서 원본 데이터 한 건까지 체인이 끊기지 않는 걸 보여줍니다.
+      </p>
+
+      <div class="claim">
+        <p class="claim-say">“해지 관련 검색을 한 고객이 <span class="num">37</span>명입니다.”<span class="pass">검증 통과</span></p>
+        <ul class="chain">
+          <li><span>CLAIM</span><span><b>metric</b> · churn_search_customers · <b>gte</b> 37</span></li>
+          <li><span>FACT</span><span>F-0142 — step S3 · <b>distinct_count</b> · plan rev 2</span></li>
+          <li><span>SOURCE</span><span>search_history — adapter <b>v1.2</b> · manifest <b>v3</b></span></li>
+          <li><span>EVIDENCE</span><span>E-8891 외 <b>36</b>건 — 원문 보기</span></li>
+        </ul>
+      </div>
+
+      <p>
+        이 체인이 그냥 예쁜 그림이 아니라 <strong>계약에 이미 존재한다</strong>는 게 핵심입니다.
+        <code>VerifiedClaim</code>은 <code>claim_type</code>·<code>operator</code>·<code>target</code>을 가진
+        <strong>기계 검증 가능한 술어</strong>이고, <code>FactRef</code>는 <code>fact_id</code>부터
+        <code>evidence_id</code>까지 참조를 들고 있으며, <code>AnalysisReportProvenance</code>에는
+        <code>dataset_versions</code>·<code>adapter_versions</code>·<code>manifest_versions</code>가 들어 있어
+        <strong>재현 가능성</strong>까지 표시할 수 있습니다. 화면은 이미 있는 걸 드러내기만 하면 됩니다.
+      </p>
+
+      <h3>“분석가 모드” 토글</h3>
+      <p>
+        별도 페이지와 별개로, 결과 화면 우상단에 <code>기본 / 분석가</code> 토글을 둡니다.
+        페이지를 나누는 게 아니라 <strong>같은 화면의 정보 밀도를 바꾸는</strong> 장치입니다.
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>요소</th><th>기본</th><th>분석가</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>근거 칩</td><td>hover 시</td><td>항상 노출</td></tr>
+            <tr><td>핵심지표 카드</td><td>숫자와 라벨</td><td>+ 집계 방식, 모수, <code>metric_key</code></td></tr>
+            <tr><td>분석 로그 탭</td><td>숨김</td><td>노출</td></tr>
+            <tr><td>로딩 화면</td><td colspan="2">두 모드가 같습니다 — 아래 참고</td></tr>
+            <tr><td>저니 노드</td><td>행동 요약</td><td>+ <code>source_id</code>, <code>event_type</code>, <code>outcome</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note">
+        <span class="note-label">로딩 화면은 모드를 따르지 않습니다</span>
+        <p>
+          한때 분석가 모드에서 로딩 문장 아래에 <code>match_sequence · 1,204건</code> 같은
+          원본 값을 함께 띄웠는데, <strong>같은 화면이 모드에 따라 달라 보여 혼란만 줬습니다.</strong>
+          로딩 화면은 “지금 무엇을 하고 있나”만 답하면 되는 자리이고,
+          원본 값을 확인하고 싶은 사용자는 결과 화면과 검증 기록에서 훨씬 잘 정리된 형태로 볼 수 있습니다.
+          모드 토글은 결과 화면에만 적용합니다.
+        </p>
+      </div>
+
+      <p>
+        데모에서는 기본 모드로 시작해 결론을 보여준 뒤,
+        <strong>“그런데 이게 진짜인지 어떻게 알죠?”</strong> 하면서 분석가 모드를 켜고
+        마지막에 검증 기록 페이지로 넘어가는 흐름이 가장 강합니다.
+      </p>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── -->
+  <section class="band">
+    <div class="band-head">
+      <span class="tag">Edge cases</span>
+      <h2>안 만들면 데모 중 멈추는 것</h2>
+      <p>백엔드가 보내는데 지금 화면에 대응이 없는 상태들입니다.</p>
+    </div>
+
+    <div class="col">
+      <h3 style="margin-top:0;">01 · clarification_required — 심문 모달</h3>
+      <p>
+        Agent가 되물을 수 있습니다. 대화형 UI를 안 하기로 했으니 인터럽트 한 장으로 받는데,
+        <strong>이 순간을 약점이 아니라 연출로 씁니다.</strong>
+        사용자가 Agent와 대화하는 게 아니라, <em style="font-style:normal;color:var(--chalk)">탐정이 단서를 좁히는</em> 장면이 되게 합니다.
+      </p>
+      <ul class="decisions">
+        <li class="yes"><span>연출</span><span><strong>심박이 멈춥니다.</strong> 로딩 라인이 flatline으로 떨어지고 화면이 한 톤 어두워집니다. 진행이 멈췄다는 게 텍스트 없이 읽힙니다.</span></li>
+        <li class="yes"><span>연출</span><span><strong>Agent 질문이 타이핑되며</strong> 나타납니다. 첫 화면 placeholder와 같은 모션 언어라 “같은 Agent가 말을 건다”는 인상이 이어집니다.</span></li>
+        <li class="yes"><span>연출</span><span><strong>블록 커서.</strong> 입력 캐럿을 <code>#ff2e98</code> 블록 커서로. 모노 폰트 입력창, 좌측에 <code>&gt;</code> 프롬프트 기호.</span></li>
+        <li class="yes"><span>카피</span><span>“잠깐, 하나만 더 확인할게요” → 답변 전송 → <strong>심박이 다시 뛰기 시작</strong>하며 스테퍼가 이어집니다.</span></li>
+        <li class="ask"><span>주의</span><span>브라우저 기본 <code>alert</code>/<code>confirm</code>은 쓰지 않습니다. 커스텀 dialog에 focus trap을 걸고, 백엔드가 대기 중이므로 “나중에 답하기”는 두지 않습니다.</span></li>
+      </ul>
+
+      <h3>02 · unsupported_analysis — 오류가 아니라 안내</h3>
+      <p>
+        범위 밖 질문일 때 <code>suggested_questions[]</code>가 함께 내려옵니다.
+        첫 화면으로 되돌리면서 <strong>사용자가 쓴 질문은 입력창에 그대로 남기고</strong>,
+        그 아래 제안 시나리오 카드를 <code>suggested_questions[]</code>로 교체합니다.
+      </p>
+      <div class="note">
+        <span class="note-label">경고색을 쓰지 않는 이유</span>
+        <p>
+          이건 실패가 아니라 Agent 가 “이건 못 하지만 이건 할 수 있어요”라고 말을 거는 상황입니다.
+          경고색을 쓰면 <strong>사용자를 탓하는 톤</strong>이 됩니다.
+          서비스 마크를 붙인 브랜드 톤(마젠타) 안내 박스로 처리하고,
+          아래 대안 카드로 바로 이어지게 합니다.
+        </p>
+      </div>
+
+      <h3>03 · degraded / failed — “부분 캐치”로 프레이밍</h3>
+      <p>
+        실패를 숨기지 않는 게 우리 팀 정체성과 맞고, 심사에서도 유리합니다.
+        다만 <strong>실패처럼 보이지 않게 프레이밍</strong>합니다.
+      </p>
+      <ul class="decisions">
+        <li class="yes"><span>헤드라인</span><span>“<span class="num">328</span>명을 찾았어요 — <strong>다만 2개 소스는 확인하지 못했어요</strong>”. 찾은 것을 먼저 말하고 못 한 것을 뒤에 붙입니다. 상단 배지는 <code style="white-space:normal">부분 캐치</code>(amber).</span></li>
+        <li class="yes"><span>지표</span><span>근거가 부족한 지표 카드는 <strong>숫자를 지어내지 않고</strong> 회색 점선 테두리 + “근거 부족”으로 비워 둡니다. 빈 카드 하나가 나머지 숫자의 신뢰를 올립니다.</span></li>
+        <li class="yes"><span>설명</span><span><code>limitations[]</code>를 페이지 맨 아래가 아니라 <strong>상단 배지를 누르면 펼쳐지는 패널</strong>로. “무엇을 확인하지 못했나”를 찾아 헤매게 하지 않습니다.</span></li>
+        <li class="yes"><span>회복</span><span><strong>“VOC를 추가해서 다시 캐치하기”</strong> 버튼. 빠진 소스를 켠 채 같은 질문으로 재실행합니다. 실패를 막다른 길이 아니라 다음 행동으로 잇습니다.</span></li>
+        <li class="yes"><span>완전 실패</span><span><code>failed</code>는 <strong>화면을 자동으로 바꾸지 않고 로딩 화면에서 멈춰 세웁니다.</strong> 자동으로 첫 화면에 돌려보내면 사용자가 왜 돌아왔는지 알 수 없습니다. 평선이 된 심박이 어느 단계에서 끊겼는지 그대로 남고, 그 아래 <code>연결 끊김</code> 앰버 배지 · 사유 · <strong>[다시 캐치하기] [질문 바꾸기]</strong> 두 버튼을 답니다. 모달로 덮지 않는 이유는 평선을 가리기 때문입니다.</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── -->
+  <section class="band">
+    <div class="band-head">
+      <span class="tag">Demo safety</span>
+      <h2>시연 중 사고를 막는 장치</h2>
+      <p>
+        한 페이지 안에서 화면을 전환하기 때문에, 그대로 두면 새로고침 한 번에
+        <span class="num">10.9</span>초 로딩을 다시 봐야 하고 뒤로가기도 동작하지 않습니다.
+      </p>
+    </div>
+
+    <div class="col">
+      <h3>URL 동기화</h3>
+      <p>
+        라우트를 쪼개면 하트 전환이 경계에서 끊깁니다. 대신 <strong>History API 로 URL 만 동기화</strong>했습니다.
+        로딩은 되돌아갈 지점이 아니므로 기록에 남기지 않습니다.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>URL</th><th>화면</th><th>동작</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="mono">/</td><td>질문하기</td><td>—</td></tr>
+            <tr><td class="mono">/?view=result</td><td>캐치 결과</td><td>새로고침 시 로딩 없이 <span class="num">0.8</span>초 복원</td></tr>
+            <tr><td class="mono">/?view=trace</td><td>검증 기록</td><td>링크 공유 가능</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        검증 기록에서 뒤로가기 → 결과 화면, 한 번 더 → 첫 화면으로 정상 복귀합니다.
+        “이 분석 결과를 링크로 공유하세요”라는 주장이 실제로 성립합니다.
+      </p>
+
+      <h3>오버레이는 화면 전환 래퍼 밖으로</h3>
+      <p>
+        근거 드로어와 모달이 스크롤을 내린 상태에서 화면 밖에 그려지는 문제가 있었습니다.
+        화면 전환 애니메이션이 <code>animation-fill-mode: both</code> 로 끝난 뒤에도
+        래퍼에 <code>transform</code> 이 남는데, <strong>transform 이 있는 조상은
+        <code>position: fixed</code> 의 기준점이 됩니다.</strong>
+        그래서 오버레이가 뷰포트가 아니라 페이지 전체를 기준으로 붙었습니다.
+      </p>
+      <p>
+        근거 드로어 · 추천검색어 모달 · 심문 모달을 모두 <strong>전환 래퍼 밖의 전용 컨테이너로 portal</strong> 합니다.
+        디자인 토큰이 <code>.app</code> 안에만 정의돼 있으므로 <code>body</code> 가 아니라
+        <code>.app</code> 안쪽으로 보냅니다.
+      </p>
+      <div class="note warn">
+        <span class="note-label">legacy globals.css 가 새어 들어옵니다</span>
+        <p>
+          기존 스타일시트는 <code>layout.tsx</code> 에서 앱 전체에 로드됩니다.
+          밝은 테마 기준의 전역 규칙(<code>table { min-width: 880px }</code>, 밝은 <code>th</code> 배경,
+          대문자 변환)이 새 화면의 표를 드로어 밖으로 밀어내고 있었습니다.
+          <code>.app</code> 스코프 안에서 무효화했습니다. 새 화면에 표나 폼을 추가할 때 같은 함정을 주의해야 합니다.
+        </p>
+      </div>
+
+      <h3>시연용 URL 파라미터</h3>
+      <p>
+        발표 중 각 상태를 즉시 재현하기 위한 스위치입니다.
+        <strong>URL 만 열면 질문을 입력하지 않아도 그 상태로 바로 들어갑니다.</strong>
+        백엔드를 붙이면 이 분기는 실제 이벤트로 대체됩니다.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>파라미터</th><th>용도</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="mono">?pause=goal|plan|analyze|insight|verify|complete|clarify</td><td>로딩 화면을 그 시점에 정지. 진행 중인 박동은 절반쯤 그린 상태로 멈춤</td></tr>
+            <tr><td class="mono">?speed=0.25 ~ 3</td><td>전체 진행 속도 배수. <code>0.5</code> 면 <span class="num">5.5</span>초, <code>1.5</code> 면 <span class="num">16</span>초</td></tr>
+            <tr><td class="mono">?burst=lens</td><td>전환 마크를 하트 대신 돋보기로</td></tr>
+            <tr><td class="mono">?clarify=1</td><td>확인 대기(심문 모달) 재현</td></tr>
+            <tr><td class="mono">?degraded=1</td><td>부분 캐치 — 배지 + “근거 부족” 점선 카드</td></tr>
+            <tr><td class="mono">?failed=1</td><td>실패 — 평선으로 떨어진 뒤 첫 화면 복귀(입력값 보존)</td></tr>
+            <tr><td class="mono">?unsupported=1</td><td>범위 밖 질문 — 대안 질문 카드로 교체</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:0.9rem; color:var(--fog-dim);">
+        조합도 됩니다. <code>?clarify=1&amp;degraded=1</code> 이면 확인 대기 후 부분 캐치 결과로 이어집니다.
+      </p>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── -->
+  <section class="band">
+    <div class="band-head">
+      <span class="tag">Build order</span>
+      <h2>작업 순서</h2>
+      <p>
+        STEP 0 부터 5 까지 완료했고, 백엔드 연결만 남았습니다.
+        타입체크와 프로덕션 빌드가 통과하며, 동료의 기존 단위 테스트 <span class="num">95</span>개도 그대로 통과합니다.
+      </p>
+    </div>
+
+    <div class="col">
+      <ol class="seq">
+        <li>
+          <span class="seq-n">STEP 0</span>
+          <div>
+            <h4>디자인 토큰과 브랜드</h4>
+            <p>#ff2e98 기반 팔레트, 타이포 스케일, 라운드, 이징 곡선. 시그널+돋보기 로고 SVG.</p>
+            <span class="out">완료 · 팔레트와 서체</span>
+          </div>
+        </li>
+        <li>
+          <span class="seq-n">STEP 1</span>
+          <div>
+            <h4>3단계 셸과 전환 골격</h4>
+            <p>목업 데이터로 검색 → 로딩 → 결과가 전부 넘어가는 껍데기. 이 시점부터 팀원과 논의할 실물이 생깁니다.</p>
+            <span class="out">완료</span>
+          </div>
+        </li>
+        <li>
+          <span class="seq-n">STEP 2</span>
+          <div>
+            <h4>질문하기 화면</h4>
+            <p>타이프라이터 placeholder, + 버튼 2depth 메뉴, 기간 칩과 직접 선택, 제안 시나리오 카드.</p>
+            <span class="out">완료</span>
+          </div>
+        </li>
+        <li>
+          <span class="seq-n">STEP 3</span>
+          <div>
+            <h4>캐치하는 중 화면</h4>
+            <p>심박 = 스테퍼 통합, 크레딧 로그, 단계별 체류 시간, 하트 전환, 심문 모달.</p>
+            <span class="out">완료</span>
+          </div>
+        </li>
+        <li>
+          <span class="seq-n">STEP 4</span>
+          <div>
+            <h4>캐치 결과 화면</h4>
+            <p>헤드라인·지표 → 저니 노드 플로우(연결선 + 재생 스크러버) → 인사이트&amp;액션 → 근거 드로어.</p>
+            <span class="out">완료 · 시연 가능</span>
+          </div>
+        </li>
+        <li>
+          <span class="seq-n">STEP 5</span>
+          <div>
+            <h4>검증 기록 페이지와 분석가 모드</h4>
+            <p>스코어카드, Claim Ledger, 기본/분석가 토글. 우리 팀 차별점이 화면에 드러나는 단계입니다.</p>
+            <span class="out">완료 · 차별점 확보</span>
+          </div>
+        </li>
+        <li>
+          <span class="seq-n">STEP 6</span>
+          <div>
+            <h4>실연결과 엣지케이스</h4>
+            <p>
+              지금은 Mock 이 <code>CatchSession</code> 을 만들고 있습니다.
+              같은 모양을 <code>useRunController</code> 의 이벤트로 채우면 화면은 그대로 동작합니다.
+              엣지케이스 3종은 UI 가 이미 준비돼 있어 이벤트만 연결하면 됩니다.
+            </p>
+            <span class="out">남은 작업</span>
+          </div>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── -->
+  <section class="band">
+    <div class="band-head">
+      <span class="tag">To 기획</span>
+      <h2>기획에 확인이 필요한 것</h2>
+      <p>화면 구조는 정해졌지만, 그 안에 들어갈 <strong>말과 판단 기준</strong>은 기획이 정해줘야 합니다.</p>
+    </div>
+
+    <div class="col">
+      <ul class="asks">
+        <li>
+          <strong>이름은 이렇게 적용했습니다 — 확인만 부탁드려요.</strong>
+          <span>공식 명칭은 <strong>고객 시그널 캐처(Customer Signal Catcher)</strong>, 화면에 노출되는 서비스명은 <strong>캐치캐치</strong>로 적용했습니다. 헤더는 “캐치캐치 / CUSTOMER SIGNAL CATCHER” 두 줄입니다.</span>
+        </li>
+        <li>
+          <strong>전환 마크 — 하트 vs 돋보기, 어느 쪽인가요?</strong>
+          <span>기본은 하트이고 <code>?burst=lens</code> 로 돋보기 버전을 바로 볼 수 있게 해 뒀습니다. 제 의견은 하트입니다 — 돋보기는 로고·상단 질의 바·결과 헤드라인에 이미 세 번 나와 반복이고, <strong>돋보기 = 찾는 중 / 하트 = 찾았다</strong>로 의미가 갈립니다. 다만 취향 영역이라 팀 의견을 받고 싶습니다.</span>
+        </li>
+        <li>
+          <strong>로딩 <span class="num">10.9</span>초, 발표 호흡에 맞나요?</strong>
+          <span>앞 세 단계는 훑는 속도로 줄이고 인사이트·검증만 잡아 뒀습니다. 리허설에서 길다고 느껴지면 <code>?speed=0.8</code>(<span class="num">8.7</span>초)까지는 여유가 있습니다. 그 아래로 가면 분석 단계 문장이 <span class="num">280</span>ms 라 글자가 깜빡이는 것처럼 보입니다.</span>
+        </li>
+        <li>
+          <strong>제안 시나리오 카드 4개의 최종 문구.</strong>
+          <span>신청서 대표질문 4개를 그대로 쓸지, 페르소나 태그(CX · CRM · 서비스기획 · 상담운영)를 붙일지. 첫 화면에서 사용자가 처음 읽는 문장이라 데모 첫인상을 결정합니다.</span>
+        </li>
+        <li>
+          <strong>결과 헤드라인의 톤 가이드.</strong>
+          <span>“<span class="num">37</span>명의 고객 시그널을 찾았어요”처럼 <em style="font-style:normal">수 중심</em>으로 갈지, “반복 검색 후 상담으로 넘어간 고객 <span class="num">37</span>명”처럼 <em style="font-style:normal">패턴 중심</em>으로 갈지. LLM이 생성하는 문장이라 프롬프트에 넣을 규칙이 필요합니다.</span>
+        </li>
+        <li>
+          <strong>저니 Phase 밴드를 넣을까요?</strong>
+          <span>넣는다면 국면 이름(예: 문제 발생 → 자가 해결 시도 → 도움 요청 → 이탈 검토)과, 어떤 <code>topic</code>·<code>outcome</code>이 어느 국면인지 분류 규칙을 기획이 정의해 줘야 합니다. 규칙을 못 정하면 넣지 않습니다 — 지어낸 국면은 근거가 없습니다.</span>
+        </li>
+        <li>
+          <strong>“근거 부족”을 어디까지 드러낼까요?</strong>
+          <span>검증되지 않은 지표를 빈 카드로 남기는 게 우리 강점이지만, 심사 자리에서는 미완성처럼 보일 위험도 있습니다. 노출 수위를 합의해 두면 데모 중에 흔들리지 않습니다.</span>
+        </li>
+        <li>
+          <strong>Action Preview의 범위가 이대로 맞을까요?</strong>
+          <span>신청서 9장에 “추천검색어 적용하기 → 설정 화면 → 적용 완료”를 Mock UI로 구현한다고 명시돼 있어 그대로 만들었습니다. 추천검색어 액션만 실행 화면을 갖고, 나머지 액션은 “다음 단계” 라벨로 둡니다. 적용 완료 화면에 “실제 운영 시스템에는 반영되지 않았어요”를 명시했는데, 시연에서 이 문구를 남길지 뺄지 정해 주세요.</span>
+        </li>
+        <li>
+          <strong>데모 시연 스크립트 — 로밍 질문 하나로 고정할까요?</strong>
+          <span>신청서 MVP Scenario를 따라 “최근 로밍을 알아보는 고객들이 가장 많이 궁금해하는 게 뭐야?” 하나로 목업을 만들었습니다. 결과는 “단기 일본 여행 로밍을 고르지 못한 고객 <span class="num">328</span>명”입니다. 두 번째 질문도 시연할지, 이 하나에 3분을 쓸지 정해 주세요.</span>
+        </li>
+        <li>
+          <strong>분석가 모드의 기본값.</strong>
+          <span>항상 기본 모드로 시작할지, 마지막 선택을 기억할지. 시연 순서(기본 → 분석가 → 검증 기록)와 직결됩니다.</span>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── -->
+  <section class="band">
+    <div class="band-head">
+      <span class="tag">To 백엔드</span>
+      <h2>백엔드에 확인이 필요한 것</h2>
+      <p>화면은 다 만들어졌고, 아래가 풀려야 STEP 6(실연결)을 끝낼 수 있습니다.</p>
+    </div>
+
+    <div class="col">
+      <ul class="asks">
+        <li>
+          <strong>대표 질문 하나의 fixture 응답 전체를 JSON 으로 주세요.</strong>
+          <span>가장 먼저 필요합니다. 지금은 Mock 이 <code>CatchSession</code> 을 만들고 있고, 같은 모양을 실제 이벤트로 채우면 화면은 그대로 동작합니다. <code>mode=fixture</code> 로 백엔드를 띄워 한 번 실행한 결과를 그대로 받으면 매핑을 바로 맞출 수 있습니다.</span>
+        </li>
+        <li>
+          <strong><code>headline</code>에 고객 수가 항상 들어가나요?</strong>
+          <span>결과 화면 첫 타이포가 “N명의 고객 시그널을 찾았어요”입니다. 숫자를 별도 필드로 받을 수 있으면 타이포를 훨씬 크게 쓸 수 있습니다.</span>
+        </li>
+        <li>
+          <strong><code>representative_journeys</code>는 몇 명 분량인가요?</strong>
+          <span>스윔레인은 한 번에 한 고객을 그립니다. 여러 고객이 섞여 오면 <code>customer_id</code> 기준으로 나눌 수 있어야 합니다.</span>
+        </li>
+        <li>
+          <strong><code>clarification_required</code>는 실제로 얼마나 자주 발생하나요?</strong>
+          <span>데모 시나리오에서 뜬다면 UI 우선순위를 STEP 3으로 올려야 합니다.</span>
+        </li>
+        <li>
+          <strong>검증에 <span style="color:var(--signal)">실패한</span> claim도 내려오나요?</strong>
+          <span>가장 중요한 질문입니다. <code>findings[]</code>에 통과한 claim만 담긴다면 스코어카드가 항상 <span class="num">100%</span>가 되어 의미가 없어집니다. 검증 결과(통과/탈락)와 탈락 사유를 함께 받을 수 있으면 “<span class="num">14</span>개 중 <span class="num">12</span>개 통과, <span class="num">2</span>개는 근거 부족으로 리포트에서 제외”라고 쓸 수 있고, 이게 우리 팀 차별점을 가장 강하게 보여주는 문장입니다.</span>
+        </li>
+        <li>
+          <strong><code>RunArtifact</code>에 계획 수정 이력이 남나요?</strong>
+          <span>Run이 끝난 뒤 검증 기록 페이지를 다시 열었을 때 <code>plan_revised</code>가 몇 번 있었는지, 어떤 계획이 어떻게 바뀌었는지 복원할 수 있어야 스코어카드의 “계획 수정 <span class="num">1</span>회”가 성립합니다.</span>
+        </li>
+        <li>
+          <strong>로딩 단계 라벨 문구, 이대로 갈까요?</strong>
+          <span>분석 목표 세우기 / 분석 계획 생성 / 시그널 분석 중 / 인사이트 도출 / 근거 검증.</span>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <footer class="foot col">
+    <span>캐치캐치 — CUSTOMER SIGNAL CATCHER</span>
+    <span>FRONTEND SPEC v0.4</span>
+    <span>2026.08.28</span>
+  </footer>
+
+</div>
+  </body>
+</html>
