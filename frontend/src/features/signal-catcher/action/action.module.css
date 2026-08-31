@@ -459,117 +459,132 @@
   gap: 2rem;
 }
 
+/*
+ * 시간 축은 스파크라인의 가로축이 이미 맡는다.
+ * 상단에 진행 바를 또 두면 지표 그래프와 같은 언어로 보여 어지럽다.
+ */
 .timeline {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0.85rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem 0.85rem;
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--fog);
 }
 
-.timelineDay,
-.timelineEnd {
+.timeline strong {
+  color: var(--chalk);
+  font-weight: 600;
+}
+
+.timeline span {
   font-family: var(--font-mono);
-  font-size: 0.76rem;
+  font-size: 0.74rem;
   color: var(--fog-dim);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.timelineDay {
-  color: var(--chalk);
-}
-
-.timelineBar {
-  height: 2px;
-  background: var(--line);
-  overflow: hidden;
-}
-
-.timelineBar i {
-  display: block;
-  height: 100%;
-  background: var(--signal);
-  transition: width 380ms linear;
 }
 
 /*
- * 관찰 지표는 표보다 트랙이 낫다.
- * 적용 전에서 목표까지 얼마나 왔는지가 위치로 읽히고, 지금 값이 가장 크다.
+ * 지표는 분석 도구의 관습을 따른다 — 큰 숫자 · 델타 · 스파크라인.
+ * 7일치 시계열을 이미 갖고 있으므로 진행률로 뭉개지 않고 그대로 그린다.
  */
-.tracks {
+.metrics {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 1.9rem;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 1px;
+  background: var(--line-soft);
+  border-block: 1px solid var(--line-soft);
 }
 
-.tracks li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+.metrics li {
+  padding: 1.15rem 1.25rem 1.25rem;
+  background: var(--ground);
+}
+
+.metricLabel {
+  margin: 0 0 0.5rem;
+  font-size: 0.82rem;
+  color: var(--fog-dim);
+}
+
+.metricNow {
+  display: flex;
   align-items: baseline;
-  gap: 0.4rem 1rem;
-}
-
-.trackLabel {
-  margin: 0;
-  font-size: 0.9rem;
-  color: var(--fog);
-}
-
-.trackNow {
-  margin: 0;
-  font-size: 1.65rem;
+  gap: 0.15rem;
+  margin: 0 0 0.85rem;
+  font-size: 1.75rem;
   font-weight: 600;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
-  text-align: right;
 }
 
-.trackNow small {
-  font-size: 0.82rem;
+.metricNow small {
+  font-size: 0.85rem;
   font-weight: 400;
   color: var(--fog-dim);
-  margin-left: 0.12rem;
 }
 
-.track {
-  position: relative;
-  grid-column: 1 / -1;
-  height: 3px;
-  margin-top: 0.35rem;
-  background: var(--line);
+.metricNow em {
+  margin-left: 0.5rem;
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--signal-soft);
 }
 
-.trackFill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  background: var(--signal);
-  transition: width 380ms linear;
+.spark {
+  display: block;
+  width: 100%;
+  height: 56px;
+  overflow: visible;
 }
 
-.trackPin {
-  position: absolute;
-  top: 50%;
-  width: 10px;
-  height: 10px;
-  margin-left: -5px;
-  border-radius: 50%;
-  background: var(--signal);
-  transform: translateY(-50%);
-  transition: left 380ms linear;
+/* 목표는 점선 한 줄. 값이 그 선을 넘었는지가 한눈에 읽힌다. */
+.sparkGoal {
+  stroke: var(--fog-dim);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.7;
 }
 
-.trackEnds {
-  grid-column: 1 / -1;
+.sparkLine {
+  fill: none;
+  stroke: var(--signal);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.sparkDot {
+  fill: var(--signal);
+}
+
+.metricEnds {
   display: flex;
   justify-content: space-between;
-  margin: 0.55rem 0 0;
+  gap: 0.5rem;
+  margin: 0.7rem 0 0;
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   color: var(--fog-dim);
   font-variant-numeric: tabular-nums;
+}
+
+.metricGoal::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  margin-right: 0.35rem;
+  vertical-align: 0.25em;
+  border-top: 1px dashed var(--fog-dim);
 }
 
 .ffRow {

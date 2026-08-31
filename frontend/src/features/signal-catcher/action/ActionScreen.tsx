@@ -35,10 +35,37 @@ function stageOf(experiment: Experiment | undefined): ActionStage {
   return "watching";
 }
 
-/** 시작값에서 목표까지 얼마나 왔는지. 값이 작아져야 좋은 지표도 같은 방향으로 읽는다. */
-function progress(from: number, now: number, goal: number): number {
-  if (from === goal) return 1;
-  return Math.min(1, Math.max(0, (now - from) / (goal - from)));
+/** 스파크라인 좌표계. 값이 오르내리는 방향은 그대로 두고 여백만 준다. */
+function scale(values: number[], goal: number) {
+  const all = [...values, goal];
+  const lo = Math.min(...all);
+  const hi = Math.max(...all);
+  const pad = (hi - lo) * 0.18 || 1;
+  return { lo: lo - pad, hi: hi + pad };
+}
+
+function sparkPath(values: number[], lo: number, hi: number, w: number, h: number): string {
+  if (values.length < 2) return "";
+  return values
+    .map((value, index) => {
+      const x = (index / (values.length - 1)) * w;
+      const y = h - ((value - lo) / (hi - lo)) * h;
+      return `${index === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
+    })
+    .join(" ");
+}
+
+function goalY(goal: number, lo: number, hi: number, h: number): number {
+  return h - ((goal - lo) / (hi - lo)) * h;
+}
+
+const SPARK_W = 220;
+const SPARK_H = 56;
+
+function formatDelta(from: number, now: number, unit: string): string {
+  const diff = now - from;
+  const sign = diff > 0 ? "+" : "";
+  return `${sign}${Number(diff.toFixed(1))}${unit}`;
 }
 
 export function ActionScreen({
@@ -216,40 +243,63 @@ export function ActionScreen({
 
         {stage === "watching" ? (
           <section className={styles.watch}>
-            <div className={styles.timeline}>
-              <span className={styles.timelineDay}>
-                {point.date} · {point.day}일째
+            <p className={styles.timeline}>
+              적용 후 <strong>{point.day}일째</strong>
+              <span>
+                {start.date} → {point.date} · 관찰 {plan.observeDays}일
               </span>
-              <div className={styles.timelineBar}>
-                <i style={{ width: `${(point.day / plan.observeDays) * 100}%` }} />
-              </div>
-              <span className={styles.timelineEnd}>{plan.observeDays}일</span>
-            </div>
+            </p>
 
-            <ul className={styles.tracks}>
+            <ul className={styles.metrics}>
               {TIMELAPSE_SERIES.map((series) => {
                 const pred = gains.find((g) => g.predictionId === series.key);
                 const from = start.values[series.key];
                 const now = point.values[series.key];
                 const goal = Number.parseFloat(pred?.to ?? String(from));
-                const ratio = progress(from, now, goal);
+                const shown = plan.timelapse
+                  .slice(0, frame + 1)
+                  .map((f) => f.values[series.key]);
+                const full = plan.timelapse.map((f) => f.values[series.key]);
+                const { lo, hi } = scale(full, goal);
+                const gy = goalY(goal, lo, hi, SPARK_H);
+                const lastX = ((shown.length - 1) / (full.length - 1)) * SPARK_W;
+                const lastY =
+                  SPARK_H - ((now - lo) / (hi - lo)) * SPARK_H;
                 return (
                   <li key={series.key}>
-                    <p className={styles.trackLabel}>{series.label}</p>
-                    <p className={styles.trackNow}>
+                    <p className={styles.metricLabel}>{series.label}</p>
+                    <p className={styles.metricNow}>
                       {now.toLocaleString("ko-KR")}
                       <small>{series.unit}</small>
+                      <em>{formatDelta(from, now, series.unit)}</em>
                     </p>
-                    <div className={styles.track}>
-                      <span className={styles.trackFill} style={{ width: `${ratio * 100}%` }} />
-                      <span className={styles.trackPin} style={{ left: `${ratio * 100}%` }} />
-                    </div>
-                    <p className={styles.trackEnds}>
+                    <svg
+                      className={styles.spark}
+                      viewBox={`0 0 ${SPARK_W} ${SPARK_H}`}
+                      preserveAspectRatio="none"
+                      aria-hidden="true"
+                    >
+                      <line
+                        className={styles.sparkGoal}
+                        x1="0"
+                        y1={gy}
+                        x2={SPARK_W}
+                        y2={gy}
+                      />
+                      <path
+                        className={styles.sparkLine}
+                        d={sparkPath(shown, lo, hi, SPARK_W, SPARK_H)}
+                      />
+                      {shown.length > 1 ? (
+                        <circle className={styles.sparkDot} cx={lastX} cy={lastY} r="3.5" />
+                      ) : null}
+                    </svg>
+                    <p className={styles.metricEnds}>
                       <span>
                         적용 전 {from}
                         {series.unit}
                       </span>
-                      <span>목표 {pred?.to ?? "—"}</span>
+                      <span className={styles.metricGoal}>목표 {pred?.to ?? "—"}</span>
                     </p>
                   </li>
                 );
